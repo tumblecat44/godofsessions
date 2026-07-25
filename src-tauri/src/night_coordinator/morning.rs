@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
 use chrono::Utc;
+use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::{
     model::{
-        MorningBrief, MorningBriefItem, MorningBriefVerdict, NightRunDetail, NightRunRecord,
-        NightRunVerdict, Provider,
+        MorningBrief, MorningBriefItem, MorningBriefVerdict, MorningReviewState, NightRunDetail,
+        NightRunRecord, NightRunVerdict, Provider,
     },
     night_coordinator::{CoordinatorItem, CoordinatorItemState, CoordinatorPlan},
 };
@@ -21,6 +25,7 @@ pub(super) fn load() -> Result<MorningBrief, String> {
             review_count: 0,
             in_progress_count: 0,
             not_started_count: 0,
+            reviewed_count: 0,
             items: Vec::new(),
             warnings: Vec::new(),
             read_only: true,
@@ -28,10 +33,65 @@ pub(super) fn load() -> Result<MorningBrief, String> {
         });
     };
     let recovery_state = super::recovery_state(&plan);
-    Ok(build(&plan, &recovery_state, observe))
+    let (reviews, review_warning) = match super::morning_review::load(&plan.idempotency_key) {
+        Ok(reviews) => (reviews, None),
+        Err(error) => (HashMap::new(), Some(error)),
+    };
+    let mut brief = build(&plan, &recovery_state, &reviews, observe);
+    if let Some(warning) = review_warning {
+        brief.warnings.push(warning);
+    }
+    Ok(brief)
 }
 
-fn build<F>(plan: &CoordinatorPlan, recovery_state: &str, mut observe_item: F) -> MorningBrief
+pub(super) fn mark_reviewed(
+    plan_id: &str,
+    draft_id: &str,
+    evidence_fingerprint: &str,
+) -> Result<MorningBrief, String> {
+    let current = load()?;
+    if current.plan_id.as_deref() != Some(plan_id) {
+        return Err("최신 밤 계획이 바뀌어 이 결과를 검토 완료로 표시하지 않았습니다.".to_owned());
+    }
+    let item = current
+        .items
+        .iter()
+        .find(|item| item.draft_id == draft_id)
+        .ok_or_else(|| "검토할 밤 작업을 최신 계획에서 찾지 못했습니다.".to_owned())?;
+    if item.verdict != MorningBriefVerdict::ReadyToReview
+        || !item.inspectable
+        || !item.provenance_verified
+    {
+        return Err(
+            "공급자 근거를 열어볼 수 있는 완료 결과만 검토 완료로 표시할 수 있습니다.".to_owned(),
+        );
+    }
+    if item.evidence_fingerprint != evidence_fingerprint {
+        return Err(
+            "검토하는 동안 공급자 근거가 바뀌었습니다. 새 근거를 다시 확인해 주세요.".to_owned(),
+        );
+    }
+    super::morning_review::mark(plan_id, draft_id, evidence_fingerprint, Utc::now())?;
+    load()
+}
+
+pub(super) fn reopen(plan_id: &str, draft_id: &str) -> Result<MorningBrief, String> {
+    let current = load()?;
+    if current.plan_id.as_deref() != Some(plan_id)
+        || !current.items.iter().any(|item| item.draft_id == draft_id)
+    {
+        return Err("최신 밤 계획에서 다시 열 결과를 찾지 못했습니다.".to_owned());
+    }
+    super::morning_review::reopen(plan_id, draft_id)?;
+    load()
+}
+
+fn build<F>(
+    plan: &CoordinatorPlan,
+    recovery_state: &str,
+    reviews: &HashMap<String, super::morning_review::ReviewRecord>,
+    mut observe_item: F,
+) -> MorningBrief
 where
     F: FnMut(&CoordinatorItem) -> Observation,
 {
@@ -57,15 +117,26 @@ where
                 observation,
                 after_deadline,
                 plan_requires_attention,
+                reviews.get(&item.approved.dispatch.draft.id),
             ));
         }
     }
-    items.sort_by_key(|item| verdict_priority(item.verdict));
+    items.sort_by_key(item_priority);
 
     let attention_count = count(&items, MorningBriefVerdict::NeedsAttention);
-    let review_count = count(&items, MorningBriefVerdict::ReadyToReview);
+    let review_count = items
+        .iter()
+        .filter(|item| {
+            item.verdict == MorningBriefVerdict::ReadyToReview
+                && item.review_state != MorningReviewState::Reviewed
+        })
+        .count();
     let in_progress_count = count(&items, MorningBriefVerdict::InProgress);
     let not_started_count = count(&items, MorningBriefVerdict::NotStarted);
+    let reviewed_count = items
+        .iter()
+        .filter(|item| item.review_state == MorningReviewState::Reviewed)
+        .count();
     let headline = if attention_count > 0 {
         format!("{attention_count}개는 먼저 판단이 필요합니다.")
     } else if review_count > 0 {
@@ -74,6 +145,8 @@ where
         format!("{in_progress_count}개가 아직 실행 중입니다.")
     } else if not_started_count > 0 {
         format!("{not_started_count}개가 아직 시작을 기다립니다.")
+    } else if reviewed_count > 0 {
+        "모든 완료 결과의 검토를 마쳤습니다.".to_owned()
     } else {
         "밤 계획의 현재 상태를 모두 확인했습니다.".to_owned()
     };
@@ -89,6 +162,7 @@ where
         review_count,
         in_progress_count,
         not_started_count,
+        reviewed_count,
         items,
         warnings,
         read_only: true,
@@ -153,14 +227,29 @@ fn morning_item(
     observation: Observation,
     after_deadline: bool,
     plan_requires_attention: bool,
+    review: Option<&super::morning_review::ReviewRecord>,
 ) -> MorningBriefItem {
     let draft = &item.approved.dispatch.draft;
+    let evidence_fingerprint = evidence_fingerprint(item, &observation);
     let (verdict, verdict_reason, next_action, provenance_verified) = classify(
         item.state,
         &observation,
         after_deadline,
         plan_requires_attention,
     );
+    let (review_state, reviewed_at) = match review {
+        Some(review)
+            if review.evidence_fingerprint == evidence_fingerprint
+                && verdict == MorningBriefVerdict::ReadyToReview =>
+        {
+            (
+                MorningReviewState::Reviewed,
+                Some(review.reviewed_at.to_rfc3339()),
+            )
+        }
+        Some(_) => (MorningReviewState::EvidenceChanged, None),
+        None => (MorningReviewState::Unreviewed, None),
+    };
     let record = observation.record.as_ref();
     MorningBriefItem {
         draft_id: draft.id.clone(),
@@ -187,7 +276,46 @@ fn morning_item(
         next_action,
         provenance_verified,
         inspectable: record.is_some() && observation.detail.is_some(),
+        evidence_fingerprint,
+        review_state,
+        reviewed_at,
     }
+}
+
+fn evidence_fingerprint(item: &CoordinatorItem, observation: &Observation) -> String {
+    let detail = observation.detail.as_ref().map(|detail| {
+        json!({
+            "surface": detail.surface,
+            "task_id": detail.task_id,
+            "thread_id": detail.thread_id,
+            "turn_id": detail.turn_id,
+            "task_status": detail.task_status,
+            "body": detail.body,
+            "assignee": detail.assignee,
+            "max_runtime_seconds": detail.max_runtime_seconds,
+            "goal_mode": detail.goal_mode,
+            "goal_max_turns": detail.goal_max_turns,
+            "max_retries": detail.max_retries,
+            "idempotency_key": detail.idempotency_key,
+            "provenance_verified": detail.provenance_verified,
+            "verdict": detail.verdict,
+            "verdict_reason": detail.verdict_reason,
+            "attempts": detail.attempts,
+            "events": detail.events,
+            "warnings": detail.warnings,
+        })
+    });
+    let value = json!({
+        "coordinator_state": item.state,
+        "coordinator_error": item.error,
+        "record": observation.record,
+        "detail": detail,
+        "warning": observation.warning,
+    });
+    let encoded = serde_json::to_vec(&value).expect("morning evidence must remain serializable");
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    format!("{:x}", hasher.finalize())
 }
 
 fn classify(
@@ -295,8 +423,11 @@ fn count(items: &[MorningBriefItem], verdict: MorningBriefVerdict) -> usize {
     items.iter().filter(|item| item.verdict == verdict).count()
 }
 
-fn verdict_priority(verdict: MorningBriefVerdict) -> u8 {
-    match verdict {
+fn item_priority(item: &MorningBriefItem) -> u8 {
+    if item.review_state == MorningReviewState::Reviewed {
+        return 4;
+    }
+    match item.verdict {
         MorningBriefVerdict::NeedsAttention => 0,
         MorningBriefVerdict::ReadyToReview => 1,
         MorningBriefVerdict::InProgress => 2,
@@ -480,7 +611,7 @@ mod tests {
             item("review", CoordinatorItemState::Completed),
             item("attention", CoordinatorItemState::Blocked),
         ]);
-        let brief = build(&source, "active", |item| {
+        let brief = build(&source, "active", &HashMap::new(), |item| {
             let project = item.approved.dispatch.draft.project.as_str();
             match project {
                 "review" => Observation {
@@ -512,7 +643,7 @@ mod tests {
     #[test]
     fn missing_provider_record_never_turns_coordinator_completion_into_success() {
         let source = plan(vec![item("missing", CoordinatorItemState::Completed)]);
-        let brief = build(&source, "closed", |_| Observation {
+        let brief = build(&source, "closed", &HashMap::new(), |_| Observation {
             record: None,
             detail: None,
             warning: None,
@@ -526,7 +657,7 @@ mod tests {
     #[test]
     fn pending_work_in_a_recoverable_plan_asks_for_a_decision() {
         let source = plan(vec![item("pending", CoordinatorItemState::Pending)]);
-        let brief = build(&source, "recoverable", |_| Observation {
+        let brief = build(&source, "recoverable", &HashMap::new(), |_| Observation {
             record: None,
             detail: None,
             warning: None,
@@ -535,5 +666,58 @@ mod tests {
         assert_eq!(brief.attention_count, 1);
         assert_eq!(brief.not_started_count, 0);
         assert_eq!(brief.items[0].next_action, "안전 복구 여부 결정");
+    }
+
+    #[test]
+    fn review_is_bound_to_stable_provider_evidence_and_reopens_when_it_changes() {
+        let source = plan(vec![item("review", CoordinatorItemState::Completed)]);
+        let first = build(&source, "closed", &HashMap::new(), |_| {
+            let mut next = detail(NightRunVerdict::ReadyToReview);
+            next.generated_at = "2026-01-01T00:00:00Z".to_owned();
+            Observation {
+                record: Some(record("review")),
+                detail: Some(next),
+                warning: None,
+            }
+        });
+        let fingerprint = first.items[0].evidence_fingerprint.clone();
+        let reviewed_at = Utc::now();
+        let reviews = HashMap::from([(
+            "draft-review".to_owned(),
+            super::super::morning_review::ReviewRecord {
+                draft_id: "draft-review".to_owned(),
+                evidence_fingerprint: fingerprint,
+                reviewed_at,
+            },
+        )]);
+
+        let reviewed = build(&source, "closed", &reviews, |_| {
+            let mut next = detail(NightRunVerdict::ReadyToReview);
+            next.generated_at = "2027-01-01T00:00:00Z".to_owned();
+            Observation {
+                record: Some(record("review")),
+                detail: Some(next),
+                warning: None,
+            }
+        });
+        assert_eq!(reviewed.review_count, 0);
+        assert_eq!(reviewed.reviewed_count, 1);
+        assert_eq!(reviewed.items[0].review_state, MorningReviewState::Reviewed);
+
+        let changed = build(&source, "closed", &reviews, |_| {
+            let mut next = detail(NightRunVerdict::ReadyToReview);
+            next.verdict_reason = "새 실행 시도가 추가됐습니다.".to_owned();
+            Observation {
+                record: Some(record("review")),
+                detail: Some(next),
+                warning: None,
+            }
+        });
+        assert_eq!(changed.review_count, 1);
+        assert_eq!(changed.reviewed_count, 0);
+        assert_eq!(
+            changed.items[0].review_state,
+            MorningReviewState::EvidenceChanged
+        );
     }
 }

@@ -605,6 +605,14 @@ pub enum MorningBriefVerdict {
     NotStarted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MorningReviewState {
+    Unreviewed,
+    Reviewed,
+    EvidenceChanged,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MorningBriefItem {
     pub draft_id: String,
@@ -624,6 +632,9 @@ pub struct MorningBriefItem {
     pub next_action: String,
     pub provenance_verified: bool,
     pub inspectable: bool,
+    pub evidence_fingerprint: String,
+    pub review_state: MorningReviewState,
+    pub reviewed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -638,6 +649,7 @@ pub struct MorningBrief {
     pub review_count: usize,
     pub in_progress_count: usize,
     pub not_started_count: usize,
+    pub reviewed_count: usize,
     pub items: Vec<MorningBriefItem>,
     pub warnings: Vec<String>,
     pub read_only: bool,

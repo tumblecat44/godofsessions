@@ -22,6 +22,7 @@ use crate::{
 
 mod ledger;
 mod morning;
+mod morning_review;
 mod worker;
 
 const WORKER_FLAG: &str = "--night-coordinator-worker";
@@ -414,6 +415,21 @@ pub(crate) fn load_history() -> NightPlanHistory {
 
 pub(crate) fn load_morning_brief() -> Result<crate::model::MorningBrief, String> {
     morning::load()
+}
+
+pub(crate) fn mark_morning_item_reviewed(
+    plan_id: &str,
+    draft_id: &str,
+    evidence_fingerprint: &str,
+) -> Result<crate::model::MorningBrief, String> {
+    morning::mark_reviewed(plan_id, draft_id, evidence_fingerprint)
+}
+
+pub(crate) fn reopen_morning_item(
+    plan_id: &str,
+    draft_id: &str,
+) -> Result<crate::model::MorningBrief, String> {
+    morning::reopen(plan_id, draft_id)
 }
 
 fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {

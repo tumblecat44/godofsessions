@@ -266,6 +266,28 @@ async fn load_morning_brief() -> Result<MorningBrief, String> {
 }
 
 #[tauri::command]
+async fn mark_morning_item_reviewed(
+    plan_id: String,
+    draft_id: String,
+    evidence_fingerprint: String,
+) -> Result<MorningBrief, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        night_coordinator::mark_morning_item_reviewed(&plan_id, &draft_id, &evidence_fingerprint)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn reopen_morning_item(plan_id: String, draft_id: String) -> Result<MorningBrief, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        night_coordinator::reopen_morning_item(&plan_id, &draft_id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn prepare_night_plan_resume(
     plan_id: String,
     recoveries: State<'_, RecoveryState>,
@@ -424,6 +446,8 @@ pub fn run() {
             load_night_run_history,
             load_night_plan_history,
             load_morning_brief,
+            mark_morning_item_reviewed,
+            reopen_morning_item,
             prepare_night_plan_resume,
             cancel_night_plan_resume,
             resume_approved_night_plan,

@@ -29,15 +29,16 @@ It is not:
 
 ## Current phase
 
-The evidence-ranked Morning Inbox M20 desktop slice is working. Recommendation
-and preflight remain read-only; a provider process can start only after an
-exact, expiring, one-time approval in the desktop app. The full night schedule
-is durable and safely recoverable under a plan-specific operating-system
-lease. On return, the app now joins the latest approved plan to exact Hermes,
-Codex, and Claude contract identities and sorts work into **needs a decision**,
-**ready to review**, **still running**, and **not started**. A coordinator
-completion without provider evidence can never become a successful morning
-result. Provider completion remains separate from human verification.
+The evidence-bound morning acknowledgement M21 desktop slice is working.
+Recommendation and preflight remain read-only; a provider process can start
+only after an exact, expiring, one-time approval in the desktop app. The full
+night schedule is durable and safely recoverable under a plan-specific
+operating-system lease. On return, the app joins the latest approved plan to
+exact Hermes, Codex, and Claude contract identities and ranks the Morning
+Inbox. A human can mark only an inspectable, provenance-verified provider
+result as reviewed after opening its evidence. That local acknowledgement is
+bound to the exact evidence fingerprint, is reversible, and automatically
+reopens when an attempt, handoff, or lifecycle fact changes.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -62,6 +63,7 @@ result. Provider completion remains separate from human verification.
 - [Durable full-night coordinator M18](docs/overnight-m18.md)
 - [Evidence-first coordinator recovery M19](docs/overnight-m19.md)
 - [Evidence-ranked Morning Inbox M20](docs/overnight-m20.md)
+- [Evidence-bound morning acknowledgement M21](docs/overnight-m21.md)
 
 The app currently:
 
@@ -123,6 +125,13 @@ The app currently:
   as needs a decision, ready to review, still running, or not started
 - opens the same bounded provider-owned contract, attempt, and lifecycle
   evidence directly from each inspectable Morning Inbox item
+- records a human review only after that evidence is opened, without mutating
+  the provider task, session, or completion state
+- binds each review acknowledgement to a stable SHA-256 digest of the exact
+  coordinator and provider evidence; new attempts, events, handoffs, errors,
+  or provenance changes automatically reopen the result
+- stores acknowledgements in a small atomic app-owned per-plan ledger and lets
+  the operator explicitly reopen any reviewed item
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

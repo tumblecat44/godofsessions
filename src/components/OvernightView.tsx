@@ -269,14 +269,81 @@ const morningVerdictLabels = {
   not_started: "시작 전",
 } as const;
 
-function MorningBriefSection({ brief }: { brief: MorningBrief }) {
+function updatePreviewMorningReview(
+  brief: MorningBrief,
+  draftId: string,
+  reviewed: boolean,
+) {
+  const items = brief.items
+    .map((item) =>
+      item.draft_id === draftId
+        ? {
+            ...item,
+            review_state: reviewed ? ("reviewed" as const) : ("unreviewed" as const),
+            reviewed_at: reviewed ? new Date().toISOString() : null,
+          }
+        : item,
+    )
+    .sort((left, right) => {
+      const priority = (item: MorningBriefItem) => {
+        if (item.review_state === "reviewed") return 4;
+        return {
+          needs_attention: 0,
+          ready_to_review: 1,
+          in_progress: 2,
+          not_started: 3,
+        }[item.verdict];
+      };
+      return priority(left) - priority(right);
+    });
+  const reviewCount = items.filter(
+    (item) =>
+      item.verdict === "ready_to_review" && item.review_state !== "reviewed",
+  ).length;
+  const reviewedCount = items.filter(
+    (item) => item.review_state === "reviewed",
+  ).length;
+  return {
+    ...brief,
+    review_count: reviewCount,
+    reviewed_count: reviewedCount,
+    headline:
+      brief.attention_count > 0
+        ? `${brief.attention_count}개는 먼저 판단이 필요합니다.`
+        : reviewCount > 0
+          ? `${reviewCount}개 결과가 검토를 기다립니다.`
+          : brief.in_progress_count > 0
+            ? `${brief.in_progress_count}개가 아직 실행 중입니다.`
+            : brief.not_started_count > 0
+              ? `${brief.not_started_count}개가 아직 시작을 기다립니다.`
+              : reviewedCount > 0
+                ? "모든 완료 결과의 검토를 마쳤습니다."
+                : "밤 계획의 현재 상태를 모두 확인했습니다.",
+    items,
+  };
+}
+
+function MorningBriefSection({
+  brief,
+  onMarkReviewed,
+  onReopen,
+}: {
+  brief: MorningBrief;
+  onMarkReviewed: (item: MorningBriefItem) => Promise<void>;
+  onReopen: (item: MorningBriefItem) => Promise<void>;
+}) {
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [detail, setDetail] = useState<NightRunDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const detailRequest = useRef(0);
 
   if (!brief.plan_id || brief.items.length === 0) return null;
+  const selectedItem = brief.items.find(
+    (item) => item.draft_id === selectedDraftId,
+  );
 
   const inspectItem = async (item: MorningBriefItem) => {
     if (!item.inspectable || !item.task_id) return;
@@ -291,6 +358,7 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
     setSelectedDraftId(item.draft_id);
     setDetail(null);
     setDetailError(null);
+    setActionError(null);
     setDetailLoading(true);
     try {
       const next = await fetchNightRunDetail({
@@ -305,6 +373,30 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
       }
     } finally {
       if (detailRequest.current === request) setDetailLoading(false);
+    }
+  };
+
+  const markReviewed = async (item: MorningBriefItem) => {
+    setActionLoading(item.draft_id);
+    setActionError(null);
+    try {
+      await onMarkReviewed(item);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const reopen = async (item: MorningBriefItem) => {
+    setActionLoading(item.draft_id);
+    setActionError(null);
+    try {
+      await onReopen(item);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -329,6 +421,10 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
             <strong>{brief.in_progress_count}</strong>
             진행 중
           </span>
+          <span>
+            <strong>{brief.reviewed_count}</strong>
+            검토 완료
+          </span>
         </div>
       </header>
 
@@ -336,18 +432,23 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
         {brief.items.map((item, index) => {
           const timestamp = item.completed_at || item.started_at;
           const selected = selectedDraftId === item.draft_id;
+          const stateLabel =
+            item.review_state === "reviewed"
+              ? "검토 완료"
+              : item.review_state === "evidence_changed" &&
+                  item.verdict === "ready_to_review"
+                ? "결과 변경"
+                : morningVerdictLabels[item.verdict];
           return (
             <article
-              className={`morning-brief-item morning-brief-item--${item.verdict} ${
-                selected ? "is-selected" : ""
-              }`}
+              className={`morning-brief-item morning-brief-item--${item.verdict} morning-brief-item--${item.review_state} ${selected ? "is-selected" : ""}`}
               key={item.draft_id}
             >
               <div className="morning-brief-rank">{index + 1}</div>
               <div className="morning-brief-copy">
                 <header>
                   <ProviderMark provider={item.surface} />
-                  <span>{morningVerdictLabels[item.verdict]}</span>
+                  <span>{stateLabel}</span>
                   <small>{timestamp ? relativeTime(timestamp) : "시각 없음"}</small>
                 </header>
                 <strong>{item.project}</strong>
@@ -360,7 +461,9 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
                 <footer>
                   <span>
                     <ArrowRight size={11} />
-                    {item.next_action}
+                    {item.review_state === "reviewed"
+                      ? "검토한 공급자 근거에 묶여 있음"
+                      : item.next_action}
                   </span>
                   <small>
                     {item.provenance_verified
@@ -369,16 +472,33 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
                   </small>
                 </footer>
               </div>
-              {item.inspectable && (
-                <button
-                  type="button"
-                  onClick={() => void inspectItem(item)}
-                  aria-expanded={selected}
-                >
-                  <Eye size={12} />
-                  {selected ? "근거 접기" : "원본 근거"}
-                </button>
-              )}
+              <div className="morning-brief-actions">
+                {item.inspectable && (
+                  <button
+                    type="button"
+                    onClick={() => void inspectItem(item)}
+                    aria-expanded={selected}
+                  >
+                    <Eye size={12} />
+                    {selected ? "근거 접기" : "원본 근거"}
+                  </button>
+                )}
+                {item.review_state === "reviewed" && (
+                  <button
+                    type="button"
+                    disabled={actionLoading === item.draft_id}
+                    onClick={() => void reopen(item)}
+                  >
+                    <RefreshCw
+                      className={
+                        actionLoading === item.draft_id ? "is-spinning" : ""
+                      }
+                      size={12}
+                    />
+                    다시 열기
+                  </button>
+                )}
+              </div>
             </article>
           );
         })}
@@ -390,6 +510,50 @@ function MorningBriefSection({ brief }: { brief: MorningBrief }) {
           loading={detailLoading}
           error={detailError}
         />
+      )}
+      {selectedItem &&
+        detail &&
+        selectedItem.verdict === "ready_to_review" &&
+        selectedItem.review_state !== "reviewed" && (
+          <div className="morning-review-action">
+            <span>
+              <ShieldCheck size={13} />
+              <span>
+                <strong>
+                  {selectedItem.review_state === "evidence_changed"
+                    ? "이전 검토 뒤 근거가 바뀌었습니다"
+                    : "이 공급자 근거를 모두 확인했나요?"}
+                </strong>
+                <small>
+                  현재 증거 지문에만 묶입니다. 새 시도나 결과가 생기면 자동으로
+                  다시 열립니다.
+                </small>
+              </span>
+            </span>
+            <button
+              type="button"
+              disabled={actionLoading === selectedItem.draft_id}
+              onClick={() => void markReviewed(selectedItem)}
+            >
+              {actionLoading === selectedItem.draft_id ? (
+                <>
+                  <RefreshCw className="is-spinning" size={12} />
+                  기록 중
+                </>
+              ) : (
+                <>
+                  <Check size={12} />
+                  이 근거 검토 완료
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      {actionError && (
+        <p className="night-history-warning" role="alert">
+          <AlertTriangle size={12} />
+          {actionError}
+        </p>
       )}
 
       <div className="morning-brief-trust">
@@ -1271,6 +1435,7 @@ export function OvernightView() {
         review_count: 0,
         in_progress_count: 0,
         not_started_count: 0,
+        reviewed_count: 0,
         items: [],
         warnings: [error instanceof Error ? error.message : String(error)],
         read_only: true,
@@ -1278,6 +1443,43 @@ export function OvernightView() {
       });
     }
   }, []);
+
+  const markMorningItemReviewed = async (item: MorningBriefItem) => {
+    const planId = morningBrief?.plan_id;
+    if (!planId) throw new Error("검토할 최신 밤 계획이 없습니다.");
+    if (isTauri()) {
+      const next = await invoke<MorningBrief>("mark_morning_item_reviewed", {
+        planId,
+        draftId: item.draft_id,
+        evidenceFingerprint: item.evidence_fingerprint,
+      });
+      setMorningBrief(next);
+      return;
+    }
+    setMorningBrief((current) =>
+      current
+        ? updatePreviewMorningReview(current, item.draft_id, true)
+        : current,
+    );
+  };
+
+  const reopenMorningItem = async (item: MorningBriefItem) => {
+    const planId = morningBrief?.plan_id;
+    if (!planId) throw new Error("다시 열 최신 밤 계획이 없습니다.");
+    if (isTauri()) {
+      const next = await invoke<MorningBrief>("reopen_morning_item", {
+        planId,
+        draftId: item.draft_id,
+      });
+      setMorningBrief(next);
+      return;
+    }
+    setMorningBrief((current) =>
+      current
+        ? updatePreviewMorningReview(current, item.draft_id, false)
+        : current,
+    );
+  };
 
   useEffect(() => {
     void loadNightHistory();
@@ -1769,7 +1971,13 @@ export function OvernightView() {
         </section>
       )}
 
-      {morningBrief && <MorningBriefSection brief={morningBrief} />}
+      {morningBrief && (
+        <MorningBriefSection
+          brief={morningBrief}
+          onMarkReviewed={markMorningItemReviewed}
+          onReopen={reopenMorningItem}
+        />
+      )}
       {nightPlanHistory && (
         <NightPlanHistorySection
           history={nightPlanHistory}

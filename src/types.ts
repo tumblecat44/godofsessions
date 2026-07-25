@@ -485,6 +485,11 @@ export type MorningBriefVerdict =
   | "in_progress"
   | "not_started";
 
+export type MorningReviewState =
+  | "unreviewed"
+  | "reviewed"
+  | "evidence_changed";
+
 export interface MorningBriefItem {
   draft_id: string;
   project: string;
@@ -503,6 +508,9 @@ export interface MorningBriefItem {
   next_action: string;
   provenance_verified: boolean;
   inspectable: boolean;
+  evidence_fingerprint: string;
+  review_state: MorningReviewState;
+  reviewed_at: string | null;
 }
 
 export interface MorningBrief {
@@ -516,6 +524,7 @@ export interface MorningBrief {
   review_count: number;
   in_progress_count: number;
   not_started_count: number;
+  reviewed_count: number;
   items: MorningBriefItem[];
   warnings: string[];
   read_only: boolean;

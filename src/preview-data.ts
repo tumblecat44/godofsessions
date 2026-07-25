@@ -380,6 +380,7 @@ export const previewMorningBrief: MorningBrief = {
   review_count: 1,
   in_progress_count: 1,
   not_started_count: 0,
+  reviewed_count: 0,
   read_only: true,
   methodology:
     "최신 승인 계획의 각 계약 식별자를 공급자 원장에 exact-id로 대조하고 사람 판단 필요 순서로 정렬했습니다.",
@@ -404,6 +405,10 @@ export const previewMorningBrief: MorningBrief = {
       next_action: "중복 실행 없이 원본 기록 확인",
       provenance_verified: false,
       inspectable: false,
+      evidence_fingerprint:
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      review_state: "unreviewed",
+      reviewed_at: null,
     },
     {
       draft_id: "draft-preview-codex",
@@ -425,6 +430,10 @@ export const previewMorningBrief: MorningBrief = {
       next_action: "변경 내용과 검증 근거 검토",
       provenance_verified: true,
       inspectable: true,
+      evidence_fingerprint:
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      review_state: "unreviewed",
+      reviewed_at: null,
     },
     {
       draft_id: "draft-preview-hermes",
@@ -445,6 +454,10 @@ export const previewMorningBrief: MorningBrief = {
       next_action: "완료 전까지 기다리기",
       provenance_verified: true,
       inspectable: true,
+      evidence_fingerprint:
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      review_state: "unreviewed",
+      reviewed_at: null,
     },
   ],
 };
