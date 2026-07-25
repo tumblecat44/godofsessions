@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The unified-history M14 desktop slice is working. Recommendation and preflight
+The deep-adapter M15 desktop slice is working. Recommendation and preflight
 remain read-only; a provider process can start only after an exact, expiring,
 one-time approval in the desktop app. Hermes state is recovered after an app
 restart, while Codex uses the provider rollout as its idempotency and recovery
@@ -53,6 +53,7 @@ remains separate from human verification.
 - [Codex app-server safety preflight M12](docs/overnight-m12.md)
 - [Approval-gated Codex night turns M13](docs/overnight-m13.md)
 - [Unified provider-owned night history M14](docs/overnight-m14.md)
+- [Deep Codex adapter modules M15](docs/overnight-m15.md)
 
 The app currently:
 
