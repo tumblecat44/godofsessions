@@ -1193,6 +1193,199 @@ button:active:not(:disabled) {
   margin: 20px auto 0;
 }
 
+.night-plan-history {
+  max-width: 1500px;
+  margin: 20px auto 0;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, rgba(79, 190, 166, 0.035), transparent 42%),
+    var(--console);
+  border: 1px solid rgba(79, 190, 166, 0.14);
+  border-radius: var(--radius-panel);
+}
+
+.night-plan-history > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.night-plan-history > header h2 {
+  margin: 5px 0 0;
+  color: var(--ink-primary);
+  font-size: 16px;
+  font-weight: 570;
+  letter-spacing: -0.025em;
+}
+
+.night-plan-history > header p {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 8px;
+}
+
+.night-plan-status {
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.07);
+  border: 1px solid rgba(79, 190, 166, 0.13);
+  border-radius: 999px;
+  font-size: 7px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.night-plan-status i {
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  border-radius: 50%;
+}
+
+.night-plan-status--needs_attention {
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.08);
+  border-color: rgba(228, 169, 74, 0.16);
+}
+
+.night-plan-meta {
+  margin-top: 12px;
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--ink-muted);
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-plan-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.night-plan-meta code {
+  margin-left: auto;
+  color: var(--ink-tertiary);
+}
+
+.night-plan-lanes {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 8px;
+}
+
+.night-plan-lane {
+  min-width: 0;
+  padding: 10px;
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+}
+
+.night-plan-lane > header {
+  padding-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--etched-edge-soft);
+}
+
+.night-plan-lane > header strong {
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.night-plan-lane > header small {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-plan-lane > div {
+  margin-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.night-plan-item {
+  min-height: 42px;
+  padding: 7px;
+  display: grid;
+  grid-template-columns: 16px 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+}
+
+.night-plan-item > span {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-plan-item > div {
+  min-width: 0;
+}
+
+.night-plan-item strong,
+.night-plan-item small,
+.night-plan-item em {
+  display: block;
+}
+
+.night-plan-item strong {
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-plan-item small {
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6.5px;
+}
+
+.night-plan-item em {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--signal-amber);
+  font-size: 7px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-plan-item--running,
+.night-plan-item--starting {
+  border-color: rgba(79, 190, 166, 0.18);
+  box-shadow: inset 2px 0 0 rgba(79, 190, 166, 0.5);
+}
+
+.night-plan-item--blocked,
+.night-plan-item--uncertain,
+.night-plan-item--skipped_deadline,
+.night-plan-item--skipped_uncertain {
+  border-color: rgba(228, 169, 74, 0.16);
+}
+
 .night-history-section > header {
   display: flex;
   align-items: flex-end;
@@ -4231,6 +4424,16 @@ button:active:not(:disabled) {
     align-items: flex-start;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .night-plan-history > header,
+  .night-plan-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .night-plan-meta code {
+    margin-left: 0;
   }
 
   .night-history-grid {

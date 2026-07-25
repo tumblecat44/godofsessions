@@ -1,5 +1,6 @@
 import type {
   ControlBoard,
+  NightPlanHistory,
   NightRunDetail,
   NightRunHistory,
   OvernightPlan,
@@ -573,6 +574,80 @@ const previewNightRunDetails: Record<string, NightRunDetail> = {
     methodology:
       "Hermes task, task_runs, task_events를 읽기 전용으로 결합했습니다. 완료 이벤트는 실행 수명주기를 증명하지만 결과의 정확성까지 자동 증명하지는 않습니다.",
   },
+};
+
+export const previewNightPlanHistory: NightPlanHistory = {
+  generated_at: new Date().toISOString(),
+  plans: [
+    {
+      idempotency_key: "gos-portfolio-preview-m18",
+      state: "running",
+      approved_at: new Date(now - 15 * 60_000).toISOString(),
+      deadline_at: new Date(now + 6.75 * 3_600_000).toISOString(),
+      worker_pid: 73142,
+      error: null,
+      lanes: [
+        {
+          capacity_pool: "codex_subscription",
+          items: [
+            {
+              draft_id: "night:1:godofsessions:codex:native",
+              project: "godofsessions",
+              surface: "codex",
+              capacity_pool: "codex_subscription",
+              state: "running",
+              starts_after_hours: 0,
+              time_budget_hours: 3.5,
+              started_at: new Date(now - 14 * 60_000).toISOString(),
+              completed_at: null,
+              idempotency_key: "gos-codex-preview",
+              error: null,
+            },
+          ],
+        },
+        {
+          capacity_pool: "grok_subscription",
+          items: [
+            {
+              draft_id: "night:2:agent-research:hermes:default",
+              project: "agent-research",
+              surface: "hermes",
+              capacity_pool: "grok_subscription",
+              state: "running",
+              starts_after_hours: 0,
+              time_budget_hours: 2.5,
+              started_at: new Date(now - 13 * 60_000).toISOString(),
+              completed_at: null,
+              idempotency_key: "gos-night-preview",
+              error: null,
+            },
+          ],
+        },
+        {
+          capacity_pool: "claude_subscription",
+          items: [
+            {
+              draft_id: "night:3:malgun-app:claude:native",
+              project: "malgun-app",
+              surface: "claude",
+              capacity_pool: "claude_subscription",
+              state: "running",
+              starts_after_hours: 0,
+              time_budget_hours: 2,
+              started_at: new Date(now - 12 * 60_000).toISOString(),
+              completed_at: null,
+              idempotency_key: "gos-claude-preview",
+              error: null,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  warnings: [],
+  read_only: true,
+  methodology:
+    "승인 시 고정한 coordinator 계획 원장과 공급자 실행 근거를 함께 표시합니다.",
 };
 
 export function previewNightRunDetail(taskId: string): NightRunDetail {

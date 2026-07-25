@@ -23,6 +23,7 @@ import {
 import {
   previewNightRunDetail,
   previewNightRunHistory,
+  previewNightPlanHistory,
   previewOvernightPlan,
 } from "../preview-data";
 import type {
@@ -32,6 +33,7 @@ import type {
   NightRunDetail,
   NightRunHistory,
   NightRunRecord,
+  NightPlanHistory,
   OvernightCandidate,
   OvernightPlan,
   ExecutionRoute,
@@ -140,6 +142,27 @@ function approvalEffectsFor(surface?: DispatchPreflight["surface"]) {
     "전용 Hermes 보드만 사용",
     "최대 한 작업자·계약된 시간과 턴만 허용",
   ];
+}
+
+function readyPortfolioPreflightsForPlan(plan: OvernightPlan) {
+  const ready: DispatchPreflight[] = [];
+  for (const lane of plan.schedule.lanes) {
+    for (const slot of lane.slots) {
+      const draft = plan.run_drafts.find(
+        (item) =>
+          item.candidate_rank === slot.candidate_rank &&
+          item.route_id === slot.route_id,
+      );
+      const preflight = plan.dispatch_preflights.find(
+        (item) =>
+          item.draft_id === draft?.id &&
+          item.state === "ready_for_approval",
+      );
+      if (!preflight) break;
+      ready.push(preflight);
+    }
+  }
+  return ready;
 }
 
 function RouteCard({ route }: { route: ExecutionRoute }) {
@@ -856,6 +879,106 @@ function CandidateCard({
   );
 }
 
+const nightPlanStateLabels: Record<string, string> = {
+  accepted: "시작 준비",
+  running: "관제 중",
+  completed: "일정 완료",
+  needs_attention: "확인 필요",
+};
+
+const nightPlanItemStateLabels: Record<string, string> = {
+  pending: "예약",
+  starting: "시작 확인",
+  running: "실행 중",
+  completed: "완료",
+  blocked: "차단",
+  uncertain: "불확실",
+  skipped_deadline: "마감으로 건너뜀",
+  skipped_uncertain: "앞 작업 불확실",
+};
+
+function NightPlanHistorySection({ history }: { history: NightPlanHistory }) {
+  const plan = history.plans[0];
+  if (!plan && history.warnings.length === 0) return null;
+
+  return (
+    <section className="night-plan-history">
+      <header>
+        <div>
+          <span className="eyebrow">DURABLE NIGHT PLAN</span>
+          <h2>승인한 순서를 지키는 밤 coordinator</h2>
+          <p>
+            공급자 완료 근거를 확인한 뒤 같은 구독 lane의 다음 작업만 엽니다.
+          </p>
+        </div>
+        {plan && (
+          <span className={`night-plan-status night-plan-status--${plan.state}`}>
+            <i />
+            {nightPlanStateLabels[plan.state] || plan.state}
+          </span>
+        )}
+      </header>
+
+      {plan && (
+        <>
+          <div className="night-plan-meta">
+            <span>
+              <Clock3 size={11} />
+              {timeUntil(plan.deadline_at)} 마감
+            </span>
+            <span>
+              <Database size={11} />
+              계획 원장 고정
+            </span>
+            {plan.worker_pid && <code>coordinator pid {plan.worker_pid}</code>}
+          </div>
+          <div className="night-plan-lanes">
+            {plan.lanes.map((lane) => (
+              <article
+                className="night-plan-lane"
+                key={`${plan.idempotency_key}-${lane.capacity_pool}`}
+              >
+                <header>
+                  <strong>{capacityPoolLabels[lane.capacity_pool]}</strong>
+                  <small>한 번에 1개</small>
+                </header>
+                <div>
+                  {lane.items.map((item, index) => (
+                    <div
+                      className={`night-plan-item night-plan-item--${item.state}`}
+                      key={item.draft_id}
+                    >
+                      <span>{index + 1}</span>
+                      <ProviderMark provider={item.surface} />
+                      <div>
+                        <strong>{item.project}</strong>
+                        <small>
+                          {nightPlanItemStateLabels[item.state] || item.state} ·{" "}
+                          {item.starts_after_hours > 0
+                            ? `약 ${item.starts_after_hours}시간 뒤`
+                            : "바로 시작"}{" "}
+                          · 최대 {item.time_budget_hours}시간
+                        </small>
+                        {item.error && <em>{item.error}</em>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+      {history.warnings.map((warning) => (
+        <p className="night-history-warning" key={warning}>
+          <AlertTriangle size={12} />
+          {warning}
+        </p>
+      ))}
+    </section>
+  );
+}
+
 export function OvernightView() {
   const [sleepHours, setSleepHours] = useState(7);
   const [state, setState] = useState<PlanState>({ kind: "idle" });
@@ -872,6 +995,8 @@ export function OvernightView() {
     string | null
   >(null);
   const [nightHistory, setNightHistory] = useState<NightRunHistory | null>(null);
+  const [nightPlanHistory, setNightPlanHistory] =
+    useState<NightPlanHistory | null>(null);
 
   const loadNightHistory = useCallback(async () => {
     try {
@@ -892,14 +1017,35 @@ export function OvernightView() {
     }
   }, []);
 
+  const loadNightPlanHistory = useCallback(async () => {
+    try {
+      const history = isTauri()
+        ? await invoke<NightPlanHistory>("load_night_plan_history")
+        : previewNightPlanHistory;
+      setNightPlanHistory(history);
+    } catch (error) {
+      setNightPlanHistory({
+        generated_at: new Date().toISOString(),
+        plans: [],
+        warnings: [
+          error instanceof Error ? error.message : String(error),
+        ],
+        read_only: true,
+        methodology: "밤 coordinator 계획을 불러오지 못했습니다.",
+      });
+    }
+  }, []);
+
   useEffect(() => {
     void loadNightHistory();
+    void loadNightPlanHistory();
     if (!isTauri()) return;
     const interval = window.setInterval(() => {
       void loadNightHistory();
+      void loadNightPlanHistory();
     }, 15_000);
     return () => window.clearInterval(interval);
-  }, [loadNightHistory]);
+  }, [loadNightHistory, loadNightPlanHistory]);
 
   useEffect(() => {
     const activeApproval = portfolioApproval || approval;
@@ -942,26 +1088,7 @@ export function OvernightView() {
 
   const plan = state.kind === "ready" ? state.plan : null;
   const readyPortfolioPreflights = plan
-    ? plan.schedule.lanes.flatMap((lane) =>
-        lane.slots
-          .filter((slot) => slot.starts_after_hours === 0)
-          .map((slot) => {
-            const draft = plan.run_drafts.find(
-              (item) =>
-                item.candidate_rank === slot.candidate_rank &&
-                item.route_id === slot.route_id,
-            );
-            return plan.dispatch_preflights.find(
-              (preflight) =>
-                preflight.draft_id === draft?.id &&
-                preflight.state === "ready_for_approval",
-            );
-          })
-          .filter(
-            (preflight): preflight is DispatchPreflight =>
-              preflight !== undefined,
-          ),
-      )
+    ? readyPortfolioPreflightsForPlan(plan)
     : [];
   const approvalDraft = approval
     ? plan?.run_drafts.find((draft) => draft.id === approval.draft_id)
@@ -1045,6 +1172,13 @@ export function OvernightView() {
               const candidate = plan?.candidates.find(
                 (item) => item.rank === draft?.candidate_rank,
               );
+              const slot = plan?.schedule.lanes
+                .flatMap((lane) => lane.slots)
+                .find(
+                  (item) =>
+                    item.candidate_rank === draft?.candidate_rank &&
+                    item.route_id === draft?.route_id,
+                );
               return {
                 draft_id: preflight.draft_id,
                 idempotency_key: preflight.idempotency_key,
@@ -1053,21 +1187,28 @@ export function OvernightView() {
                 workspace: draft?.workspace || "",
                 surface: preflight.surface,
                 capacity_pool: candidate?.capacity_pool || "unknown",
+                starts_after_hours: slot?.starts_after_hours || 0,
                 time_budget_hours: draft?.time_budget_hours || 0,
               };
             }),
             deferred_count:
-              plan?.schedule.lanes.reduce(
-                (count, lane) =>
-                  count +
-                  lane.slots.filter((slot) => slot.starts_after_hours > 0)
-                    .length,
-                0,
-              ) || 0,
-            confirmation_phrase: `오늘 밤 ${readyPortfolioPreflights.length}개 시작 승인`,
+              readyPortfolioPreflights.filter((preflight) => {
+                const draft = plan?.run_drafts.find(
+                  (item) => item.id === preflight.draft_id,
+                );
+                return plan?.schedule.lanes
+                  .flatMap((lane) => lane.slots)
+                  .some(
+                    (slot) =>
+                      slot.candidate_rank === draft?.candidate_rank &&
+                      slot.route_id === draft?.route_id &&
+                      slot.starts_after_hours > 0,
+                  );
+              }).length || 0,
+            confirmation_phrase: `오늘 밤 ${readyPortfolioPreflights.length}개 예약 승인`,
             expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
             warning:
-              "확인하면 위에 고정된 각 구독 lane의 첫 작업만 시작합니다. 프로젝트 파일과 연결된 구독이 사용될 수 있습니다. 몇 시간 뒤 슬롯은 아직 자동 시작하지 않습니다.",
+              "확인하면 고정된 모든 lane과 순서를 수면 마감까지 실행합니다. 새 작업을 추가하거나 대체하지 않으며 후속 작업은 시작 직전에 다시 점검합니다.",
           };
       setApproval(null);
       setPortfolioApproval(challenge);
@@ -1139,6 +1280,7 @@ export function OvernightView() {
           setApprovalError(failures.join(" · "));
         }
         void loadNightHistory();
+        void loadNightPlanHistory();
         return;
       }
       if (!approval) return;
@@ -1261,6 +1403,9 @@ export function OvernightView() {
         </section>
       )}
 
+      {nightPlanHistory && (
+        <NightPlanHistorySection history={nightPlanHistory} />
+      )}
       {nightHistory && <NightRunHistorySection history={nightHistory} />}
 
       {state.kind === "idle" && (
@@ -1416,12 +1561,12 @@ export function OvernightView() {
                       승인 범위 고정됨
                     </span>
                     <strong>
-                      지금 {readyPortfolioPreflights.length}개 구독 lane을 한 번에
-                      시작
+                      오늘 밤 {readyPortfolioPreflights.length}개 작업을 한 번에
+                      예약
                     </strong>
                     <small>
-                      각 lane의 첫 작업만 포함합니다. 뒤 슬롯은 자동으로
-                      시작하지 않습니다.
+                      각 lane은 앞 작업의 공급자 종료 근거를 확인한 뒤 다음
+                      작업을 다시 점검합니다.
                     </small>
                   </div>
                   <button
@@ -1437,7 +1582,7 @@ export function OvernightView() {
                     ) : (
                       <>
                         <MoonStar size={13} />
-                        오늘 밤 한 번에 맡기기
+                        오늘 밤 전체 일정 맡기기
                       </>
                     )}
                   </button>
@@ -1583,7 +1728,11 @@ export function OvernightView() {
                     <small>{item.goal}</small>
                     <em title={item.workspace}>
                       {capacityPoolLabels[item.capacity_pool]} · 최대{" "}
-                      {item.time_budget_hours}시간 · {compactPath(item.workspace)}
+                      {item.time_budget_hours}시간 ·{" "}
+                      {item.starts_after_hours > 0
+                        ? `약 ${item.starts_after_hours}시간 뒤`
+                        : "바로 시작"}{" "}
+                      · {compactPath(item.workspace)}
                     </em>
                   </div>
                 </article>
@@ -1593,11 +1742,11 @@ export function OvernightView() {
             <div className="approval-effects">
               <p>
                 <Check size={12} />
-                표시된 프로젝트·제공자·작업공간만 시작
+                표시된 프로젝트·제공자·순서·작업공간만 예약
               </p>
               <p>
                 <Check size={12} />
-                서로 다른 구독 lane은 독립적으로 실행
+                lane별 한 작업씩 · 종료 근거 뒤 다음 작업 점검
               </p>
               <p>
                 <AlertTriangle size={12} />
@@ -1606,7 +1755,8 @@ export function OvernightView() {
               {portfolioApproval.deferred_count > 0 && (
                 <p>
                   <Clock3 size={12} />
-                  뒤 슬롯 {portfolioApproval.deferred_count}개는 이번 승인에서 제외
+                  후속 {portfolioApproval.deferred_count}개는 승인된 예상 시각과
+                  앞 작업 종료 뒤 자동 점검
                 </p>
               )}
             </div>
@@ -1663,7 +1813,7 @@ export function OvernightView() {
                 ) : (
                   <>
                     <MoonStar size={13} />
-                    승인하고 {portfolioApproval.items.length}개 시작
+                    승인하고 {portfolioApproval.items.length}개 예약
                   </>
                 )}
               </button>

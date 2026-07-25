@@ -8,6 +8,7 @@ mod dispatch;
 mod execution_routes;
 mod model;
 mod night_contract;
+mod night_coordinator;
 mod recommendation;
 mod time_utils;
 mod usage;
@@ -16,9 +17,9 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, DispatchReceipt, NightRunDetail, NightRunHistory, OvernightPlan,
-    PortfolioApprovalChallenge, PortfolioDispatchOutcome, PortfolioDispatchResult, Provider,
-    Session, Snapshot, StatusConfidence, WorkspaceOverview,
+    ApprovalChallenge, DispatchReceipt, NightPlanHistory, NightRunDetail, NightRunHistory,
+    OvernightPlan, PortfolioApprovalChallenge, PortfolioDispatchResult, Provider, Session,
+    Snapshot, StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
@@ -30,6 +31,10 @@ pub fn run_codex_night_worker() {
 
 pub fn run_claude_night_worker() {
     claude_dispatch::run_night_worker_from_stdin();
+}
+
+pub fn run_night_coordinator_worker() {
+    night_coordinator::run_worker_from_stdin();
 }
 
 #[tauri::command]
@@ -74,6 +79,7 @@ async fn generate_overnight_plan(
             &plan.run_drafts,
             &plan.dispatch_preflights,
             &plan.schedule,
+            plan.sleep_hours,
             Utc::now(),
         );
     Ok(plan)
@@ -225,71 +231,9 @@ async fn dispatch_approved_portfolio(
             Utc::now(),
         )
         .map_err(|error| error.to_string())?;
-    let result_approval_id = approval_id.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let budgets = usage::load_budgets();
-        let routes = execution_routes::load(&budgets, Utc::now());
-        let mut outcomes = Vec::with_capacity(approved.len());
-        for item in approved {
-            let draft_id = item.draft.id.clone();
-            let project = item.draft.project.clone();
-            let surface = item.preflight.surface;
-            let result = routes
-                .routes
-                .iter()
-                .find(|route| route.id == item.draft.route_id && route.surface == surface)
-                .ok_or_else(|| {
-                    format!(
-                        "승인한 {} 실행 경로를 더 이상 찾지 못했습니다.",
-                        surface.as_str()
-                    )
-                })
-                .and_then(|route| match surface {
-                    Provider::Hermes => dispatch::execute_approved(item, route),
-                    Provider::Codex => codex_dispatch::execute_approved(item, route),
-                    Provider::Claude => claude_dispatch::execute_approved(item, route),
-                    _ => Err(format!(
-                        "{} 실행 어댑터는 아직 승인 실행을 지원하지 않습니다.",
-                        surface.as_str()
-                    )),
-                });
-            outcomes.push(match result {
-                Ok(receipt) => PortfolioDispatchOutcome {
-                    draft_id,
-                    project,
-                    surface,
-                    receipt: Some(receipt),
-                    error: None,
-                },
-                Err(error) => PortfolioDispatchOutcome {
-                    draft_id,
-                    project,
-                    surface,
-                    receipt: None,
-                    error: Some(error),
-                },
-            });
-        }
-        let receipt_count = outcomes
-            .iter()
-            .filter(|outcome| outcome.receipt.is_some())
-            .count();
-        let error_count = outcomes.len().saturating_sub(receipt_count);
-        PortfolioDispatchResult {
-            started_at: Utc::now().to_rfc3339(),
-            approval_id: result_approval_id,
-            message: if error_count == 0 {
-                format!("{receipt_count}개 작업의 공급자 영수증을 모두 확보했습니다.")
-            } else {
-                format!(
-                    "{receipt_count}개는 영수증을 확보했고 {error_count}개는 시작 전에 막혔습니다."
-                )
-            },
-            outcomes,
-        }
-    })
-    .await
-    .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || night_coordinator::execute(approved, approval_id))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -302,6 +246,13 @@ async fn load_workspace_overview() -> Result<WorkspaceOverview, String> {
 #[tauri::command]
 async fn load_night_run_history() -> Result<NightRunHistory, String> {
     tauri::async_runtime::spawn_blocking(dispatch::load_night_run_history)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn load_night_plan_history() -> Result<NightPlanHistory, String> {
+    tauri::async_runtime::spawn_blocking(night_coordinator::load_history)
         .await
         .map_err(|error| error.to_string())
 }
@@ -421,6 +372,7 @@ pub fn run() {
             load_snapshot,
             load_workspace_overview,
             load_night_run_history,
+            load_night_plan_history,
             load_night_run_detail,
             generate_overnight_plan,
             prepare_dispatch_approval,

@@ -278,6 +278,7 @@ export interface PortfolioApprovalItem {
   workspace: string;
   surface: Provider;
   capacity_pool: CapacityPool;
+  starts_after_hours: number;
   time_budget_hours: number;
 }
 
@@ -330,6 +331,51 @@ export interface PortfolioDispatchResult {
   approval_id: string;
   outcomes: PortfolioDispatchOutcome[];
   message: string;
+}
+
+export interface NightPlanItemSummary {
+  draft_id: string;
+  project: string;
+  surface: Provider;
+  capacity_pool: CapacityPool;
+  state:
+    | "pending"
+    | "starting"
+    | "running"
+    | "completed"
+    | "blocked"
+    | "uncertain"
+    | "skipped_deadline"
+    | "skipped_uncertain";
+  starts_after_hours: number;
+  time_budget_hours: number;
+  started_at: string | null;
+  completed_at: string | null;
+  idempotency_key: string;
+  error: string | null;
+}
+
+export interface NightPlanLaneSummary {
+  capacity_pool: CapacityPool;
+  items: NightPlanItemSummary[];
+}
+
+export interface NightPlanSummary {
+  idempotency_key: string;
+  state: string;
+  approved_at: string;
+  deadline_at: string;
+  worker_pid: number | null;
+  lanes: NightPlanLaneSummary[];
+  error: string | null;
+}
+
+export interface NightPlanHistory {
+  generated_at: string;
+  plans: NightPlanSummary[];
+  warnings: string[];
+  read_only: boolean;
+  methodology: string;
 }
 
 export interface NightRunRecord {

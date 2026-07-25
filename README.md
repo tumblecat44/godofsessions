@@ -29,13 +29,15 @@ It is not:
 
 ## Current phase
 
-The bounded Claude fork M17 desktop slice is working. Recommendation and
+The durable night coordinator M18 desktop slice is working. Recommendation and
 preflight remain read-only; a provider process can start only after an exact,
-expiring, one-time approval in the desktop app. Hermes state is recovered after
-an app restart, Codex uses the provider rollout as its idempotency and recovery
-ledger, and Claude combines an atomic execution receipt with its forked
-provider transcript. Their records appear in one Morning Review while provider
-completion remains separate from human verification.
+expiring, one-time approval in the desktop app. That approval now freezes every
+eligible item in the visible overnight lanes, not only the immediate heads. A
+detached coordinator opens approved successors at their not-before offsets
+after exact provider evidence closes the previous item. It never invents
+replacement work or retries an ambiguous start. Hermes, Codex, and Claude
+records still appear in one Morning Review while provider completion remains
+separate from human verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -57,6 +59,7 @@ completion remains separate from human verification.
 - [Deep Codex adapter modules M15](docs/overnight-m15.md)
 - [One-approval night portfolio M16](docs/overnight-m16.md)
 - [Bounded Claude session forks M17](docs/overnight-m17.md)
+- [Durable full-night coordinator M18](docs/overnight-m18.md)
 
 The app currently:
 
@@ -85,8 +88,21 @@ The app currently:
   for every route
 - builds parallel lanes per subscription while keeping work inside each shared
   Capacity Pool sequential and within the sleep window
-- freezes the immediately runnable head of every independent lane into one
-  exact, expiring portfolio approval and returns itemized provider receipts
+- freezes every contiguous, execution-ready item in each visible independent
+  lane into one exact, expiring portfolio approval
+- persists that fixed schedule before launch, then runs a detached,
+  idle-sleep-resistant coordinator after the desktop window closes
+- treats each approved offset as a not-before time, allows only one active item
+  per Capacity Pool, and starts a successor only after terminal evidence for
+  every earlier item in that lane
+- re-runs the selected provider's complete preflight before every scheduled
+  start, skips work whose full accepted budget no longer fits before wake time,
+  and never substitutes a different project
+- stops later work in a lane when provider evidence is ambiguous, while an
+  explicitly blocked predecessor may release the next independent approved
+  project
+- exposes the durable coordinator plan and item states in the Overnight screen
+  while provider-specific ledgers remain authoritative for actual execution
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt
@@ -134,9 +150,9 @@ The app currently:
 
 The Overnight screen never dispatches before explicit approval. Eligible
 Hermes proposals plus provenance-checked existing Codex and Claude sessions
-have individual start controls, while immediately runnable independent lanes
-can be accepted as one frozen portfolio. The operator must review the effects
-and type the exact confirmation phrase. New Codex or Claude sessions plus
+have individual start controls, while the visible eligible lane schedule can
+be accepted as one frozen full-night portfolio. The operator must review every
+item and type the exact confirmation phrase. New Codex or Claude sessions plus
 native Grok, Cursor, and OpenClaw dispatch remain disabled until their
 guardrail contracts are equally strong. The tools that created the sessions
 remain the source of truth.

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -33,6 +34,9 @@ struct PendingApproval {
 struct RegisteredPortfolioItem {
     draft_id: String,
     capacity_pool: CapacityPool,
+    lane_index: usize,
+    slot_index: usize,
+    starts_after_hours: f64,
     time_budget_hours: f64,
 }
 
@@ -45,10 +49,31 @@ struct PendingPortfolioApproval {
     expires_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovedDispatch {
     pub draft: NightRunDraft,
     pub preflight: DispatchPreflight,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovedPortfolioItem {
+    pub dispatch: ApprovedDispatch,
+    pub starts_after_hours: f64,
+    pub time_budget_hours: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovedPortfolioLane {
+    pub capacity_pool: CapacityPool,
+    pub items: Vec<ApprovedPortfolioItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovedPortfolio {
+    pub idempotency_key: String,
+    pub approved_at: DateTime<Utc>,
+    pub deadline_at: DateTime<Utc>,
+    pub lanes: Vec<ApprovedPortfolioLane>,
 }
 
 #[derive(Debug, Default)]
@@ -58,6 +83,7 @@ pub struct ApprovalRegistry {
     proposals: HashMap<String, RegisteredProposal>,
     pending: HashMap<String, PendingApproval>,
     portfolio_items: Vec<RegisteredPortfolioItem>,
+    sleep_hours: f64,
     deferred_count: usize,
     pending_portfolios: HashMap<String, PendingPortfolioApproval>,
 }
@@ -88,12 +114,14 @@ impl ApprovalRegistry {
         drafts: &[NightRunDraft],
         preflights: &[DispatchPreflight],
         schedule: &NightSchedule,
+        sleep_hours: f64,
         now: DateTime<Utc>,
     ) {
         self.generation = self.generation.saturating_add(1);
         self.proposals.clear();
         self.pending.clear();
         self.portfolio_items.clear();
+        self.sleep_hours = sleep_hours;
         self.deferred_count = 0;
         self.pending_portfolios.clear();
         let expires_at = now + Duration::minutes(PROPOSAL_TTL_MINUTES);
@@ -122,30 +150,33 @@ impl ApprovalRegistry {
             );
         }
 
+        let mut approved_lane_index = 0;
         for lane in &schedule.lanes {
-            self.deferred_count = self
-                .deferred_count
-                .saturating_add(lane.slots.len().saturating_sub(1));
-            let Some(slot) = lane.slots.first() else {
-                continue;
-            };
-            if slot.starts_after_hours.abs() > f64::EPSILON {
-                self.deferred_count = self.deferred_count.saturating_add(1);
-                continue;
+            let lane_start = self.portfolio_items.len();
+            for (slot_index, slot) in lane.slots.iter().enumerate() {
+                let Some(draft) = drafts.iter().find(|draft| {
+                    draft.candidate_rank == slot.candidate_rank && draft.route_id == slot.route_id
+                }) else {
+                    break;
+                };
+                if !self.proposals.contains_key(&draft.id) {
+                    break;
+                }
+                if slot_index > 0 || slot.starts_after_hours > f64::EPSILON {
+                    self.deferred_count = self.deferred_count.saturating_add(1);
+                }
+                self.portfolio_items.push(RegisteredPortfolioItem {
+                    draft_id: draft.id.clone(),
+                    capacity_pool: lane.capacity_pool,
+                    lane_index: approved_lane_index,
+                    slot_index,
+                    starts_after_hours: slot.starts_after_hours,
+                    time_budget_hours: slot.time_budget_hours,
+                });
             }
-            let Some(draft) = drafts.iter().find(|draft| {
-                draft.candidate_rank == slot.candidate_rank && draft.route_id == slot.route_id
-            }) else {
-                continue;
-            };
-            if !self.proposals.contains_key(&draft.id) {
-                continue;
+            if self.portfolio_items.len() > lane_start {
+                approved_lane_index += 1;
             }
-            self.portfolio_items.push(RegisteredPortfolioItem {
-                draft_id: draft.id.clone(),
-                capacity_pool: lane.capacity_pool,
-                time_budget_hours: slot.time_budget_hours,
-            });
         }
     }
 
@@ -287,6 +318,7 @@ impl ApprovalRegistry {
 
         let mut hasher = Sha256::new();
         hasher.update(format!("generation:{}\n", self.generation));
+        hasher.update(format!("sleep-hours:{:.3}\n", self.sleep_hours));
         let mut items = Vec::with_capacity(self.portfolio_items.len());
         for item in &self.portfolio_items {
             let proposal = self
@@ -307,6 +339,9 @@ impl ApprovalRegistry {
             hasher.update(proposal.preflight.idempotency_key.as_bytes());
             hasher.update(b"\n");
             hasher.update(format!("{:?}\n", item.capacity_pool).as_bytes());
+            hasher.update(format!("{}:{}\n", item.lane_index, item.slot_index).as_bytes());
+            hasher.update(format!("{:.3}\n", item.starts_after_hours).as_bytes());
+            hasher.update(format!("{:.3}\n", item.time_budget_hours).as_bytes());
             items.push(PortfolioApprovalItem {
                 draft_id: item.draft_id.clone(),
                 idempotency_key: proposal.preflight.idempotency_key.clone(),
@@ -315,6 +350,7 @@ impl ApprovalRegistry {
                 workspace: proposal.draft.workspace.clone(),
                 surface: proposal.preflight.surface,
                 capacity_pool: item.capacity_pool,
+                starts_after_hours: item.starts_after_hours,
                 time_budget_hours: item.time_budget_hours,
             });
         }
@@ -328,7 +364,7 @@ impl ApprovalRegistry {
             self.sequence,
             &digest[..12]
         );
-        let confirmation_phrase = format!("오늘 밤 {}개 시작 승인", items.len());
+        let confirmation_phrase = format!("오늘 밤 {}개 예약 승인", items.len());
         let expires_at = now + Duration::minutes(CHALLENGE_TTL_MINUTES);
         self.pending_portfolios.insert(
             id.clone(),
@@ -349,9 +385,9 @@ impl ApprovalRegistry {
             confirmation_phrase,
             expires_at: expires_at.to_rfc3339(),
             warning: concat!(
-                "확인하면 위에 고정된 각 구독 lane의 첫 작업만 시작합니다. ",
+                "확인하면 위에 고정된 모든 lane과 순서를 이번 수면 시간 동안 실행합니다. ",
                 "프로젝트 파일과 연결된 구독이 사용될 수 있습니다. ",
-                "몇 시간 뒤 슬롯은 아직 자동 시작하지 않습니다."
+                "새 작업을 추가하거나 대체하지 않으며 각 지연 작업은 시작 직전에 다시 점검합니다."
             )
             .to_owned(),
         })
@@ -363,7 +399,7 @@ impl ApprovalRegistry {
         idempotency_key: &str,
         confirmation_phrase: &str,
         now: DateTime<Utc>,
-    ) -> Result<Vec<ApprovedDispatch>, ApprovalError> {
+    ) -> Result<ApprovedPortfolio, ApprovalError> {
         let pending = self
             .pending_portfolios
             .get(approval_id)
@@ -384,19 +420,38 @@ impl ApprovalRegistry {
             return Err(ApprovalError::ConfirmationMismatch);
         }
 
-        let mut approved = Vec::with_capacity(pending.draft_ids.len());
-        for draft_id in &pending.draft_ids {
+        let mut lanes = Vec::<ApprovedPortfolioLane>::new();
+        for item in &self.portfolio_items {
+            if !pending.draft_ids.contains(&item.draft_id) {
+                continue;
+            }
             let proposal = self
                 .proposals
-                .get(draft_id)
+                .get(&item.draft_id)
                 .cloned()
                 .ok_or(ApprovalError::MissingProposal)?;
             if proposal.expires_at <= now {
                 return Err(ApprovalError::ProposalExpired);
             }
-            approved.push(ApprovedDispatch {
-                draft: proposal.draft,
-                preflight: proposal.preflight,
+            if lanes.len() <= item.lane_index {
+                lanes.push(ApprovedPortfolioLane {
+                    capacity_pool: item.capacity_pool,
+                    items: Vec::new(),
+                });
+            }
+            let lane = lanes
+                .get_mut(item.lane_index)
+                .ok_or(ApprovalError::MissingProposal)?;
+            if lane.capacity_pool != item.capacity_pool || lane.items.len() != item.slot_index {
+                return Err(ApprovalError::FingerprintMismatch);
+            }
+            lane.items.push(ApprovedPortfolioItem {
+                dispatch: ApprovedDispatch {
+                    draft: proposal.draft,
+                    preflight: proposal.preflight,
+                },
+                starts_after_hours: item.starts_after_hours,
+                time_budget_hours: item.time_budget_hours,
             });
         }
 
@@ -405,7 +460,13 @@ impl ApprovalRegistry {
             self.pending.retain(|_, item| item.draft_id != *draft_id);
             self.proposals.remove(draft_id);
         }
-        Ok(approved)
+        let sleep_seconds = (self.sleep_hours * 3_600.0).round() as i64;
+        Ok(ApprovedPortfolio {
+            idempotency_key: pending.idempotency_key,
+            approved_at: now,
+            deadline_at: now + Duration::seconds(sleep_seconds),
+            lanes,
+        })
     }
 
     pub fn cancel(&mut self, approval_id: &str) {
@@ -504,6 +565,7 @@ mod tests {
                 parallel: false,
                 methodology: "test".to_owned(),
             },
+            7.0,
             now,
         );
         registry
@@ -554,6 +616,7 @@ mod tests {
                 parallel: false,
                 methodology: "replacement".to_owned(),
             },
+            7.0,
             now + Duration::seconds(1),
         );
 
@@ -618,6 +681,7 @@ mod tests {
                 parallel: false,
                 methodology: "test".to_owned(),
             },
+            7.0,
             now,
         );
 
@@ -641,6 +705,7 @@ mod tests {
                 parallel: false,
                 methodology: "test".to_owned(),
             },
+            7.0,
             now,
         );
 
@@ -651,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn portfolio_challenge_freezes_only_immediate_lane_heads() {
+    fn portfolio_challenge_freezes_every_visible_lane_slot() {
         let now = Utc::now();
         let mut second = draft();
         second.id = "night:2:beta:codex:existing".to_owned();
@@ -713,15 +778,18 @@ mod tests {
             &[draft(), second, third],
             &[preflight(), second_preflight, third_preflight],
             &schedule,
+            7.0,
             now,
         );
 
         let challenge = registry.begin_portfolio(now).expect("portfolio challenge");
-        assert_eq!(challenge.items.len(), 2);
+        assert_eq!(challenge.items.len(), 3);
         assert_eq!(challenge.deferred_count, 1);
         assert_eq!(challenge.items[0].project, "alpha");
-        assert_eq!(challenge.items[1].project, "beta");
-        assert_eq!(challenge.confirmation_phrase, "오늘 밤 2개 시작 승인");
+        assert_eq!(challenge.items[1].project, "gamma");
+        assert_eq!(challenge.items[1].starts_after_hours, 2.0);
+        assert_eq!(challenge.items[2].project, "beta");
+        assert_eq!(challenge.confirmation_phrase, "오늘 밤 3개 예약 승인");
     }
 
     #[test]
@@ -748,7 +816,9 @@ mod tests {
                 now,
             )
             .expect("approved portfolio");
-        assert_eq!(approved.len(), 1);
+        assert_eq!(approved.lanes.len(), 1);
+        assert_eq!(approved.lanes[0].items.len(), 1);
+        assert_eq!(approved.deadline_at, now + Duration::hours(7));
         assert!(matches!(
             registry.consume_portfolio(
                 &challenge.id,
@@ -801,6 +871,7 @@ mod tests {
             &[draft(), second],
             &[blocked_head, ready_second],
             &schedule,
+            7.0,
             now,
         );
 

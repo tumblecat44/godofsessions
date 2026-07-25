@@ -161,7 +161,7 @@ pub struct ResourceBudget {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapacityPool {
     ClaudeSubscription,
@@ -172,7 +172,7 @@ pub enum CapacityPool {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RouteCapability {
     ResumeSession,
@@ -182,7 +182,7 @@ pub enum RouteCapability {
     NativeSandbox,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdapterReadiness {
     ContractReady,
@@ -190,7 +190,7 @@ pub enum AdapterReadiness {
     ObserveOnly,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRoute {
     pub id: String,
     pub surface: Provider,
@@ -226,27 +226,27 @@ pub enum RecommendationConfidence {
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunDraftFormat {
     HermesGoal,
     StructuredPrompt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunMode {
     ResumeExisting,
     NewSession,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionProfile {
     WorkspaceWrite,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoalContract {
     pub outcome: String,
     pub verification: String,
@@ -255,7 +255,7 @@ pub struct GoalContract {
     pub stop_when: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NightRunDraft {
     pub id: String,
     pub candidate_rank: usize,
@@ -299,7 +299,7 @@ pub struct NightSchedule {
     pub methodology: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreflightLevel {
     Pass,
@@ -307,14 +307,14 @@ pub enum PreflightLevel {
     Block,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchPreflightState {
     ReadyForApproval,
     Blocked,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreflightCheck {
     pub key: String,
     pub level: PreflightLevel,
@@ -322,7 +322,7 @@ pub struct PreflightCheck {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatchCommandPreview {
     pub step: String,
     pub program: String,
@@ -331,7 +331,7 @@ pub struct DispatchCommandPreview {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatchProtocolPreview {
     pub step: String,
     pub method: String,
@@ -340,7 +340,7 @@ pub struct DispatchProtocolPreview {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatchPreflight {
     pub draft_id: String,
     pub state: DispatchPreflightState,
@@ -382,6 +382,7 @@ pub struct PortfolioApprovalItem {
     pub workspace: String,
     pub surface: Provider,
     pub capacity_pool: CapacityPool,
+    pub starts_after_hours: f64,
     pub time_budget_hours: f64,
 }
 
@@ -396,7 +397,7 @@ pub struct PortfolioApprovalChallenge {
     pub warning: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchReceiptState {
     Started,
@@ -406,7 +407,7 @@ pub enum DispatchReceiptState {
     Uncertain,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatchReceipt {
     pub received_at: String,
     pub draft_id: String,
@@ -426,7 +427,7 @@ pub struct DispatchReceipt {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortfolioDispatchOutcome {
     pub draft_id: String,
     pub project: String,
@@ -435,12 +436,53 @@ pub struct PortfolioDispatchOutcome {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortfolioDispatchResult {
     pub started_at: String,
     pub approval_id: String,
     pub outcomes: Vec<PortfolioDispatchOutcome>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightPlanItemSummary {
+    pub draft_id: String,
+    pub project: String,
+    pub surface: Provider,
+    pub capacity_pool: CapacityPool,
+    pub state: String,
+    pub starts_after_hours: f64,
+    pub time_budget_hours: f64,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub idempotency_key: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightPlanLaneSummary {
+    pub capacity_pool: CapacityPool,
+    pub items: Vec<NightPlanItemSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightPlanSummary {
+    pub idempotency_key: String,
+    pub state: String,
+    pub approved_at: String,
+    pub deadline_at: String,
+    pub worker_pid: Option<u32>,
+    pub lanes: Vec<NightPlanLaneSummary>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightPlanHistory {
+    pub generated_at: String,
+    pub plans: Vec<NightPlanSummary>,
+    pub warnings: Vec<String>,
+    pub read_only: bool,
+    pub methodology: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
