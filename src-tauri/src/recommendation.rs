@@ -31,6 +31,7 @@ struct ProviderChoice<'a> {
     reason: String,
     score: f64,
     capacity_ready_after_hours: f64,
+    execution_ready: bool,
 }
 
 #[cfg(test)]
@@ -191,7 +192,14 @@ fn build_overnight_plan_inner(
             continue;
         };
 
-        let provider_choice = choose_provider(sessions, latest, &budgets, now, sleep_hours);
+        let provider_choice = choose_provider(
+            sessions,
+            latest,
+            &budgets,
+            route_inventory,
+            now,
+            sleep_hours,
+        );
         let provider = provider_choice.provider;
         let provider_session = provider_choice.resumable_session;
         let title = latest
@@ -230,9 +238,8 @@ fn build_overnight_plan_inner(
             .collect::<std::collections::HashSet<_>>()
             .len();
         let resume_available = provider_session.is_some();
-        let route = select_execution_route(provider, resume_available, route_inventory);
-        let resume_existing =
-            resume_available && route.is_none_or(|route| route.surface == provider);
+        let (route, resume_existing, execution_is_ready) =
+            assess_execution_route(provider, resume_available, route_inventory);
         let (execution_route_id, execution_surface, capacity_pool, route_reason) =
             route_selection(provider, resume_existing, route);
         let project_score = (30.0 - latest_age_hours.min(24.0) * 1.25)
@@ -248,9 +255,7 @@ fn build_overnight_plan_inner(
         let budget_is_ready = budgets
             .iter()
             .any(|budget| budget.provider == provider && budget.state == ResourceState::Ready);
-        let execution_is_ready = route.is_none_or(|route| {
-            route.state == ResourceState::Ready && route_is_dispatchable(route, resume_existing)
-        });
+        debug_assert_eq!(execution_is_ready, provider_choice.execution_ready);
         let confidence = if sessions.len() >= 2
             && latest.title.is_some()
             && latest.cwd.is_some()
@@ -597,6 +602,27 @@ fn select_execution_route(
         })
 }
 
+fn assess_execution_route(
+    provider: Provider,
+    resume_available: bool,
+    inventory: Option<&ExecutionRouteInventory>,
+) -> (Option<&ExecutionRoute>, bool, bool) {
+    let route = select_execution_route(provider, resume_available, inventory);
+    let resume_existing = resume_available
+        && match inventory {
+            Some(_) => route.is_some_and(|route| route.surface == provider),
+            None => true,
+        };
+    let ready = match (inventory, route) {
+        (None, _) => true,
+        (Some(_), Some(route)) => {
+            route.state == ResourceState::Ready && route_is_dispatchable(route, resume_existing)
+        }
+        (Some(_), None) => false,
+    };
+    (route, resume_existing, ready)
+}
+
 fn route_is_dispatchable(route: &ExecutionRoute, resume_available: bool) -> bool {
     if route.adapter_readiness != crate::model::AdapterReadiness::ContractReady {
         return false;
@@ -713,11 +739,12 @@ fn choose_provider<'a>(
     sessions: &[&'a Session],
     latest: &'a Session,
     budgets: &[ResourceBudget],
+    route_inventory: Option<&ExecutionRouteInventory>,
     now: DateTime<Utc>,
     sleep_hours: f64,
 ) -> ProviderChoice<'a> {
     let execution_providers = [Provider::Claude, Provider::Codex, Provider::Grok];
-    execution_providers
+    let choices = execution_providers
         .into_iter()
         .map(|provider| {
             let provider_sessions = sessions
@@ -750,8 +777,11 @@ fn choose_provider<'a>(
                 - budget_penalty
                 - scarcity_penalty
                 - capacity_ready_after_hours * 3.0;
+            let resume_available = resumable.is_some();
+            let (_, _, execution_ready) =
+                assess_execution_route(provider, resume_available, route_inventory);
             let provider_name = provider_display_name(provider);
-            let reason = if capacity_ready_after_hours > 0.0 {
+            let mut reason = if capacity_ready_after_hours > 0.0 {
                 format!(
                     "{provider_name}의 현재 제한 창은 소진됐지만 약 {} 뒤 초기화됩니다. 그 시각에 사용량을 다시 확인한 뒤 시작할 수 있습니다.",
                     duration_label(capacity_ready_after_hours)
@@ -774,23 +804,28 @@ fn choose_provider<'a>(
                 ),
                 }
             };
+            if route_inventory.is_some() && execution_ready {
+                reason.push_str(" 현재 승인 가능한 실행 경로도 확인했습니다.");
+            }
             ProviderChoice {
                 provider,
                 resumable_session: resumable,
                 reason,
                 score,
                 capacity_ready_after_hours,
+                execution_ready,
             }
         })
+        .collect::<Vec<_>>();
+    let has_writable_choice =
+        route_inventory.is_some() && choices.iter().any(|choice| choice.execution_ready);
+    choices
+        .into_iter()
+        .filter(|choice| !has_writable_choice || choice.execution_ready)
         .max_by(|left, right| {
             left.score
                 .total_cmp(&right.score)
-                .then_with(|| {
-                    right
-                        .provider
-                        .as_str()
-                        .cmp(left.provider.as_str())
-                })
+                .then_with(|| right.provider.as_str().cmp(left.provider.as_str()))
         })
         .expect("execution provider list is not empty")
 }
@@ -1141,6 +1176,75 @@ mod tests {
             plan.run_drafts[0].run_mode,
             crate::model::RunMode::NewSession
         );
+    }
+
+    #[test]
+    fn provider_choice_prefers_a_writable_route_over_more_available_quota() {
+        let snapshot = snapshot(vec![
+            session(
+                Provider::Grok,
+                "grok-session",
+                "alpha",
+                "Continue the overnight implementation",
+                SessionStatus::Idle,
+                "2026-07-24T21:50:00Z",
+            ),
+            session(
+                Provider::Codex,
+                "codex-session",
+                "alpha",
+                "Implement and verify the next milestone",
+                SessionStatus::Idle,
+                "2026-07-24T20:00:00Z",
+            ),
+        ]);
+        let inventory = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![
+                route(
+                    "grok:native",
+                    Provider::Grok,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "codex:native",
+                    Provider::Codex,
+                    Provider::Codex,
+                    ResourceState::Ready,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context_and_routes(
+            &snapshot,
+            vec![budget(Provider::Grok, 0.0), budget(Provider::Codex, 65.0)],
+            &ContextIndex {
+                generated_at: "2026-07-24T22:00:00Z".to_owned(),
+                window_hours: 24,
+                projects: Vec::new(),
+                warnings: Vec::new(),
+                ephemeral: true,
+                methodology: "test".to_owned(),
+            },
+            &inventory,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let candidate = &plan.candidates[0];
+
+        assert_eq!(candidate.provider, Provider::Codex);
+        assert_eq!(candidate.execution_route_id, "codex:native");
+        assert_eq!(candidate.execution_surface, Provider::Codex);
+        assert!(candidate.resume_existing);
+        assert!(candidate
+            .provider_reason
+            .contains("승인 가능한 실행 경로도 확인"));
+        assert!(plan.run_drafts[0].dispatch_supported);
     }
 
     #[test]

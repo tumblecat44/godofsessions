@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The billable-capacity identity M38 desktop slice is working.
+The writable-provider choice M39 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -104,6 +104,10 @@ Hermes routes now derive readiness from the resource they actually bill.
 Separate OpenAI API credits cannot borrow a healthy Codex subscription
 observation, and recommendation confidence requires the exact selected route
 and run shape to be approval-capable.
+Provider selection now treats that approval-capable route as a prerequisite
+whenever at least one runnable alternative exists. A full but unwritable Grok
+quota can no longer beat a smaller Codex budget whose existing task can
+actually be resumed, and a missing route is no longer mistaken for readiness.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -146,6 +150,7 @@ and run shape to be approval-capable.
 - [Selected route risks M36](docs/overnight-m36.md)
 - [Bounded external-workspace observation M37](docs/overnight-m37.md)
 - [Billable-capacity identity M38](docs/overnight-m38.md)
+- [Writable-provider choice M39](docs/overnight-m39.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:
