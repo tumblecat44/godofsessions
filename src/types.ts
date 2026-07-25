@@ -153,7 +153,12 @@ export interface OvernightPlan {
 }
 
 export type WorkItemOrigin = "inferred_session" | "hermes_kanban";
-export type WorkItemState = "needs_me" | "ready" | "running" | "review";
+export type WorkItemState =
+  | "needs_me"
+  | "ready"
+  | "waiting"
+  | "running"
+  | "review";
 export type HumanGateKind =
   | "decision"
   | "external_action"
@@ -188,7 +193,37 @@ export interface ControlBoard {
   methodology: string;
 }
 
+export type ContextRole = "user" | "assistant";
+
+export interface ContextExcerpt {
+  provider: Provider;
+  session_id: string;
+  role: ContextRole;
+  text: string;
+  timestamp: string | null;
+}
+
+export interface ProjectContextBrief {
+  project: string;
+  workspace: string | null;
+  session_ids: string[];
+  providers: Provider[];
+  excerpts: ContextExcerpt[];
+  excerpt_count: number;
+  truncated: boolean;
+}
+
+export interface ContextIndex {
+  generated_at: string;
+  window_hours: number;
+  projects: ProjectContextBrief[];
+  warnings: string[];
+  ephemeral: boolean;
+  methodology: string;
+}
+
 export interface WorkspaceOverview {
   snapshot: Snapshot;
   control_board: ControlBoard;
+  context_index: ContextIndex;
 }

@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::model::{
-    Capability, ExcludedProject, OvernightCandidate, OvernightPlan, Provider,
-    RecommendationConfidence, ResourceBudget, ResourceState, Session, SessionStatus, Snapshot,
+    Capability, ContextIndex, ContextRole, ExcludedProject, OvernightCandidate, OvernightPlan,
+    ProjectContextBrief, Provider, RecommendationConfidence, ResourceBudget, ResourceState,
+    Session, SessionStatus, Snapshot,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +37,26 @@ pub fn build_overnight_plan(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
+    build_overnight_plan_inner(snapshot, budgets, None, sleep_hours, now)
+}
+
+pub fn build_overnight_plan_with_context(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: &ContextIndex,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
+    build_overnight_plan_inner(snapshot, budgets, Some(context), sleep_hours, now)
+}
+
+fn build_overnight_plan_inner(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: Option<&ContextIndex>,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
     let sleep_hours = sleep_hours.value();
     let cutoff = now - Duration::hours(24);
     let recent_sessions = snapshot
@@ -62,9 +83,14 @@ pub fn build_overnight_plan(
 
     let mut candidates = Vec::new();
     let mut exclusions = Vec::new();
-    for sessions in projects.values_mut() {
+    for (project_key, sessions) in projects.iter_mut() {
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
         let project = project_name(sessions);
+        let context_brief = context.and_then(|context| {
+            context.projects.iter().find(|brief| {
+                brief.workspace.as_deref() == Some(project_key.as_str()) || brief.project == project
+            })
+        });
 
         if sessions.iter().any(|session| {
             matches!(
@@ -127,10 +153,12 @@ pub fn build_overnight_plan(
         let failed = sessions
             .iter()
             .any(|session| session.status == SessionStatus::Failed);
+        let context_goal = context_brief.and_then(latest_meaningful_user_goal);
+        let goal_subject = context_goal.unwrap_or(title);
         let goal = if failed {
-            format!("실패 원인을 해결하고 검증까지 완료: {title}")
+            format!("실패 원인을 해결하고 검증까지 완료: {goal_subject}")
         } else {
-            format!("{title} — 검증 가능한 결과까지 진행")
+            format!("{goal_subject} — 검증 가능한 결과까지 진행")
         };
         let latest_age_hours = latest
             .updated_at
@@ -149,7 +177,8 @@ pub fn build_overnight_plan(
             + (distinct_providers.min(3) as f64 * 4.0)
             + if latest.title.is_some() { 10.0 } else { 0.0 }
             + if latest.cwd.is_some() { 10.0 } else { 0.0 }
-            + if failed { 6.0 } else { 0.0 };
+            + if failed { 6.0 } else { 0.0 }
+            + if context_goal.is_some() { 12.0 } else { 0.0 };
         let score = (project_score + provider_choice.score * 0.35).clamp(0.0, 100.0);
         let budget_is_ready = budgets
             .iter()
@@ -167,8 +196,14 @@ pub fn build_overnight_plan(
             RecommendationConfidence::Low
         };
 
-        let mut risks =
-            vec!["대화 본문이 아닌 로컬 메타데이터만으로 목표를 추론했습니다.".to_owned()];
+        let mut risks = if context_goal.is_some() {
+            vec![
+                "오늘 대화의 제한된 발췌만 사용했으므로 오래된 결정이나 생략된 중간 맥락이 있을 수 있습니다."
+                    .to_owned(),
+            ]
+        } else {
+            vec!["대화 본문이 아닌 로컬 메타데이터만으로 목표를 추론했습니다.".to_owned()]
+        };
         if latest_age_hours > 8.0 {
             risks.push("마지막 활동이 오래되어 현재 목표가 달라졌을 수 있습니다.".to_owned());
         }
@@ -183,6 +218,26 @@ pub fn build_overnight_plan(
             .cwd
             .clone()
             .unwrap_or_else(|| latest.repository.clone().unwrap_or_default());
+        let mut evidence = vec![
+            format!("최근 24시간에 {project} 관련 세션 {}개", sessions.len()),
+            format!(
+                "가장 최근 근거: “{title}” · {}",
+                relative_age_label(latest_age_hours)
+            ),
+            format!(
+                "{}개 도구에서 같은 프로젝트 맥락이 발견됨",
+                distinct_providers
+            ),
+        ];
+        if let Some(brief) = context_brief {
+            evidence.push(format!(
+                "오늘 대화 {}개 중 사용자·응답 발췌 {}개를 확인함{}",
+                brief.excerpt_count,
+                brief.excerpts.len(),
+                if brief.truncated { " (bookends)" } else { "" }
+            ));
+        }
+
         candidates.push(OvernightCandidate {
             rank: 0,
             project: project.clone(),
@@ -193,17 +248,7 @@ pub fn build_overnight_plan(
             resume_existing,
             score: round_one(score),
             confidence,
-            evidence: vec![
-                format!("최근 24시간에 {project} 관련 세션 {}개", sessions.len()),
-                format!(
-                    "가장 최근 근거: “{title}” · {}",
-                    relative_age_label(latest_age_hours)
-                ),
-                format!(
-                    "{}개 도구에서 같은 프로젝트 맥락이 발견됨",
-                    distinct_providers
-                ),
-            ],
+            evidence,
             source_session_ids: sessions
                 .iter()
                 .map(|session| format!("{}:{}", session.provider.as_str(), session.native_id))
@@ -256,9 +301,26 @@ pub fn build_overnight_plan(
         exclusions,
         read_only: true,
         methodology:
-            "최근성·반복 활동·구체적 제목·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
+            "최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
                 .to_owned(),
     }
+}
+
+fn latest_meaningful_user_goal(brief: &ProjectContextBrief) -> Option<&str> {
+    brief
+        .excerpts
+        .iter()
+        .rev()
+        .find(|excerpt| {
+            excerpt.role == ContextRole::User
+                && excerpt
+                    .text
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .count()
+                    >= 12
+        })
+        .map(|excerpt| excerpt.text.as_str())
 }
 
 fn project_key(session: &Session) -> Option<String> {
@@ -404,8 +466,9 @@ fn floor_half(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        Capability, NativeKind, Provider, ResourceBudget, ResourceState, Session, SessionSignal,
-        SessionStatus, Snapshot, StatusConfidence, UsageWindow,
+        Capability, ContextExcerpt, ContextIndex, ContextRole, NativeKind, ProjectContextBrief,
+        Provider, ResourceBudget, ResourceState, Session, SessionSignal, SessionStatus, Snapshot,
+        StatusConfidence, UsageWindow,
     };
 
     use super::*;
@@ -716,5 +779,70 @@ mod tests {
 
         assert_eq!(plan.candidates[0].estimated_hours, 1.0);
         assert!(plan.candidates[0].estimated_hours <= plan.sleep_hours);
+    }
+
+    #[test]
+    fn today_context_supplies_the_goal_instead_of_session_title_guessing() {
+        let snapshot = snapshot(vec![session(
+            Provider::Codex,
+            "alpha",
+            "alpha",
+            "Generic session title",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "alpha".to_owned(),
+                workspace: Some("/work/alpha".to_owned()),
+                session_ids: vec!["codex:alpha".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:alpha".to_owned(),
+                        role: ContextRole::User,
+                        text: "인증 리팩터링을 끝내고 회귀 테스트까지 돌려줘".to_owned(),
+                        timestamp: Some("2026-07-24T21:20:00Z".to_owned()),
+                    },
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:alpha".to_owned(),
+                        role: ContextRole::Assistant,
+                        text: "먼저 경계를 확인하겠습니다.".to_owned(),
+                        timestamp: Some("2026-07-24T21:21:00Z".to_owned()),
+                    },
+                ],
+                excerpt_count: 2,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates[0]
+            .goal
+            .contains("인증 리팩터링을 끝내고 회귀 테스트까지"));
+        assert!(plan.candidates[0]
+            .evidence
+            .iter()
+            .any(|evidence| evidence.contains("오늘 대화")));
+        assert!(plan.candidates[0]
+            .risks
+            .iter()
+            .all(|risk| !risk.contains("대화 본문이 아닌")));
     }
 }

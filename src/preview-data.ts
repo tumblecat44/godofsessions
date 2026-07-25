@@ -116,7 +116,7 @@ export const previewSnapshot: Snapshot = {
   providers,
   warnings: [],
   privacy_note:
-    "대화 본문은 읽지 않습니다. 공급자 소유 파일과 데이터베이스는 읽기 전용입니다.",
+    "원본은 읽기 전용입니다. 관제판은 최근 24시간의 사용자·응답 텍스트를 메모리에서 제한적으로 읽고 저장하지 않습니다.",
 };
 
 export const previewControlBoard: ControlBoard = {
@@ -144,7 +144,12 @@ export const previewControlBoard: ControlBoard = {
       human_gate: "external_action",
       human_gate_reason:
         "외부 전송·배포·삭제·결제 가능성이 있어 unattended 실행 전에 확인해야 합니다.",
-      evidence: ["Hermes Kanban · default 보드", "담당 프로필: worker", "우선순위: 1"],
+      evidence: [
+        "Hermes Kanban · default 보드",
+        "원본 작업 ID: t_send",
+        "담당 프로필: worker",
+        "우선순위: 1",
+      ],
     },
     {
       id: "project:/Users/you/projects/godofsessions",
@@ -221,6 +226,68 @@ export const previewControlBoard: ControlBoard = {
 export const previewWorkspaceOverview: WorkspaceOverview = {
   snapshot: previewSnapshot,
   control_board: previewControlBoard,
+  context_index: {
+    generated_at: new Date().toISOString(),
+    window_hours: 24,
+    projects: [
+      {
+        project: "godofsessions",
+        workspace: "/Users/you/projects/godofsessions",
+        session_ids: ["codex:co2", "hermes:h1"],
+        providers: ["codex", "hermes"],
+        excerpt_count: 8,
+        truncated: true,
+        excerpts: [
+          {
+            provider: "codex",
+            session_id: "codex:co2",
+            role: "user",
+            text: "자기 전에 overnight로 돌릴 가장 ROI 높은 프로젝트와 공급자를 대신 골라주는 에이전트가 필요해.",
+            timestamp: new Date(now - 6 * 60 * 60_000).toISOString(),
+          },
+          {
+            provider: "codex",
+            session_id: "codex:co2",
+            role: "assistant",
+            text: "사용량, 최근 프로젝트 맥락, 사람 확인이 필요한 작업을 함께 보도록 설계하겠습니다.",
+            timestamp: new Date(now - 5.8 * 60 * 60_000).toISOString(),
+          },
+          {
+            provider: "hermes",
+            session_id: "hermes:h1",
+            role: "user",
+            text: "Hermes처럼 기억을 찾되 모든 공급자 세션을 프로젝트 단위로 이해해야 해.",
+            timestamp: new Date(now - 4.2 * 60 * 60_000).toISOString(),
+          },
+          {
+            provider: "hermes",
+            session_id: "hermes:h1",
+            role: "assistant",
+            text: "원본을 복제하지 않고 첫 맥락과 최신 결론을 임시 발췌로 묶을 수 있습니다.",
+            timestamp: new Date(now - 4 * 60 * 60_000).toISOString(),
+          },
+          {
+            provider: "codex",
+            session_id: "codex:co2",
+            role: "user",
+            text: "외부 전송 같은 일은 밤에 자동으로 돌리면 안 돼.",
+            timestamp: new Date(now - 70 * 60_000).toISOString(),
+          },
+          {
+            provider: "codex",
+            session_id: "codex:co2",
+            role: "assistant",
+            text: "사람 확인 게이트와 읽기 전용 관제판으로 먼저 검증하겠습니다.",
+            timestamp: new Date(now - 65 * 60_000).toISOString(),
+          },
+        ],
+      },
+    ],
+    warnings: [],
+    ephemeral: true,
+    methodology:
+      "오늘의 사용자·응답 텍스트만 메모리에서 제한적으로 읽으며 별도 데이터베이스에 저장하지 않습니다.",
+  },
 };
 
 export const previewOvernightPlan: OvernightPlan = {

@@ -221,6 +221,7 @@ pub enum WorkItemOrigin {
 pub enum WorkItemState {
     NeedsMe,
     Ready,
+    Waiting,
     Running,
     Review,
 }
@@ -264,10 +265,48 @@ pub struct ControlBoard {
     pub methodology: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextExcerpt {
+    pub provider: Provider,
+    pub session_id: String,
+    pub role: ContextRole,
+    pub text: String,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectContextBrief {
+    pub project: String,
+    pub workspace: Option<String>,
+    pub session_ids: Vec<String>,
+    pub providers: Vec<Provider>,
+    pub excerpts: Vec<ContextExcerpt>,
+    pub excerpt_count: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextIndex {
+    pub generated_at: String,
+    pub window_hours: u32,
+    pub projects: Vec<ProjectContextBrief>,
+    pub warnings: Vec<String>,
+    pub ephemeral: bool,
+    pub methodology: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceOverview {
     pub snapshot: Snapshot,
     pub control_board: ControlBoard,
+    pub context_index: ContextIndex,
 }
 
 #[derive(Debug)]

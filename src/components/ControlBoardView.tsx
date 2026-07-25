@@ -12,7 +12,9 @@ import {
 import { compactPath, providerNames, relativeTime } from "../lib/format";
 import type {
   ControlBoard,
+  ContextIndex,
   HumanGateKind,
+  ProjectContextBrief,
   WorkItem,
   WorkItemOrigin,
   WorkItemState,
@@ -21,6 +23,7 @@ import { ProviderMark } from "./ProviderMark";
 
 interface ControlBoardViewProps {
   board: ControlBoard;
+  contextIndex: ContextIndex;
   isRefreshing: boolean;
   onRefresh: () => void;
 }
@@ -42,6 +45,12 @@ const lanes: Array<{
     eyebrow: "NIGHT QUEUE",
     title: "오늘 밤 준비됨",
     description: "안전하게 이어갈 후보",
+  },
+  {
+    state: "waiting",
+    eyebrow: "PROVIDER GATE",
+    title: "대기 중",
+    description: "시간·의존성 해제 전",
   },
   {
     state: "running",
@@ -69,7 +78,45 @@ const sourceLabels: Record<WorkItemOrigin, string> = {
   hermes_kanban: "Hermes Kanban",
 };
 
-function WorkCard({ item }: { item: WorkItem }) {
+function ProjectMemory({ brief }: { brief: ProjectContextBrief }) {
+  return (
+    <details className="project-memory">
+      <summary>
+        <span>
+          <Database size={12} />
+          오늘의 대화 {brief.excerpt_count}개
+        </span>
+        <small>
+          {brief.providers.map((provider) => providerNames[provider]).join(" · ")}
+          {brief.truncated ? " · bookends" : ""}
+        </small>
+      </summary>
+      <ol>
+        {brief.excerpts.map((excerpt, index) => (
+          <li
+            key={`${excerpt.session_id}:${excerpt.timestamp ?? index}:${index}`}
+            className={`memory-excerpt memory-excerpt--${excerpt.role}`}
+          >
+            <span>{excerpt.role === "user" ? "나" : "AI"}</span>
+            <p>{excerpt.text}</p>
+            <small>{providerNames[excerpt.provider]}</small>
+          </li>
+        ))}
+      </ol>
+      <footer>
+        임시 발췌 · 시스템 지시, 도구 기록, 내부 추론 제외
+      </footer>
+    </details>
+  );
+}
+
+function WorkCard({
+  item,
+  contextBrief,
+}: {
+  item: WorkItem;
+  contextBrief: ProjectContextBrief | null;
+}) {
   return (
     <article className={`work-card work-card--${item.state}`}>
       <div className="provenance-rail">
@@ -130,6 +177,8 @@ function WorkCard({ item }: { item: WorkItem }) {
         )}
       </details>
 
+      {contextBrief && <ProjectMemory brief={contextBrief} />}
+
       <footer>
         <span>{item.updated_at ? relativeTime(item.updated_at) : "시각 불명"}</span>
         {item.model_override && <span>{item.model_override}</span>}
@@ -140,11 +189,18 @@ function WorkCard({ item }: { item: WorkItem }) {
 
 export function ControlBoardView({
   board,
+  contextIndex,
   isRefreshing,
   onRefresh,
 }: ControlBoardViewProps) {
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<WorkItemOrigin | "all">("all");
+  const briefFor = (item: WorkItem) =>
+    contextIndex.projects.find(
+      (brief) =>
+        (item.workspace && brief.workspace === item.workspace) ||
+        brief.project === item.project,
+    ) ?? null;
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return board.items.filter(
@@ -157,13 +213,20 @@ export function ControlBoardView({
             item.workspace,
             item.assignee,
             item.provider,
+            ...(
+              contextIndex.projects.find(
+                (brief) =>
+                  (item.workspace && brief.workspace === item.workspace) ||
+                  brief.project === item.project,
+              )?.excerpts ?? []
+            ).map((excerpt) => excerpt.text),
           ]
             .filter(Boolean)
             .some((value) =>
               String(value).toLocaleLowerCase().includes(normalized),
             )),
     );
-  }, [board.items, query, source]);
+  }, [board.items, contextIndex.projects, query, source]);
 
   const count = (state: WorkItemState) =>
     filtered.filter((item) => item.state === state).length;
@@ -213,6 +276,12 @@ export function ControlBoardView({
           <span>오늘 밤 준비됨</span>
           <strong>{count("ready")}</strong>
           <small>추천 엔진의 후보 풀</small>
+        </div>
+        <i aria-hidden="true" />
+        <div>
+          <span>대기 중</span>
+          <strong>{count("waiting")}</strong>
+          <small>아직 실행 불가</small>
         </div>
         <i aria-hidden="true" />
         <div>
@@ -277,6 +346,20 @@ export function ControlBoardView({
         </details>
       )}
 
+      {contextIndex.warnings.length > 0 && (
+        <details className="warning-strip board-warning context-warning">
+          <summary>
+            <Database size={14} />
+            대화 문맥 제한 {contextIndex.warnings.length}개
+          </summary>
+          <ul>
+            {contextIndex.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       <section className="control-board" aria-label="작업 관제판">
         {lanes.map((lane) => {
           const items = filtered.filter((item) => item.state === lane.state);
@@ -295,7 +378,11 @@ export function ControlBoardView({
               </header>
               <div className="board-lane-body">
                 {items.map((item) => (
-                  <WorkCard item={item} key={item.id} />
+                  <WorkCard
+                    item={item}
+                    contextBrief={briefFor(item)}
+                    key={item.id}
+                  />
                 ))}
                 {items.length === 0 && (
                   <div className="board-lane-empty">
@@ -311,7 +398,9 @@ export function ControlBoardView({
 
       <footer className="board-methodology">
         <Database size={14} />
-        <p>{board.methodology}</p>
+        <p>
+          {board.methodology} {contextIndex.methodology}
+        </p>
       </footer>
     </main>
   );

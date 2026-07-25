@@ -165,6 +165,7 @@ function App() {
       {activeView === "board" ? (
         <ControlBoardView
           board={state.overview.control_board}
+          contextIndex={state.overview.context_index}
           isRefreshing={isRefreshing}
           onRefresh={() => void load()}
         />

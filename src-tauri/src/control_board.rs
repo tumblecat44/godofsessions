@@ -14,6 +14,7 @@ pub struct HermesTaskEvidence {
     pub id: String,
     pub board: String,
     pub title: String,
+    body: Option<String>,
     pub status: String,
     pub priority: Option<i64>,
     pub assignee: Option<String>,
@@ -21,62 +22,86 @@ pub struct HermesTaskEvidence {
     pub model_override: Option<String>,
     pub session_id: Option<String>,
     pub block_kind: Option<String>,
-    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
-pub fn load_hermes_tasks_from_path(
-    path: &Path,
-    board: &str,
-) -> Result<Vec<HermesTaskEvidence>, String> {
+#[derive(Debug, Default)]
+pub struct HermesTaskLoad {
+    pub tasks: Vec<HermesTaskEvidence>,
+    pub warnings: Vec<String>,
+}
+
+pub fn load_hermes_tasks_from_path(path: &Path, board: &str) -> Result<HermesTaskLoad, String> {
     let connection = open_read_only_sqlite(path).map_err(|error| error.to_string())?;
     let mut statement = connection
         .prepare(
             "
-            SELECT id, title, status, priority, assignee, workspace_path,
-                   model_override, session_id, block_kind, created_at
+            SELECT id, title, body, status, priority, assignee, workspace_path,
+                   model_override, session_id, block_kind,
+                   COALESCE(completed_at, started_at, created_at) AS updated_at
             FROM tasks
             WHERE status != 'archived'
-            ORDER BY priority DESC, created_at DESC
+            ORDER BY priority DESC, created_at DESC, id ASC
             ",
         )
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([], |row| {
-            let created_at = row.get::<_, Option<i64>>(9)?;
+            let updated_at = row.get::<_, Option<i64>>(10)?;
             Ok(HermesTaskEvidence {
                 id: row.get(0)?,
                 board: board.to_owned(),
                 title: row.get(1)?,
-                status: row.get(2)?,
-                priority: row.get(3)?,
-                assignee: row.get(4)?,
-                workspace_path: row.get(5)?,
-                model_override: row.get(6)?,
-                session_id: row.get(7)?,
-                block_kind: row.get(8)?,
-                created_at: created_at.and_then(unix_seconds_to_rfc3339),
+                body: row.get(2)?,
+                status: row.get(3)?,
+                priority: row.get(4)?,
+                assignee: row.get(5)?,
+                workspace_path: row.get(6)?,
+                model_override: row.get(7)?,
+                session_id: row.get(8)?,
+                block_kind: row.get(9)?,
+                updated_at: updated_at.and_then(unix_seconds_to_rfc3339),
             })
         })
         .map_err(|error| error.to_string())?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+    let mut loaded = HermesTaskLoad::default();
+    for row in rows {
+        match row {
+            Ok(task) => loaded.tasks.push(task),
+            Err(error) => loaded.warnings.push(format!(
+                "Hermes Kanban · {board}: 작업 행을 건너뜀 ({error})"
+            )),
+        }
+    }
+    Ok(loaded)
 }
 
-pub fn load_hermes_tasks() -> Result<Vec<HermesTaskEvidence>, String> {
-    let root = dirs::home_dir()
-        .map(|home| home.join(".hermes"))
-        .ok_or_else(|| "Hermes 홈 폴더를 찾지 못했습니다.".to_owned())?;
+pub fn load_hermes_tasks() -> HermesTaskLoad {
+    let Some(root) = dirs::home_dir().map(|home| home.join(".hermes")) else {
+        return HermesTaskLoad {
+            tasks: Vec::new(),
+            warnings: vec!["Hermes 홈 폴더를 찾지 못했습니다.".to_owned()],
+        };
+    };
     let mut boards = vec![("default".to_owned(), root.join("kanban.db"))];
     boards.extend(additional_board_paths(&root));
 
-    let mut tasks = Vec::new();
+    let mut loaded = HermesTaskLoad::default();
     for (board, path) in boards {
         if path.is_file() {
-            tasks.extend(load_hermes_tasks_from_path(&path, &board)?);
+            match load_hermes_tasks_from_path(&path, &board) {
+                Ok(mut board_load) => {
+                    loaded.tasks.append(&mut board_load.tasks);
+                    loaded.warnings.append(&mut board_load.warnings);
+                }
+                Err(error) => loaded.warnings.push(format!(
+                    "Hermes Kanban · {board}: 보드를 읽지 못했습니다 ({error})"
+                )),
+            }
         }
     }
-    Ok(tasks)
+    loaded
 }
 
 fn additional_board_paths(root: &Path) -> Vec<(String, PathBuf)> {
@@ -139,6 +164,7 @@ pub fn build_control_board(
             .cmp(&state_order(right.state))
             .then_with(|| right.updated_at.cmp(&left.updated_at))
             .then_with(|| left.title.cmp(&right.title))
+            .then_with(|| left.id.cmp(&right.id))
     });
 
     ControlBoard {
@@ -244,11 +270,19 @@ fn inferred_work_item(project_key: String, sessions: &[&Session]) -> Option<Work
 }
 
 fn explicit_work_item(task: HermesTaskEvidence) -> WorkItem {
-    let external_action = may_have_external_side_effect(&task.title);
+    let task_status = HermesTaskStatus::from(task.status.as_str());
+    let external_action = may_have_external_side_effect(&task.title)
+        || task
+            .body
+            .as_deref()
+            .is_some_and(may_have_external_side_effect);
     let (state, human_gate, human_gate_reason) = if external_action
         && matches!(
-            task.status.as_str(),
-            "triage" | "todo" | "scheduled" | "ready"
+            task_status,
+            HermesTaskStatus::Triage
+                | HermesTaskStatus::Todo
+                | HermesTaskStatus::Scheduled
+                | HermesTaskStatus::Ready
         ) {
         (
             WorkItemState::NeedsMe,
@@ -259,13 +293,13 @@ fn explicit_work_item(task: HermesTaskEvidence) -> WorkItem {
             ),
         )
     } else {
-        match task.status.as_str() {
-            "triage" => (
+        match task_status {
+            HermesTaskStatus::Triage => (
                 WorkItemState::NeedsMe,
                 Some(HumanGateKind::Decision),
                 Some("Hermes Triage 작업이라 범위 지정이 먼저 필요합니다.".to_owned()),
             ),
-            "blocked" => (
+            HermesTaskStatus::Blocked => (
                 WorkItemState::NeedsMe,
                 Some(match task.block_kind.as_deref() {
                     Some("capability") => HumanGateKind::Capability,
@@ -273,9 +307,21 @@ fn explicit_work_item(task: HermesTaskEvidence) -> WorkItem {
                 }),
                 Some("Hermes 작업이 차단 상태입니다.".to_owned()),
             ),
-            "running" => (WorkItemState::Running, None, None),
-            "review" | "done" => (WorkItemState::Review, None, None),
-            _ => (WorkItemState::Ready, None, None),
+            HermesTaskStatus::Running => (WorkItemState::Running, None, None),
+            HermesTaskStatus::Review | HermesTaskStatus::Done => {
+                (WorkItemState::Review, None, None)
+            }
+            HermesTaskStatus::Todo | HermesTaskStatus::Scheduled => {
+                (WorkItemState::Waiting, None, None)
+            }
+            HermesTaskStatus::Ready => (WorkItemState::Ready, None, None),
+            HermesTaskStatus::Unknown(raw) => (
+                WorkItemState::NeedsMe,
+                Some(HumanGateKind::Capability),
+                Some(format!(
+                    "지원하지 않는 Hermes 상태 “{raw}”입니다. 자동 실행 전에 어댑터 확인이 필요합니다."
+                )),
+            ),
         }
     };
     let project = task
@@ -285,7 +331,10 @@ fn explicit_work_item(task: HermesTaskEvidence) -> WorkItem {
         .and_then(|value| value.to_str())
         .map(str::to_owned)
         .unwrap_or_else(|| task.board.clone());
-    let mut evidence = vec![format!("Hermes Kanban · {} 보드", task.board)];
+    let mut evidence = vec![
+        format!("Hermes Kanban · {} 보드", task.board),
+        format!("원본 작업 ID: {}", task.id),
+    ];
     if let Some(assignee) = task.assignee.as_deref() {
         evidence.push(format!("담당 프로필: {assignee}"));
     }
@@ -303,7 +352,7 @@ fn explicit_work_item(task: HermesTaskEvidence) -> WorkItem {
         source_state: task.status,
         provider: Some(Provider::Hermes),
         workspace: task.workspace_path,
-        updated_at: task.created_at,
+        updated_at: task.updated_at,
         priority: task.priority,
         assignee: task.assignee,
         model_override: task.model_override,
@@ -314,11 +363,63 @@ fn explicit_work_item(task: HermesTaskEvidence) -> WorkItem {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HermesTaskStatus<'a> {
+    Triage,
+    Todo,
+    Scheduled,
+    Ready,
+    Running,
+    Blocked,
+    Review,
+    Done,
+    Unknown(&'a str),
+}
+
+impl<'a> From<&'a str> for HermesTaskStatus<'a> {
+    fn from(value: &'a str) -> Self {
+        match value {
+            "triage" => Self::Triage,
+            "todo" => Self::Todo,
+            "scheduled" => Self::Scheduled,
+            "ready" => Self::Ready,
+            "running" => Self::Running,
+            "blocked" => Self::Blocked,
+            "review" => Self::Review,
+            "done" => Self::Done,
+            unknown => Self::Unknown(unknown),
+        }
+    }
+}
+
 fn may_have_external_side_effect(title: &str) -> bool {
     let normalized = title.to_lowercase();
     [
-        "보내", "전송", "발송", "배포", "게시", "삭제", "결제", "구매", "send", "email", "publish",
-        "deploy", "delete", "payment", "purchase",
+        "보내",
+        "전송",
+        "발송",
+        "배포",
+        "게시",
+        "삭제",
+        "결제",
+        "구매",
+        "업로드",
+        "병합",
+        "공유",
+        "초대",
+        "취소",
+        "send",
+        "email",
+        "publish",
+        "deploy",
+        "delete",
+        "payment",
+        "purchase",
+        "upload",
+        "merge",
+        "share",
+        "invite",
+        "cancel",
     ]
     .iter()
     .any(|term| normalized.contains(term))
@@ -334,8 +435,9 @@ fn state_order(state: WorkItemState) -> u8 {
     match state {
         WorkItemState::NeedsMe => 0,
         WorkItemState::Ready => 1,
-        WorkItemState::Running => 2,
-        WorkItemState::Review => 3,
+        WorkItemState::Waiting => 2,
+        WorkItemState::Running => 3,
+        WorkItemState::Review => 4,
     }
 }
 
@@ -518,10 +620,13 @@ mod tests {
                 CREATE TABLE tasks (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
+                    body TEXT,
                     assignee TEXT,
                     status TEXT NOT NULL,
                     priority INTEGER,
                     created_at INTEGER NOT NULL,
+                    started_at INTEGER,
+                    completed_at INTEGER,
                     workspace_path TEXT,
                     model_override TEXT,
                     session_id TEXT,
@@ -530,10 +635,13 @@ mod tests {
                 INSERT INTO tasks VALUES (
                     't_ready',
                     'Implement overnight board',
+                    NULL,
                     'worker',
                     'ready',
                     2,
                     1784955600,
+                    NULL,
+                    NULL,
                     '/work/godofsessions',
                     'gpt-5.6',
                     'session-1',
@@ -543,9 +651,12 @@ mod tests {
                     't_old',
                     'Old archived task',
                     NULL,
+                    NULL,
                     'archived',
                     0,
                     1784950000,
+                    NULL,
+                    NULL,
                     NULL,
                     NULL,
                     NULL,
@@ -556,16 +667,46 @@ mod tests {
             .expect("fixture schema");
         drop(connection);
 
-        let tasks = load_hermes_tasks_from_path(&path, "default").expect("tasks");
+        let loaded = load_hermes_tasks_from_path(&path, "default").expect("tasks");
 
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].id, "t_ready");
-        assert_eq!(tasks[0].board, "default");
+        assert_eq!(loaded.tasks.len(), 1);
+        assert!(loaded.warnings.is_empty());
+        assert_eq!(loaded.tasks[0].id, "t_ready");
+        assert_eq!(loaded.tasks[0].board, "default");
         assert_eq!(
-            tasks[0].workspace_path.as_deref(),
+            loaded.tasks[0].workspace_path.as_deref(),
             Some("/work/godofsessions")
         );
-        assert_eq!(tasks[0].model_override.as_deref(), Some("gpt-5.6"));
+        assert_eq!(loaded.tasks[0].model_override.as_deref(), Some("gpt-5.6"));
+    }
+
+    #[test]
+    fn malformed_hermes_row_does_not_hide_valid_tasks() {
+        let directory = tempdir().expect("temp dir");
+        let path = directory.path().join("kanban.db");
+        let connection = Connection::open(&path).expect("fixture database");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT, assignee TEXT,
+                    status TEXT NOT NULL, priority INTEGER, created_at INTEGER NOT NULL,
+                    started_at INTEGER, completed_at INTEGER,
+                    workspace_path TEXT, model_override TEXT, session_id TEXT, block_kind TEXT
+                );
+                INSERT INTO tasks VALUES
+                    ('good', 'Valid task', NULL, NULL, 'ready', 1, 1784955600, NULL, NULL, NULL, NULL, NULL, NULL),
+                    ('bad', 'Malformed task', NULL, NULL, 'ready', 'not-a-number', 1784955500, NULL, NULL, NULL, NULL, NULL, NULL);
+                ",
+            )
+            .expect("fixture schema");
+        drop(connection);
+
+        let loaded = load_hermes_tasks_from_path(&path, "default").expect("partial load");
+
+        assert_eq!(loaded.tasks.len(), 1);
+        assert_eq!(loaded.tasks[0].id, "good");
+        assert_eq!(loaded.warnings.len(), 1);
     }
 
     #[test]
@@ -576,6 +717,7 @@ mod tests {
                 id: "t_send".to_owned(),
                 board: "default".to_owned(),
                 title: "설문 폼을 멘토에게 보내기".to_owned(),
+                body: None,
                 status: "ready".to_owned(),
                 priority: Some(1),
                 assignee: Some("worker".to_owned()),
@@ -583,7 +725,7 @@ mod tests {
                 model_override: None,
                 session_id: None,
                 block_kind: None,
-                created_at: Some("2026-07-24T21:00:00Z".to_owned()),
+                updated_at: Some("2026-07-24T21:00:00Z".to_owned()),
             }],
             DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
                 .unwrap()
@@ -599,5 +741,102 @@ mod tests {
             .human_gate_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("외부")));
+    }
+
+    #[test]
+    fn unknown_hermes_status_fails_closed_at_the_human_gate() {
+        let board = build_control_board(
+            &snapshot(Vec::new()),
+            vec![HermesTaskEvidence {
+                id: "t_future".to_owned(),
+                board: "default".to_owned(),
+                title: "Future Hermes task".to_owned(),
+                body: None,
+                status: "delegating".to_owned(),
+                priority: None,
+                assignee: None,
+                workspace_path: None,
+                model_override: None,
+                session_id: None,
+                block_kind: None,
+                updated_at: Some("2026-07-24T21:00:00Z".to_owned()),
+            }],
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(board.items[0].state, WorkItemState::NeedsMe);
+        assert_eq!(
+            board.items[0].human_gate,
+            Some(crate::model::HumanGateKind::Capability)
+        );
+        assert!(board.items[0]
+            .human_gate_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("delegating")));
+    }
+
+    #[test]
+    fn dependency_and_time_gated_hermes_tasks_are_waiting_not_ready() {
+        let task = |id: &str, status: &str| HermesTaskEvidence {
+            id: id.to_owned(),
+            board: "default".to_owned(),
+            title: format!("{status} task"),
+            body: None,
+            status: status.to_owned(),
+            priority: None,
+            assignee: None,
+            workspace_path: None,
+            model_override: None,
+            session_id: None,
+            block_kind: None,
+            updated_at: Some("2026-07-24T21:00:00Z".to_owned()),
+        };
+        let board = build_control_board(
+            &snapshot(Vec::new()),
+            vec![task("todo", "todo"), task("scheduled", "scheduled")],
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(board
+            .items
+            .iter()
+            .all(|item| item.state == WorkItemState::Waiting));
+    }
+
+    #[test]
+    fn hermes_body_can_trigger_an_external_action_gate_without_being_exposed() {
+        let board = build_control_board(
+            &snapshot(Vec::new()),
+            vec![HermesTaskEvidence {
+                id: "t_upload".to_owned(),
+                board: "default".to_owned(),
+                title: "릴리스 마무리".to_owned(),
+                body: Some("완성된 artifact를 고객 포털에 upload".to_owned()),
+                status: "ready".to_owned(),
+                priority: None,
+                assignee: None,
+                workspace_path: None,
+                model_override: None,
+                session_id: None,
+                block_kind: None,
+                updated_at: Some("2026-07-24T21:00:00Z".to_owned()),
+            }],
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(
+            board.items[0].human_gate,
+            Some(crate::model::HumanGateKind::ExternalAction)
+        );
+        assert!(board.items[0]
+            .evidence
+            .iter()
+            .all(|evidence| !evidence.contains("고객 포털")));
     }
 }

@@ -60,3 +60,9 @@ _Avoid_: Recommendation, assignment
 A cross-provider projection of Work Items and Runs for supervision. It is not
 the source of truth for provider-owned state.
 _Avoid_: Kanban database, session list
+
+**Context Brief**:
+A bounded, ephemeral set of recent user and final-response excerpts grouped by
+Project. It helps recover intent but is not a transcript, summary, or durable
+memory store.
+_Avoid_: Conversation copy, source of truth, full context

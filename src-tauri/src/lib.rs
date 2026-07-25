@@ -1,4 +1,5 @@
 mod connectors;
+mod context_brief;
 mod control_board;
 mod model;
 mod recommendation;
@@ -26,11 +27,14 @@ async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, Stri
         let snapshot = snapshot_thread
             .join()
             .map_err(|_| "로컬 세션 증거를 모으지 못했습니다.".to_owned())?;
-        Ok(recommendation::build_overnight_plan(
+        let now = Utc::now();
+        let context = context_brief::build_context_index(&snapshot, now);
+        Ok(recommendation::build_overnight_plan_with_context(
             &snapshot,
             budgets,
+            &context,
             sleep_hours,
-            Utc::now(),
+            now,
         ))
     })
     .await
@@ -45,20 +49,20 @@ async fn load_workspace_overview() -> Result<WorkspaceOverview, String> {
 }
 
 fn build_workspace_overview() -> WorkspaceOverview {
-    let snapshot = build_snapshot();
-    let (tasks, warning) = match control_board::load_hermes_tasks() {
-        Ok(tasks) => (tasks, None),
-        Err(error) => (
-            Vec::new(),
-            Some(format!("Hermes Kanban을 읽지 못했습니다: {error}")),
-        ),
-    };
-    let mut control_board = control_board::build_control_board(&snapshot, tasks, Utc::now());
+    let now = Utc::now();
+    let mut snapshot = build_snapshot();
+    let context_index = context_brief::build_context_index(&snapshot, now);
+    snapshot.privacy_note =
+        "원본은 읽기 전용입니다. 관제판은 최근 24시간의 사용자·응답 텍스트를 메모리에서 제한적으로 읽고 저장하지 않습니다."
+            .to_owned();
+    let hermes_load = control_board::load_hermes_tasks();
+    let mut control_board = control_board::build_control_board(&snapshot, hermes_load.tasks, now);
     control_board.warnings.extend(snapshot.warnings.clone());
-    control_board.warnings.extend(warning);
+    control_board.warnings.extend(hermes_load.warnings);
     WorkspaceOverview {
         snapshot,
         control_board,
+        context_index,
     }
 }
 
@@ -185,11 +189,14 @@ mod live_tests {
     fn local_overnight_plan_is_read_only_and_explainable() {
         let snapshot = build_snapshot();
         let budgets = usage::load_budgets();
-        let plan = recommendation::build_overnight_plan(
+        let now = chrono::Utc::now();
+        let context = context_brief::build_context_index(&snapshot, now);
+        let plan = recommendation::build_overnight_plan_with_context(
             &snapshot,
             budgets,
+            &context,
             recommendation::SleepHours::new(7.0).expect("valid sleep duration"),
-            chrono::Utc::now(),
+            now,
         );
 
         eprintln!(
@@ -216,6 +223,10 @@ mod live_tests {
             .all(|candidate| !candidate.evidence.is_empty()
                 && !candidate.verification.is_empty()
                 && !candidate.risks.is_empty()));
+        assert!(plan.candidates.iter().any(|candidate| candidate
+            .evidence
+            .iter()
+            .any(|evidence| evidence.contains("오늘 대화"))));
     }
 
     #[test]
@@ -248,6 +259,43 @@ mod live_tests {
         assert!(hermes_items.iter().any(|item| {
             item.state == WorkItemState::NeedsMe
                 && item.human_gate == Some(HumanGateKind::ExternalAction)
+        }));
+    }
+
+    #[test]
+    #[ignore = "reads recent user and assistant text from installed local providers"]
+    fn local_context_index_is_ephemeral_bounded_and_project_scoped() {
+        let started = Instant::now();
+        let overview = build_workspace_overview();
+        let index = overview.context_index;
+
+        eprintln!(
+            "projects={} excerpts={} providers={:?} elapsed_ms={} warnings={:?}",
+            index.projects.len(),
+            index
+                .projects
+                .iter()
+                .map(|project| project.excerpts.len())
+                .sum::<usize>(),
+            index
+                .projects
+                .iter()
+                .flat_map(|project| project.providers.iter())
+                .map(|provider| provider.as_str())
+                .collect::<std::collections::HashSet<_>>(),
+            started.elapsed().as_millis(),
+            index.warnings,
+        );
+        assert!(index.ephemeral);
+        assert_eq!(index.window_hours, 24);
+        assert!(!index.projects.is_empty());
+        assert!(index.projects.iter().all(|project| {
+            !project.project.trim().is_empty()
+                && project.excerpts.len() <= 12
+                && project
+                    .excerpts
+                    .iter()
+                    .all(|excerpt| excerpt.text.chars().count() <= 421)
         }));
     }
 }

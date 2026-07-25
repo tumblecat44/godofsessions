@@ -1893,7 +1893,7 @@ button:active:not(:disabled) {
   display: grid;
   grid-template-columns:
     minmax(110px, 0.9fr) 1px minmax(150px, 1.3fr) 1px
-    minmax(110px, 0.9fr) 1px minmax(110px, 0.9fr);
+    minmax(110px, 0.9fr) 1px minmax(110px, 0.9fr) 1px minmax(110px, 0.9fr);
   align-items: center;
   background: var(--console);
   border: 1px solid var(--etched-edge);
@@ -2056,8 +2056,8 @@ button:active:not(:disabled) {
   margin: 12px auto 0;
   display: grid;
   grid-template-columns:
-    minmax(240px, 0.86fr) minmax(300px, 1.22fr) minmax(240px, 0.94fr)
-    minmax(240px, 0.94fr);
+    minmax(220px, 0.86fr) minmax(280px, 1.2fr) minmax(210px, 0.82fr)
+    minmax(220px, 0.92fr) minmax(220px, 0.92fr);
   gap: 10px;
   align-items: start;
 }
@@ -2128,6 +2128,10 @@ button:active:not(:disabled) {
 
 .board-lane--running {
   --lane-signal: rgba(228, 169, 74, 0.7);
+}
+
+.board-lane--waiting {
+  --lane-signal: rgba(106, 125, 142, 0.7);
 }
 
 .board-lane--review {
@@ -2346,6 +2350,101 @@ button:active:not(:disabled) {
   white-space: nowrap;
 }
 
+.project-memory {
+  margin: 0 8px 8px;
+  overflow: hidden;
+  background: rgba(99, 181, 160, 0.035);
+  border: 1px solid rgba(99, 181, 160, 0.11);
+  border-radius: 5px;
+}
+
+.project-memory summary {
+  min-height: 34px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--signal-teal);
+  cursor: pointer;
+  list-style: none;
+}
+
+.project-memory summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-memory summary > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 7px;
+  font-weight: 600;
+}
+
+.project-memory summary > small {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-memory ol {
+  margin: 0;
+  padding: 0 8px 4px;
+  list-style: none;
+}
+
+.memory-excerpt {
+  padding: 7px 0;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  border-top: 1px solid var(--etched-edge-soft);
+}
+
+.memory-excerpt > span {
+  min-height: 17px;
+  display: grid;
+  place-items: center;
+  color: var(--signal-teal);
+  background: var(--signal-teal-soft);
+  border-radius: 3px;
+  font-size: 6px;
+  font-weight: 700;
+}
+
+.memory-excerpt--user > span {
+  color: var(--signal-amber);
+  background: var(--signal-amber-soft);
+}
+
+.memory-excerpt p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.memory-excerpt > small {
+  padding-top: 2px;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6px;
+}
+
+.project-memory > footer {
+  padding: 7px 8px;
+  color: var(--ink-muted);
+  border-top: 1px solid var(--etched-edge-soft);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6px;
+  line-height: 1.4;
+}
+
 .work-card > footer {
   min-height: 30px;
   padding: 0 10px;
@@ -2426,7 +2525,7 @@ button:active:not(:disabled) {
 
   .control-board {
     overflow-x: auto;
-    grid-template-columns: 260px 330px 260px 260px;
+    grid-template-columns: 250px 320px 240px 250px 250px;
     padding-bottom: 8px;
   }
 }
