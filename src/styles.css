@@ -2875,6 +2875,7 @@ button:active:not(:disabled) {
   font-size: 8px;
 }
 
+.route-profile,
 .route-pool {
   margin-top: 12px;
   padding: 8px 9px;
@@ -2887,15 +2888,26 @@ button:active:not(:disabled) {
   border-radius: 5px;
 }
 
+.route-profile + .route-pool {
+  margin-top: 6px;
+}
+
+.route-profile span,
 .route-pool span {
   color: var(--ink-muted);
   font-size: 8px;
 }
 
+.route-profile b,
 .route-pool b {
   color: var(--signal-amber);
   font-size: 8px;
   font-weight: 600;
+}
+
+.route-profile b {
+  color: var(--ink-secondary);
+  font-family: "JetBrains Mono Variable", monospace;
 }
 
 .route-capabilities {

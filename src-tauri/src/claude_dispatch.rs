@@ -492,6 +492,7 @@ mod tests {
             id: "claude:native".to_owned(),
             surface: Provider::Claude,
             model_provider: Some(Provider::Claude),
+            executor_profile: None,
             model: None,
             runtime: "Claude Code".to_owned(),
             capacity_pool: CapacityPool::ClaudeSubscription,

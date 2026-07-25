@@ -932,12 +932,13 @@ export const previewOvernightPlan: OvernightPlan = {
     generated_at: new Date().toISOString(),
     warnings: [],
     methodology:
-      "실행 화면과 실제 모델 제공자, 차감되는 구독 풀을 분리했습니다. 여러 실행 경로가 같은 구독을 쓰면 하나의 용량으로 취급합니다.",
+      "실행 화면과 실제 모델 제공자, 선택된 실행 profile, 차감되는 구독 풀을 분리했습니다. 여러 실행 경로가 같은 구독을 쓰면 하나의 용량으로 취급합니다.",
     routes: [
       {
         id: "claude:native",
         surface: "claude",
         model_provider: "claude",
+        executor_profile: null,
         model: null,
         runtime: "Claude Code",
         capacity_pool: "claude_subscription",
@@ -963,6 +964,7 @@ export const previewOvernightPlan: OvernightPlan = {
         id: "codex:native",
         surface: "codex",
         model_provider: "codex",
+        executor_profile: null,
         model: null,
         runtime: "Codex app-server",
         capacity_pool: "codex_subscription",
@@ -984,6 +986,7 @@ export const previewOvernightPlan: OvernightPlan = {
         id: "grok:native",
         surface: "grok",
         model_provider: "grok",
+        executor_profile: null,
         model: null,
         runtime: "Grok Build ACP",
         capacity_pool: "grok_subscription",
@@ -1005,6 +1008,7 @@ export const previewOvernightPlan: OvernightPlan = {
         id: "hermes:default",
         surface: "hermes",
         model_provider: "grok",
+        executor_profile: "default",
         model: "grok-4.5",
         runtime: "Hermes agent loop",
         capacity_pool: "grok_subscription",

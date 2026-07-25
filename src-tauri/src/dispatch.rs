@@ -104,6 +104,7 @@ pub fn preview_hermes(
     route: &ExecutionRoute,
     environment: &HermesDispatchEnvironment,
 ) -> DispatchPreflight {
+    let executor_profile = route.executor_profile.as_deref().unwrap_or("");
     let workspace = environment
         .workspace_canonical
         .as_deref()
@@ -114,10 +115,11 @@ pub fn preview_hermes(
             "route",
             route.surface == Provider::Hermes
                 && route.state == ResourceState::Ready
-                && route.adapter_readiness == AdapterReadiness::ContractReady,
+                && route.adapter_readiness == AdapterReadiness::ContractReady
+                && executor_profile == ASSIGNEE,
             "Hermes 실행 경로",
-            "현재 Hermes 경로와 구독이 준비되어 있습니다.",
-            "Hermes 경로·구독·어댑터 계약 중 하나가 준비되지 않았습니다.",
+            "현재 Hermes 경로·작업자·구독이 준비되어 있습니다.",
+            "Hermes 경로·작업자·구독·어댑터 계약 중 하나가 준비되지 않았습니다.",
         ),
         check(
             "binary",
@@ -181,7 +183,7 @@ pub fn preview_hermes(
     commands.push(DispatchCommandPreview {
         step: "create_task".to_owned(),
         program: program.clone(),
-        arguments: create_task_arguments(draft, workspace, &idempotency_key),
+        arguments: create_task_arguments(draft, workspace, &idempotency_key, executor_profile),
         mutates_local_state: true,
         summary: "승인된 계약과 동일한 goal 작업을 idempotent하게 생성".to_owned(),
     });
@@ -215,7 +217,7 @@ pub fn preview_hermes(
         scope_label: "격리 보드".to_owned(),
         scope_value: BOARD.to_owned(),
         executor_label: "작업자".to_owned(),
-        executor_value: ASSIGNEE.to_owned(),
+        executor_value: executor_profile.to_owned(),
         transport: "직접 argv".to_owned(),
         idempotency_key,
         checks,
@@ -837,7 +839,7 @@ fn verify_created_task(
         .and_then(|path| path.canonicalize().ok());
     let expected_runtime = (approved.draft.time_budget_hours * 3_600.0).round() as i64;
     if task.idempotency_key.as_deref() != Some(&approved.preflight.idempotency_key)
-        || task.assignee.as_deref() != Some(ASSIGNEE)
+        || task.assignee.as_deref() != Some(approved.preflight.executor_value.as_str())
         || task.workspace_kind != "dir"
         || actual_workspace.as_deref() != Some(expected_workspace.as_path())
         || task.max_runtime_seconds != Some(expected_runtime)
@@ -1095,6 +1097,7 @@ fn create_task_arguments(
     draft: &NightRunDraft,
     workspace: &Path,
     idempotency_key: &str,
+    executor_profile: &str,
 ) -> Vec<String> {
     let minutes = (draft.time_budget_hours * 60.0).round() as u32;
     vec![
@@ -1105,7 +1108,7 @@ fn create_task_arguments(
         "--body".to_owned(),
         render_contract(draft),
         "--assignee".to_owned(),
-        ASSIGNEE.to_owned(),
+        executor_profile.to_owned(),
         "--workspace".to_owned(),
         format!("dir:{}", workspace.display()),
         "--priority".to_owned(),
@@ -1140,7 +1143,7 @@ fn render_contract(draft: &NightRunDraft) -> String {
 
 fn idempotency_key(draft: &NightRunDraft, route: &ExecutionRoute) -> String {
     let mut hash = Sha256::new();
-    for value in ["god-of-sessions/hermes-dispatch/v1", BOARD, ASSIGNEE] {
+    for value in ["god-of-sessions/hermes-dispatch/v1", BOARD] {
         hash.update((value.len() as u64).to_le_bytes());
         hash.update(value.as_bytes());
     }
@@ -1194,6 +1197,7 @@ mod tests {
             id: "hermes:default".to_owned(),
             surface: Provider::Hermes,
             model_provider: Some(Provider::Grok),
+            executor_profile: Some("default".to_owned()),
             model: Some("grok-4.5".to_owned()),
             runtime: "Hermes agent loop".to_owned(),
             capacity_pool: CapacityPool::GrokSubscription,
@@ -1291,6 +1295,45 @@ mod tests {
             ["--", "검증 가능한 기능 완성"]
         );
         assert!(!create.arguments.iter().any(|value| value == "--yolo"));
+    }
+
+    #[test]
+    fn hermes_profile_is_part_of_the_route_and_preflight_identity() {
+        let directory = tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let binary = directory.path().join("hermes");
+        std::fs::write(&binary, "").expect("binary");
+        let default_preview =
+            preview_hermes(&draft(&workspace), &route(), &environment(&workspace, &binary));
+        let mut unsupported_profile = route();
+        unsupported_profile.executor_profile = Some("researcher".to_owned());
+
+        let preview = preview_hermes(
+            &draft(&workspace),
+            &unsupported_profile,
+            &environment(&workspace, &binary),
+        );
+        let create = preview
+            .commands
+            .iter()
+            .find(|command| command.step == "create_task")
+            .expect("create command");
+
+        assert_eq!(preview.state, DispatchPreflightState::Blocked);
+        assert_eq!(preview.executor_value, "researcher");
+        assert_ne!(
+            preview.idempotency_key, default_preview.idempotency_key,
+            "the selected Hermes profile must be part of dispatch identity"
+        );
+        assert!(create
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--assignee", "researcher"]));
+        assert!(preview
+            .checks
+            .iter()
+            .any(|check| check.key == "route" && check.level == PreflightLevel::Block));
     }
 
     #[test]
@@ -1743,6 +1786,7 @@ mod tests {
                 &draft,
                 &workspace,
                 "gos-night-parser",
+                ASSIGNEE,
             ))
             .output()
             .expect("create command");

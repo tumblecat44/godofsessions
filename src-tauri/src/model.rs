@@ -195,6 +195,7 @@ pub struct ExecutionRoute {
     pub id: String,
     pub surface: Provider,
     pub model_provider: Option<Provider>,
+    pub executor_profile: Option<String>,
     pub model: Option<String>,
     pub runtime: String,
     pub capacity_pool: CapacityPool,

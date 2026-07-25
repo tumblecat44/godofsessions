@@ -554,6 +554,7 @@ mod tests {
             id: "codex:native".to_owned(),
             surface: Provider::Codex,
             model_provider: Some(Provider::Codex),
+            executor_profile: None,
             model: None,
             runtime: "Codex app-server".to_owned(),
             capacity_pool: CapacityPool::CodexSubscription,

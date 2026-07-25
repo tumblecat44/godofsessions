@@ -257,6 +257,12 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
       </header>
       <strong>{route.runtime}</strong>
       <p>{route.model || "현재 기본 모델"}</p>
+      {route.executor_profile && (
+        <div className="route-profile">
+          <span>작업자</span>
+          <b>{route.executor_profile}</b>
+        </div>
+      )}
       <div className="route-pool">
         <span>차감</span>
         <b>{capacityPoolLabels[route.capacity_pool]}</b>

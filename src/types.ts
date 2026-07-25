@@ -137,6 +137,7 @@ export interface ExecutionRoute {
   id: string;
   surface: Provider;
   model_provider: Provider | null;
+  executor_profile: string | null;
   model: string | null;
   runtime: string;
   capacity_pool: CapacityPool;

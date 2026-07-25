@@ -137,7 +137,7 @@ pub fn load_from(
         },
         warnings: Vec::new(),
         methodology:
-            "실행 화면과 실제 모델 제공자, 차감되는 구독 풀을 분리했습니다. 여러 실행 경로가 같은 구독을 쓰면 하나의 용량으로 취급하며, 자격 증명 값은 읽거나 표시하지 않고 설정 여부만 확인합니다."
+            "실행 화면과 실제 모델 제공자, 선택된 실행 profile, 차감되는 구독 풀을 분리했습니다. 여러 실행 경로가 같은 구독을 쓰면 하나의 용량으로 취급하며, 자격 증명 값은 읽거나 표시하지 않고 설정 여부만 확인합니다."
                 .to_owned(),
     }
 }
@@ -176,6 +176,7 @@ fn native_route(
         id: id.to_owned(),
         surface: provider,
         model_provider: Some(provider),
+        executor_profile: None,
         model: None,
         runtime: runtime.to_owned(),
         capacity_pool,
@@ -301,6 +302,7 @@ fn hermes_route(
         id: "hermes:default".to_owned(),
         surface: Provider::Hermes,
         model_provider,
+        executor_profile: Some("default".to_owned()),
         model: config.model,
         runtime: if app_server {
             "Hermes → Codex app-server".to_owned()
@@ -335,6 +337,7 @@ fn unavailable_hermes_route(message: &str) -> ExecutionRoute {
         id: "hermes:default".to_owned(),
         surface: Provider::Hermes,
         model_provider: None,
+        executor_profile: Some("default".to_owned()),
         model: None,
         runtime: "Hermes".to_owned(),
         capacity_pool: CapacityPool::Unknown,
@@ -567,6 +570,7 @@ mod tests {
 
         assert_eq!(route.surface, Provider::Hermes);
         assert_eq!(route.model_provider, Some(Provider::Grok));
+        assert_eq!(route.executor_profile.as_deref(), Some("default"));
         assert_eq!(route.capacity_pool, CapacityPool::GrokSubscription);
         assert_eq!(route.state, ResourceState::Ready);
         assert!(route.capabilities.contains(&RouteCapability::GoalLoop));

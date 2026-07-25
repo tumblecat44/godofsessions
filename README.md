@@ -32,7 +32,7 @@ Route, Capacity Pool, and Night Portfolio lives in [CONTEXT.md](CONTEXT.md).
 
 ## Current phase
 
-The stable refresh surface M43 desktop slice is working.
+The executor-bound Hermes route M44 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -128,6 +128,11 @@ new session and quota evidence is gathered. The retained plan is visibly
 muted and every single-run and portfolio approval is disabled until the new
 snapshot replaces it atomically; a failed refresh preserves it as read-only
 context instead of clearing the screen.
+The Hermes execution route now names its selected profile (`default`) as part
+of route identity. The route card, command preview, approval fingerprint,
+Kanban assignee argument, and provider receipt check all agree on that value;
+an unimplemented profile selection fails preflight instead of changing the
+worker after approval.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -175,6 +180,7 @@ context instead of clearing the screen.
 - [Visible no-run explanations M41](docs/overnight-m41.md)
 - [Prewarmed bedtime evidence M42](docs/overnight-m42.md)
 - [Stable recommendation refresh M43](docs/overnight-m43.md)
+- [Executor-bound Hermes routes M44](docs/overnight-m44.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 - [Orchestration UI revalidation](docs/research/orchestration-ui-revalidation-2026-07-24.md)
 - [Cloud conversation context feasibility](docs/research/cloud-conversation-feasibility-2026-07-24.md)

@@ -1046,6 +1046,7 @@ mod tests {
             id: id.to_owned(),
             surface,
             model_provider: Some(model_provider),
+            executor_profile: (surface == Provider::Hermes).then(|| "default".to_owned()),
             model: None,
             runtime: "test".to_owned(),
             capacity_pool: capacity_pool_for(model_provider),
