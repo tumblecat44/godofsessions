@@ -1,0 +1,26 @@
+[package]
+name = "god-of-sessions"
+version = "0.1.0"
+description = "A local-first attention inbox for native AI coding sessions"
+authors = ["God of Sessions"]
+edition = "2021"
+
+[lib]
+name = "god_of_sessions_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+chrono = { version = "0.4.42", features = ["serde"] }
+dirs = "6.0.0"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tauri = { version = "2.11.5", features = [] }
+thiserror = "2.0.17"
+walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.23.0"
