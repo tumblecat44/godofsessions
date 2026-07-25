@@ -69,6 +69,22 @@ impl CoordinatorItemState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CoordinatorWaitKind {
+    Workspace,
+    Capacity,
+}
+
+impl CoordinatorWaitKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::Capacity => "capacity",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoordinatorItem {
     approved: ApprovedPortfolioItem,
@@ -79,6 +95,8 @@ struct CoordinatorItem {
     error: Option<String>,
     #[serde(default)]
     waiting_reason: Option<String>,
+    #[serde(default)]
+    waiting_kind: Option<CoordinatorWaitKind>,
     #[serde(default)]
     workspace_baseline: Option<workspace_evidence::WorkspaceSnapshot>,
     #[serde(default)]
@@ -131,6 +149,7 @@ impl CoordinatorPlan {
                             receipt: None,
                             error: None,
                             waiting_reason: None,
+                            waiting_kind: None,
                             workspace_baseline: None,
                             workspace_final: None,
                         })
@@ -486,6 +505,14 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
                         completed_at: item.completed_at.map(|value| value.to_rfc3339()),
                         idempotency_key: item.approved.dispatch.preflight.idempotency_key,
                         error: item.error,
+                        waiting_kind: item
+                            .waiting_kind
+                            .or_else(|| {
+                                item.waiting_reason
+                                    .as_ref()
+                                    .map(|_| CoordinatorWaitKind::Workspace)
+                            })
+                            .map(|kind| kind.as_str().to_owned()),
                         waiting_reason: item.waiting_reason,
                     })
                     .collect(),

@@ -166,6 +166,7 @@ fn validate(plan: &CoordinatorPlan) -> Result<(), String> {
                 .waiting_reason
                 .as_deref()
                 .is_some_and(|value| value.is_empty() || value.len() > 500)
+                || (item.waiting_kind.is_some() && item.waiting_reason.is_none())
             {
                 return Err("밤 coordinator 대기 이유가 올바르지 않습니다.".to_owned());
             }
@@ -391,7 +392,27 @@ mod tests {
                 .expect("entry")
                 .file_name()
                 .to_string_lossy()
-                .ends_with(".tmp")));
+            .ends_with(".tmp")));
+    }
+
+    #[test]
+    fn legacy_workspace_wait_without_a_kind_remains_loadable() {
+        let mut source = plan();
+        source.lanes[0].items[0].waiting_reason =
+            Some("같은 실제 작업공간의 다른 실행을 기다립니다.".to_owned());
+        source.lanes[0].items[0].waiting_kind =
+            Some(crate::night_coordinator::CoordinatorWaitKind::Workspace);
+        let mut encoded = serde_json::to_value(source).expect("serialize plan");
+        encoded
+            .pointer_mut("/lanes/0/items/0")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("item")
+            .remove("waiting_kind");
+
+        let decoded: CoordinatorPlan = serde_json::from_value(encoded).expect("legacy plan");
+
+        assert_eq!(decoded.lanes[0].items[0].waiting_kind, None);
+        validate(&decoded).expect("legacy wait stays valid");
     }
 
     #[test]

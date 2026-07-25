@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The host-readiness overnight approval M24 desktop slice is working.
+The scheduled-start capacity revalidation M25 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -50,6 +50,10 @@ Before approval, the plan also reports AC or battery power, `caffeinate`
 availability, MacBook lid limitations, and the minimum free space across
 selected workspace volumes. Any unresolved host warning is repeated in the
 typed-confirmation dialog.
+Immediately before each later scheduled start, the coordinator also reloads
+the exact selected subscription pool. Exhausted or ambiguous capacity remains
+pending with a durable explanation until fresh capacity returns or the
+original wake deadline makes the accepted task no longer fit.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -78,6 +82,7 @@ typed-confirmation dialog.
 - [Workspace-change evidence M22](docs/overnight-m22.md)
 - [Worktree-aware collision control M23](docs/overnight-m23.md)
 - [Host readiness before approval M24](docs/overnight-m24.md)
+- [Capacity revalidation at scheduled start M25](docs/overnight-m25.md)
 
 The app currently:
 
@@ -165,6 +170,12 @@ The app currently:
   selected-volume disk space without changing system settings
 - repeats actionable host warnings in the exact one-night approval rather than
   burying a sleep or power assumption in coordinator internals
+- reloads the exact selected Claude, Codex, or Grok subscription pool before
+  every scheduled start instead of trusting the approval-time observation
+- leaves exhausted, missing, or degraded usage pending with a durable
+  capacity-wait reason, then retries only inside the original wake deadline
+- distinguishes capacity recovery from shared-worktree release in the durable
+  plan and Morning Inbox while preserving pre-M25 waiting ledgers
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

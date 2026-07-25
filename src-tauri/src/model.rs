@@ -458,6 +458,7 @@ pub struct NightPlanItemSummary {
     pub idempotency_key: String,
     pub error: Option<String>,
     pub waiting_reason: Option<String>,
+    pub waiting_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

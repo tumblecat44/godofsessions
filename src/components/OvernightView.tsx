@@ -1458,7 +1458,12 @@ function NightPlanHistorySection({
                       <div>
                         <strong>{item.project}</strong>
                         <small>
-                          {nightPlanItemStateLabels[item.state] || item.state} ·{" "}
+                          {item.waiting_kind === "workspace"
+                            ? "작업공간 대기"
+                            : item.waiting_kind === "capacity"
+                              ? "사용량 대기"
+                              : nightPlanItemStateLabels[item.state] || item.state}{" "}
+                          ·{" "}
                           {item.starts_after_hours > 0
                             ? `약 ${item.starts_after_hours}시간 뒤`
                             : "바로 시작"}{" "}

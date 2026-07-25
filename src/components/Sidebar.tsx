@@ -51,7 +51,7 @@ export function Sidebar({
         >
           <MoonStar size={16} />
           <span>오늘 밤 추천</span>
-          <i className="nav-new">M24</i>
+          <i className="nav-new">M25</i>
         </button>
         <button
           className={activeView === "inbox" ? "is-selected" : ""}

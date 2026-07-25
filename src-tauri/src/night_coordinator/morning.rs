@@ -249,8 +249,14 @@ fn morning_item(
         after_deadline,
         plan_requires_attention,
     );
-    if item.state == CoordinatorItemState::Pending && item.waiting_reason.is_some() {
-        next_action = "공유 작업공간 종료 기다리기".to_owned();
+    if item.state == CoordinatorItemState::Pending {
+        next_action = match item.waiting_kind {
+            Some(super::CoordinatorWaitKind::Workspace) => "공유 작업공간 종료 기다리기",
+            Some(super::CoordinatorWaitKind::Capacity) => "구독 사용량 회복 기다리기",
+            None if item.waiting_reason.is_some() => "공유 작업공간 종료 기다리기",
+            None => &next_action,
+        }
+        .to_owned();
     }
     let (review_state, reviewed_at) = match review {
         Some(review)
@@ -550,6 +556,7 @@ mod tests {
             receipt: None,
             error: None,
             waiting_reason: None,
+            waiting_kind: None,
             workspace_baseline: None,
             workspace_final: None,
         }
@@ -694,6 +701,7 @@ mod tests {
     fn workspace_wait_is_explained_without_turning_into_attention() {
         let mut waiting = item("waiting", CoordinatorItemState::Pending);
         waiting.waiting_reason = Some("같은 실제 작업공간의 다른 실행을 기다립니다.".to_owned());
+        waiting.waiting_kind = Some(super::super::CoordinatorWaitKind::Workspace);
         let source = plan(vec![waiting]);
         let brief = build(&source, "active", &HashMap::new(), |_| Observation {
             record: None,
@@ -707,6 +715,26 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|value| value.contains("다른 실행")));
+    }
+
+    #[test]
+    fn capacity_wait_is_explained_without_turning_into_attention() {
+        let mut waiting = item("waiting", CoordinatorItemState::Pending);
+        waiting.waiting_reason = Some("Codex 구독의 5시간 창 사용량 회복을 기다립니다.".to_owned());
+        waiting.waiting_kind = Some(super::super::CoordinatorWaitKind::Capacity);
+        let source = plan(vec![waiting]);
+        let brief = build(&source, "active", &HashMap::new(), |_| Observation {
+            record: None,
+            detail: None,
+            warning: None,
+        });
+
+        assert_eq!(brief.items[0].verdict, MorningBriefVerdict::NotStarted);
+        assert_eq!(brief.items[0].next_action, "구독 사용량 회복 기다리기");
+        assert!(brief.items[0]
+            .error
+            .as_deref()
+            .is_some_and(|value| value.contains("사용량 회복")));
     }
 
     #[test]

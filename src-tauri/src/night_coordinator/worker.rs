@@ -5,18 +5,19 @@ use chrono::{DateTime, Utc};
 use crate::{
     approval::ApprovedDispatch,
     model::{
-        DispatchReceiptState, ExecutionRouteInventory, PortfolioDispatchOutcome,
-        PortfolioDispatchResult, Provider,
+        CapacityPool, DispatchReceiptState, ExecutionRouteInventory, PortfolioDispatchOutcome,
+        PortfolioDispatchResult, Provider, ResourceBudget, ResourceState,
     },
 };
 
 use super::{
-    ledger, CoordinatorItem, CoordinatorItemState, CoordinatorPlan, CoordinatorWorkerMode,
-    CoordinatorWorkerRequest,
+    ledger, CoordinatorItem, CoordinatorItemState, CoordinatorPlan, CoordinatorWaitKind,
+    CoordinatorWorkerMode, CoordinatorWorkerRequest,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const EVIDENCE_GRACE_SECONDS: i64 = 120;
+const EXHAUSTED_REMAINING_PERCENT: f64 = 0.5;
 
 pub(super) fn run(request: CoordinatorWorkerRequest) -> Result<(), String> {
     let _lease = ledger::acquire_lease(&request.idempotency_key)?;
@@ -116,6 +117,7 @@ fn tick(
                 item.state = CoordinatorItemState::SkippedDeadline;
                 item.completed_at = Some(now);
                 item.waiting_reason = None;
+                item.waiting_kind = None;
                 item.error = Some(
                     "승인된 수면 마감 안에 전체 시간 예산이 남지 않아 시작하지 않음".to_owned(),
                 );
@@ -149,16 +151,25 @@ fn tick(
             item.state = CoordinatorItemState::SkippedDeadline;
             item.completed_at = Some(now);
             item.waiting_reason = None;
+            item.waiting_kind = None;
             item.error =
                 Some("남은 수면 시간보다 승인된 작업 시간 예산이 커서 시작하지 않음".to_owned());
             plan.updated_at = now;
             ledger::update(plan)?;
             continue;
         }
+        let capacity_pool = plan.lanes[lane_index].capacity_pool;
+        if let Some(reason) = capacity_wait_reason(capacity_pool, &budgets) {
+            let item = &mut plan.lanes[lane_index].items[item_index];
+            item.waiting_kind = Some(CoordinatorWaitKind::Capacity);
+            item.waiting_reason = Some(reason);
+            continue;
+        }
         let workspace_key =
             crate::workspace_identity::key_or_path(&item.approved.dispatch.draft.workspace);
         if occupied_workspaces.contains(&workspace_key) {
             let item = &mut plan.lanes[lane_index].items[item_index];
+            item.waiting_kind = Some(CoordinatorWaitKind::Workspace);
             item.waiting_reason = Some(
                 "같은 실제 작업공간에서 다른 세션이나 승인 작업이 실행 중이라 종료 근거를 기다립니다."
                     .to_owned(),
@@ -177,6 +188,7 @@ fn tick(
             item.started_at = Some(now);
             item.error = None;
             item.waiting_reason = None;
+            item.waiting_kind = None;
         }
         plan.updated_at = now;
         ledger::update(plan)?;
@@ -365,6 +377,7 @@ fn halt_uncertain_lanes(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
                 item.state = CoordinatorItemState::SkippedUncertain;
                 item.completed_at = Some(now);
                 item.waiting_reason = None;
+                item.waiting_kind = None;
                 item.error = Some(
                     "앞 작업의 공급자 시작·종료 증거가 불확실해 이 lane의 후속 작업을 시작하지 않음"
                         .to_owned(),
@@ -435,6 +448,44 @@ fn dispatch_one(
     }
 }
 
+fn capacity_wait_reason(capacity_pool: CapacityPool, budgets: &[ResourceBudget]) -> Option<String> {
+    let (provider, pool_label) = match capacity_pool {
+        CapacityPool::ClaudeSubscription => (Provider::Claude, "Claude 구독"),
+        CapacityPool::CodexSubscription => (Provider::Codex, "Codex 구독"),
+        CapacityPool::GrokSubscription => (Provider::Grok, "Grok 구독"),
+        CapacityPool::CursorSubscription => (Provider::Cursor, "Cursor 구독"),
+        CapacityPool::ApiCredits | CapacityPool::Unknown => return None,
+    };
+    let Some(budget) = budgets.iter().find(|budget| budget.provider == provider) else {
+        return Some(format!(
+            "{pool_label} 사용량을 지금 확인하지 못했습니다. 승인한 마감 안에서 다시 확인합니다."
+        ));
+    };
+    if budget.state != ResourceState::Ready || budget.windows.is_empty() {
+        return Some(format!(
+            "{pool_label} 사용량 근거가 최신 상태가 아닙니다. 승인한 마감 안에서 다시 확인합니다."
+        ));
+    }
+    let constrained = budget.windows.iter().max_by(|left, right| {
+        left.used_percent
+            .partial_cmp(&right.used_percent)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+    let remaining = (100.0 - constrained.used_percent).clamp(0.0, 100.0);
+    if remaining > EXHAUSTED_REMAINING_PERCENT {
+        return None;
+    }
+    let reset = constrained
+        .resets_at
+        .as_deref()
+        .map(|value| format!(" 초기화 예정: {value}."))
+        .unwrap_or_default();
+    Some(format!(
+        "{pool_label}의 {} 창에 {:.1}%만 남았습니다.{reset} 승인한 마감은 늘리지 않고 사용량 회복을 다시 확인합니다.",
+        constrained.label, remaining
+    ))
+}
+
 fn hours(value: f64) -> chrono::Duration {
     chrono::Duration::milliseconds((value * 3_600_000.0).round() as i64)
 }
@@ -465,7 +516,8 @@ mod tests {
         approval::{ApprovedDispatch, ApprovedPortfolioItem},
         model::{
             CapacityPool, DispatchPreflight, DispatchPreflightState, GoalContract, NightRunDraft,
-            PermissionProfile, Provider, RunDraftFormat, RunMode,
+            PermissionProfile, Provider, ResourceBudget, ResourceState, RunDraftFormat, RunMode,
+            UsageWindow,
         },
         night_coordinator::{CoordinatorItem, CoordinatorLane, CoordinatorPlan},
     };
@@ -528,6 +580,7 @@ mod tests {
             receipt: None,
             error: None,
             waiting_reason: None,
+            waiting_kind: None,
             workspace_baseline: None,
             workspace_final: None,
         }
@@ -550,6 +603,31 @@ mod tests {
                 items: vec![item(1, 0.0), item(2, 2.0)],
             }],
             error: None,
+        }
+    }
+
+    fn budget(
+        provider: Provider,
+        state: ResourceState,
+        used_percent: Option<f64>,
+    ) -> ResourceBudget {
+        ResourceBudget {
+            provider,
+            state,
+            plan: Some("test".to_owned()),
+            windows: used_percent
+                .map(|used_percent| {
+                    vec![UsageWindow {
+                        label: "5시간".to_owned(),
+                        used_percent,
+                        resets_at: Some("2026-07-24T12:00:00Z".to_owned()),
+                    }]
+                })
+                .unwrap_or_default(),
+            credits: None,
+            observed_at: "2026-07-24T08:00:00Z".to_owned(),
+            source_label: "test".to_owned(),
+            message: None,
         }
     }
 
@@ -620,6 +698,33 @@ mod tests {
 
         let occupied = active_plan_workspace_keys(&source);
         assert!(occupied.contains(&crate::workspace_identity::key_or_path(&shared_workspace)));
+    }
+
+    #[test]
+    fn exhausted_exact_subscription_waits_for_capacity_recovery() {
+        let budgets = vec![budget(Provider::Codex, ResourceState::Ready, Some(99.9))];
+
+        let reason =
+            capacity_wait_reason(CapacityPool::CodexSubscription, &budgets).expect("capacity wait");
+
+        assert!(reason.contains("0.1%"));
+        assert!(reason.contains("2026-07-24T12:00:00Z"));
+    }
+
+    #[test]
+    fn ambiguous_usage_waits_but_healthy_capacity_may_start() {
+        let degraded = vec![budget(Provider::Claude, ResourceState::Degraded, None)];
+        assert!(
+            capacity_wait_reason(CapacityPool::ClaudeSubscription, &degraded)
+                .expect("ambiguous capacity wait")
+                .contains("최신 상태가 아닙니다")
+        );
+
+        let healthy = vec![budget(Provider::Codex, ResourceState::Ready, Some(40.0))];
+        assert_eq!(
+            capacity_wait_reason(CapacityPool::CodexSubscription, &healthy),
+            None
+        );
     }
 
     #[test]

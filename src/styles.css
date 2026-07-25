@@ -1888,6 +1888,13 @@ button:active:not(:disabled) {
   white-space: nowrap;
 }
 
+.night-plan-item em.is-waiting {
+  overflow: visible;
+  line-height: 1.45;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .night-plan-item--running,
 .night-plan-item--starting {
   border-color: rgba(79, 190, 166, 0.18);

@@ -354,6 +354,7 @@ export interface NightPlanItemSummary {
   idempotency_key: string;
   error: string | null;
   waiting_reason: string | null;
+  waiting_kind: "workspace" | "capacity" | null;
 }
 
 export interface NightPlanLaneSummary {
