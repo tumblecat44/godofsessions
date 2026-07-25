@@ -131,8 +131,8 @@ Final clean run:
 - Rust clippy passed with warnings denied for all targets and features.
 - TypeScript compilation and production Vite build passed.
 - The production dependency audit reported zero known vulnerabilities.
-- Git connectivity verification passed; the worktree contains 53 focused
-  commits from the overnight build and no uncommitted files.
+- Git connectivity verification passed; the worktree contains more than 50
+  focused commits from the overnight build and no uncommitted files.
 - The in-app browser was used to regenerate the plan and verify that the
   Hermes recommendation shows `Hermes → Grok`, `작업자 default`, session mode,
   and runtime together.
