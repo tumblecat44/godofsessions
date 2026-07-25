@@ -142,7 +142,10 @@ recovering 21 GiB; no source or provider data was removed.
 ## Honest gaps
 
 1. Direct Grok ACP dispatch is not implemented. A Grok-native session cannot
-   yet be safely resumed overnight through the approval system.
+   yet be safely resumed overnight through the approval system. The installed
+   user configuration currently defaults Grok to `always-approve`, so the
+   adapter must first prove a per-process permission override rather than
+   silently inheriting it.
 2. Cursor write dispatch is intentionally disabled until a narrow,
    project-scoped sandbox and deny policy can be proven without a broad force
    switch.
@@ -174,3 +177,6 @@ This closes the largest mismatch between the product promise and current
 execution coverage: God of Sessions already knows when Grok is the best
 overnight bet, but today it can execute that bet only through Hermes rather
 than directly resuming a Grok-native session.
+
+The exact enablement gate is documented in
+[`grok-direct-dispatch-gate-2026-07-24.md`](grok-direct-dispatch-gate-2026-07-24.md).

@@ -183,6 +183,7 @@ worker after approval.
 - [Executor-bound Hermes routes M44](docs/overnight-m44.md)
 - [Answer-first executor identity M45](docs/overnight-m45.md)
 - [Overnight build report](docs/overnight-build-report-2026-07-24.md)
+- [Direct Grok dispatch gate](docs/grok-direct-dispatch-gate-2026-07-24.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 - [Orchestration UI revalidation](docs/research/orchestration-ui-revalidation-2026-07-24.md)
 - [Cloud conversation context feasibility](docs/research/cloud-conversation-feasibility-2026-07-24.md)
