@@ -236,7 +236,14 @@ fn hermes_route(
     let provider_has_auth = auth_has_provider(&sources.hermes_auth, configured_provider);
     let runtime_ready =
         !app_server || (sources.codex_binary.is_file() && sources.codex_auth.is_file());
-    let budget = model_provider.and_then(|provider| budget_for(budgets, provider));
+    let budget = match capacity_pool {
+        CapacityPool::ClaudeSubscription => budget_for(budgets, Provider::Claude),
+        CapacityPool::CodexSubscription => budget_for(budgets, Provider::Codex),
+        CapacityPool::GrokSubscription => budget_for(budgets, Provider::Grok),
+        CapacityPool::CursorSubscription => budget_for(budgets, Provider::Cursor),
+        CapacityPool::ApiCredits | CapacityPool::Unknown => None,
+    };
+    let capacity_unverified = capacity_pool == CapacityPool::ApiCredits;
     let policy_blocked = configured_provider == "anthropic";
     let configured = sources.hermes_binary.is_file()
         && !configured_provider.is_empty()
@@ -244,7 +251,7 @@ fn hermes_route(
         && runtime_ready;
     let state = if !configured {
         ResourceState::Unavailable
-    } else if policy_blocked {
+    } else if policy_blocked || capacity_unverified {
         ResourceState::Degraded
     } else {
         budget
@@ -281,6 +288,10 @@ fn hermes_route(
         Some("Codex app-server 실행기 또는 Codex 로그인을 찾지 못했습니다.".to_owned())
     } else if policy_blocked {
         Some("공식 사용 범위를 확인하기 전에는 이 구독 경로를 자동 실행하지 않습니다.".to_owned())
+    } else if capacity_unverified {
+        Some(
+            "별도 OpenAI API 크레딧의 남은 금액을 확인하지 못해 자동 실행하지 않습니다.".to_owned(),
+        )
     } else {
         budget.and_then(|item| item.message.clone())
     };
@@ -658,6 +669,40 @@ mod tests {
             .limitations
             .iter()
             .any(|item| item.contains("자동 배정하지 않음")));
+    }
+
+    #[test]
+    fn openai_api_credits_never_borrow_codex_subscription_readiness() {
+        let (_directory, sources) = sources();
+        fs::write(
+            &sources.hermes_config,
+            "model:\n  default: gpt-5.6\n  provider: openai\n",
+        )
+        .expect("config");
+        fs::write(
+            &sources.hermes_auth,
+            r#"{"providers":{"openai":{"api_key":"secret"}}}"#,
+        )
+        .expect("auth");
+        fs::write(&sources.hermes_binary, "").expect("Hermes binary");
+
+        let inventory = load_from(
+            &sources,
+            &[budget(Provider::Codex)],
+            Utc.with_ymd_and_hms(2026, 7, 24, 8, 0, 0).unwrap(),
+        );
+        let route = inventory
+            .routes
+            .iter()
+            .find(|route| route.id == "hermes:default")
+            .expect("Hermes API route");
+
+        assert_eq!(route.capacity_pool, CapacityPool::ApiCredits);
+        assert_eq!(route.state, ResourceState::Degraded);
+        assert!(route
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("API 크레딧")));
     }
 
     #[test]

@@ -248,15 +248,19 @@ fn build_overnight_plan_inner(
         let budget_is_ready = budgets
             .iter()
             .any(|budget| budget.provider == provider && budget.state == ResourceState::Ready);
+        let execution_is_ready = route.is_none_or(|route| {
+            route.state == ResourceState::Ready && route_is_dispatchable(route, resume_existing)
+        });
         let confidence = if sessions.len() >= 2
             && latest.title.is_some()
             && latest.cwd.is_some()
             && budget_is_ready
+            && execution_is_ready
             && resume_existing
             && provider_choice.capacity_ready_after_hours == 0.0
         {
             RecommendationConfidence::High
-        } else if latest.title.is_some() && budget_is_ready {
+        } else if latest.title.is_some() && budget_is_ready && execution_is_ready {
             RecommendationConfidence::Medium
         } else {
             RecommendationConfidence::Low
@@ -283,6 +287,12 @@ fn build_overnight_plan_inner(
         }
         if !budget_is_ready {
             risks.push("현재 사용량을 확인하지 못해 공급자 선택 확신이 낮습니다.".to_owned());
+        }
+        if !execution_is_ready {
+            risks.push(
+                "선택된 실행 경로가 현재 승인 가능한 상태가 아니어서 이 계획만으로는 시작할 수 없습니다."
+                    .to_owned(),
+            );
         }
         if provider_choice.capacity_ready_after_hours > 0.0 {
             risks.push(
@@ -1131,6 +1141,53 @@ mod tests {
             plan.run_drafts[0].run_mode,
             crate::model::RunMode::NewSession
         );
+    }
+
+    #[test]
+    fn a_ready_budget_cannot_hide_an_unwritable_selected_route() {
+        let snapshot = snapshot(vec![session(
+            Provider::Grok,
+            "grok-session",
+            "alpha",
+            "Continue the overnight implementation",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let inventory = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![route(
+                "grok:native",
+                Provider::Grok,
+                Provider::Grok,
+                ResourceState::Ready,
+            )],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+        let plan = build_overnight_plan_with_context_and_routes(
+            &snapshot,
+            vec![budget(Provider::Grok, 10.0)],
+            &ContextIndex {
+                generated_at: "2026-07-24T22:00:00Z".to_owned(),
+                window_hours: 24,
+                projects: Vec::new(),
+                warnings: Vec::new(),
+                ephemeral: true,
+                methodology: "test".to_owned(),
+            },
+            &inventory,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates[0].confidence, RecommendationConfidence::Low);
+        assert!(plan.candidates[0]
+            .risks
+            .iter()
+            .any(|risk| risk.contains("승인 가능한 상태가 아니어서")));
+        assert!(!plan.run_drafts[0].dispatch_supported);
     }
 
     #[test]

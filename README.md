@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The bounded external-workspace observation M37 desktop slice is working.
+The billable-capacity identity M38 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -100,6 +100,10 @@ While waiting on an external provider session that occupies the approved
 worktree, the coordinator now persists a one-minute retry time instead of
 rebuilding all six provider snapshots every 15 seconds. Same-plan workspace
 dependencies remain responsive on every cheap coordinator tick.
+Hermes routes now derive readiness from the resource they actually bill.
+Separate OpenAI API credits cannot borrow a healthy Codex subscription
+observation, and recommendation confidence requires the exact selected route
+and run shape to be approval-capable.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -141,6 +145,7 @@ dependencies remain responsive on every cheap coordinator tick.
 - [Explainable schedule gates M35](docs/overnight-m35.md)
 - [Selected route risks M36](docs/overnight-m36.md)
 - [Bounded external-workspace observation M37](docs/overnight-m37.md)
+- [Billable-capacity identity M38](docs/overnight-m38.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:
@@ -190,6 +195,8 @@ The app currently:
   candidate's visible risks before the bedtime approval
 - separates cheap same-plan workspace tracking from bounded external-session
   discovery, persisting the next retry instead of polling every heartbeat
+- binds readiness to the selected route's billable Capacity Pool and lowers
+  confidence when the exact execution shape is not approval-capable
 - freezes every contiguous, execution-ready item in each visible independent
   lane into one exact, expiring portfolio approval
 - persists that fixed schedule before launch, then runs a detached,
