@@ -26,6 +26,11 @@ approval contract. A working protocol connection alone is not sufficient.
   `agent stdio`.
 - The top-level CLI accepts repeatable `--deny` rules before `agent stdio`.
 - `grok inspect --json` identifies the active user configuration source.
+- A no-session, no-prompt ACP handshake using
+  `--permission-mode default agent --no-leader stdio` succeeded with protocol
+  version 1. The runtime advertised load-session, MCP, prompt, session, and
+  authentication capabilities. The probe terminated before creating a session
+  or invoking a model or tool.
 - `GROK_HOME` can isolate the Grok configuration directory, but it also changes
   the home used for sessions and authentication; using it naively would break
   native-session resume.
