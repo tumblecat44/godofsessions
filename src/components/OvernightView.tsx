@@ -521,6 +521,61 @@ export function OvernightView() {
             </div>
           </section>
 
+          {plan.schedule.lanes.length > 0 && (
+            <section className="schedule-section">
+              <header>
+                <span className="eyebrow">NIGHT PORTFOLIO</span>
+                <h2>구독별 실행 순서</h2>
+                <p>
+                  {plan.schedule.parallel
+                    ? `${plan.schedule.lanes.length}개 구독은 동시에 시작하고, 같은 구독 안에서만 순서대로 실행합니다.`
+                    : "한 구독 안에서 추천 순서대로 실행합니다."}
+                </p>
+              </header>
+              <div className="schedule-grid">
+                {plan.schedule.lanes.map((lane) => (
+                  <article
+                    className="schedule-lane"
+                    key={lane.capacity_pool}
+                  >
+                    <header>
+                      <span>{capacityPoolLabels[lane.capacity_pool]}</span>
+                      <strong>최대 {lane.planned_hours}시간</strong>
+                    </header>
+                    <div>
+                      {lane.slots.map((slot) => {
+                        const candidate = plan.candidates.find(
+                          (item) => item.rank === slot.candidate_rank,
+                        );
+                        return (
+                          <div className="schedule-slot" key={slot.candidate_rank}>
+                            <span className="schedule-rank">
+                              #{slot.candidate_rank}
+                            </span>
+                            {candidate && (
+                              <ProviderMark
+                                provider={candidate.execution_surface}
+                              />
+                            )}
+                            <strong>{slot.project}</strong>
+                            <small>
+                              {slot.starts_after_hours === 0
+                                ? "바로 시작"
+                                : `${slot.starts_after_hours}시간 후`}
+                              {" · "}
+                              최대 {slot.time_budget_hours}시간
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <p className="schedule-method">{plan.schedule.methodology}</p>
+            </section>
+          )}
+
           {plan.candidates.length > 0 ? (
             <section className="candidate-stack">
               <CandidateCard

@@ -1631,6 +1631,109 @@ button:active:not(:disabled) {
   line-height: 1.45;
 }
 
+.schedule-section {
+  max-width: 1500px;
+  margin: 24px auto 0;
+}
+
+.schedule-section > header h2 {
+  margin: 5px 0 0;
+  color: var(--ink-primary);
+  font-size: 18px;
+  font-weight: 570;
+  letter-spacing: -0.03em;
+}
+
+.schedule-section > header p {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 9px;
+}
+
+.schedule-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.schedule-lane {
+  min-width: 0;
+  padding: 12px;
+  background: var(--console);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.schedule-lane > header {
+  padding-bottom: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--etched-edge-soft);
+}
+
+.schedule-lane > header span {
+  color: var(--signal-amber);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.schedule-lane > header strong {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-weight: 500;
+}
+
+.schedule-lane > div {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-slot {
+  min-height: 38px;
+  padding: 7px 8px;
+  display: grid;
+  grid-template-columns: 22px 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+}
+
+.schedule-rank {
+  color: var(--signal-amber);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.schedule-slot strong {
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-size: 9px;
+  font-weight: 570;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-slot small {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.schedule-method {
+  margin: 8px 0 0;
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
 .candidate-stack {
   max-width: 1500px;
   margin: 16px auto 0;
@@ -2951,6 +3054,18 @@ button:active:not(:disabled) {
 
   .route-grid {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-slot {
+    grid-template-columns: 22px 18px minmax(0, 1fr);
+  }
+
+  .schedule-slot small {
+    grid-column: 3;
   }
 
   .candidate-details {

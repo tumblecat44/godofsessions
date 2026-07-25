@@ -39,6 +39,7 @@ The read-only M4 desktop slice is working.
 - [Night Contracts M4](docs/overnight-m4.md)
 - [Dispatch adapter feasibility](docs/dispatch-feasibility.md)
 - [Dispatch readiness M5](docs/overnight-m5.md)
+- [Capacity-aware Night Portfolio M6](docs/overnight-m6.md)
 
 The app currently:
 
@@ -65,6 +66,8 @@ The app currently:
 - compiles each candidate into an inert, operator-reviewable Night Contract
 - shows the proven dispatch interface, durable receipt, and missing guardrails
   for every route
+- builds parallel lanes per subscription while keeping work inside each shared
+  Capacity Pool sequential and within the sleep window
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 

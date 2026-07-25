@@ -579,6 +579,39 @@ export const previewOvernightPlan: OvernightPlan = {
       dispatch_supported: false,
     },
   ],
+  schedule: {
+    parallel: true,
+    methodology:
+      "같은 구독 풀의 작업은 한 번에 하나씩 순차 실행하고, 서로 다른 구독 풀은 동시에 시작합니다. 각 레인의 합은 수면시간을 넘지 않습니다.",
+    lanes: [
+      {
+        capacity_pool: "codex_subscription",
+        planned_hours: 3.5,
+        slots: [
+          {
+            candidate_rank: 1,
+            project: "godofsessions",
+            route_id: "codex:native",
+            starts_after_hours: 0,
+            time_budget_hours: 3.5,
+          },
+        ],
+      },
+      {
+        capacity_pool: "grok_subscription",
+        planned_hours: 2.5,
+        slots: [
+          {
+            candidate_rank: 2,
+            project: "agent-research",
+            route_id: "grok:native",
+            starts_after_hours: 0,
+            time_budget_hours: 2.5,
+          },
+        ],
+      },
+    ],
+  },
   exclusions: [
     {
       project: "malgun-app",

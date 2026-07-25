@@ -161,7 +161,7 @@ pub struct ResourceBudget {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapacityPool {
     ClaudeSubscription,
@@ -277,6 +277,29 @@ pub struct NightRunDraft {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct NightScheduleSlot {
+    pub candidate_rank: usize,
+    pub project: String,
+    pub route_id: String,
+    pub starts_after_hours: f64,
+    pub time_budget_hours: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightScheduleLane {
+    pub capacity_pool: CapacityPool,
+    pub planned_hours: f64,
+    pub slots: Vec<NightScheduleSlot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightSchedule {
+    pub lanes: Vec<NightScheduleLane>,
+    pub parallel: bool,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
     pub project: String,
@@ -317,6 +340,7 @@ pub struct OvernightPlan {
     pub route_inventory: ExecutionRouteInventory,
     pub candidates: Vec<OvernightCandidate>,
     pub run_drafts: Vec<NightRunDraft>,
+    pub schedule: NightSchedule,
     pub exclusions: Vec<ExcludedProject>,
     pub read_only: bool,
     pub methodology: String,

@@ -4,8 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use crate::model::{
     Capability, CapacityPool, ContextIndex, ContextRole, ExcludedProject, ExecutionRoute,
-    ExecutionRouteInventory, OvernightCandidate, OvernightPlan, ProjectContextBrief, Provider,
-    RecommendationConfidence, ResourceBudget, ResourceState, Session, SessionStatus, Snapshot,
+    ExecutionRouteInventory, NightSchedule, NightScheduleLane, NightScheduleSlot,
+    OvernightCandidate, OvernightPlan, ProjectContextBrief, Provider, RecommendationConfidence,
+    ResourceBudget, ResourceState, Session, SessionStatus, Snapshot,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -309,8 +310,10 @@ fn build_overnight_plan_inner(
             .total_cmp(&left.score)
             .then_with(|| left.project.cmp(&right.project))
     });
-    if candidates.len() > 3 {
-        for candidate in candidates.drain(3..) {
+    let mut selected = Vec::new();
+    let mut lane_hours = BTreeMap::<CapacityPool, f64>::new();
+    for mut candidate in candidates {
+        if selected.len() >= 3 {
             exclusions.push(ExcludedProject {
                 project: candidate.project,
                 reason: format!(
@@ -318,12 +321,33 @@ fn build_overnight_plan_inner(
                     candidate.score
                 ),
             });
+            continue;
         }
+        let used = lane_hours
+            .get(&candidate.capacity_pool)
+            .copied()
+            .unwrap_or_default();
+        let remaining = floor_half((sleep_hours - used).max(0.0));
+        if remaining < 1.0 {
+            exclusions.push(ExcludedProject {
+                project: candidate.project,
+                reason: format!(
+                    "{}의 오늘 밤 시간 예산을 더 높은 순위 작업이 이미 사용합니다.",
+                    capacity_pool_display_name(candidate.capacity_pool)
+                ),
+            });
+            continue;
+        }
+        candidate.estimated_hours = candidate.estimated_hours.min(remaining);
+        lane_hours.insert(candidate.capacity_pool, used + candidate.estimated_hours);
+        selected.push(candidate);
     }
+    let mut candidates = selected;
     for (index, candidate) in candidates.iter_mut().enumerate() {
         candidate.rank = index + 1;
     }
     exclusions.sort_by(|left, right| left.project.cmp(&right.project));
+    let schedule = build_schedule(&candidates);
     let run_drafts = candidates
         .iter()
         .map(crate::night_contract::build)
@@ -341,10 +365,41 @@ fn build_overnight_plan_inner(
             .unwrap_or_else(|| empty_route_inventory(now)),
         candidates,
         run_drafts,
+        schedule,
         exclusions,
         read_only: true,
         methodology:
             "최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
+                .to_owned(),
+    }
+}
+
+fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
+    let mut lanes = BTreeMap::<CapacityPool, NightScheduleLane>::new();
+    for candidate in candidates {
+        let lane = lanes
+            .entry(candidate.capacity_pool)
+            .or_insert_with(|| NightScheduleLane {
+                capacity_pool: candidate.capacity_pool,
+                planned_hours: 0.0,
+                slots: Vec::new(),
+            });
+        let starts_after_hours = lane.planned_hours;
+        lane.slots.push(NightScheduleSlot {
+            candidate_rank: candidate.rank,
+            project: candidate.project.clone(),
+            route_id: candidate.execution_route_id.clone(),
+            starts_after_hours,
+            time_budget_hours: candidate.estimated_hours,
+        });
+        lane.planned_hours += candidate.estimated_hours;
+    }
+    let lanes = lanes.into_values().collect::<Vec<_>>();
+    NightSchedule {
+        parallel: lanes.len() > 1,
+        lanes,
+        methodology:
+            "같은 구독 풀의 작업은 한 번에 하나씩 순차 실행하고, 서로 다른 구독 풀은 동시에 시작합니다. 각 레인의 합은 수면시간을 넘지 않으며 남는 시간을 채우기 위한 작업은 만들지 않습니다."
                 .to_owned(),
     }
 }
@@ -420,6 +475,17 @@ fn capacity_pool_for(provider: Provider) -> CapacityPool {
         Provider::Grok => CapacityPool::GrokSubscription,
         Provider::Cursor => CapacityPool::CursorSubscription,
         Provider::Hermes | Provider::Openclaw => CapacityPool::Unknown,
+    }
+}
+
+fn capacity_pool_display_name(pool: CapacityPool) -> &'static str {
+    match pool {
+        CapacityPool::ClaudeSubscription => "Claude 구독",
+        CapacityPool::CodexSubscription => "Codex 구독",
+        CapacityPool::GrokSubscription => "Grok 구독",
+        CapacityPool::CursorSubscription => "Cursor 구독",
+        CapacityPool::ApiCredits => "API 크레딧",
+        CapacityPool::Unknown => "확인되지 않은 용량 풀",
     }
 }
 
@@ -1007,6 +1073,96 @@ mod tests {
             .exclusions
             .iter()
             .all(|item| item.reason.contains("상위 3개")));
+    }
+
+    #[test]
+    fn same_capacity_pool_runs_sequentially_within_the_sleep_window() {
+        let sessions = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .map(|project| {
+                session(
+                    Provider::Codex,
+                    project,
+                    project,
+                    "Continue work",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:30:00Z",
+                )
+            })
+            .collect();
+
+        let plan = build_overnight_plan(
+            &snapshot(sessions),
+            vec![budget(Provider::Codex, 10.0)],
+            SleepHours::new(4.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 2);
+        assert_eq!(plan.schedule.lanes.len(), 1);
+        let lane = &plan.schedule.lanes[0];
+        assert_eq!(lane.capacity_pool, CapacityPool::CodexSubscription);
+        assert_eq!(lane.planned_hours, 4.0);
+        assert_eq!(lane.slots[0].starts_after_hours, 0.0);
+        assert_eq!(lane.slots[1].starts_after_hours, 2.0);
+        assert!(lane.planned_hours <= plan.sleep_hours);
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("시간 예산")));
+    }
+
+    #[test]
+    fn independent_capacity_pools_start_in_parallel() {
+        let plan = build_overnight_plan(
+            &snapshot(vec![
+                session(
+                    Provider::Claude,
+                    "alpha",
+                    "alpha",
+                    "Claude work",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:30:00Z",
+                ),
+                session(
+                    Provider::Codex,
+                    "beta",
+                    "beta",
+                    "Codex work",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:30:00Z",
+                ),
+                session(
+                    Provider::Grok,
+                    "gamma",
+                    "gamma",
+                    "Grok work",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:30:00Z",
+                ),
+            ]),
+            vec![
+                budget(Provider::Claude, 10.0),
+                budget(Provider::Codex, 10.0),
+                budget(Provider::Grok, 10.0),
+            ],
+            SleepHours::new(2.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.schedule.lanes.len(), 3);
+        assert!(plan.schedule.parallel);
+        assert!(plan.schedule.lanes.iter().all(|lane| {
+            lane.planned_hours <= plan.sleep_hours
+                && lane
+                    .slots
+                    .first()
+                    .is_some_and(|slot| slot.starts_after_hours == 0.0)
+        }));
     }
 
     #[test]

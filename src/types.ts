@@ -193,6 +193,26 @@ export interface NightRunDraft {
   dispatch_supported: boolean;
 }
 
+export interface NightScheduleSlot {
+  candidate_rank: number;
+  project: string;
+  route_id: string;
+  starts_after_hours: number;
+  time_budget_hours: number;
+}
+
+export interface NightScheduleLane {
+  capacity_pool: CapacityPool;
+  planned_hours: number;
+  slots: NightScheduleSlot[];
+}
+
+export interface NightSchedule {
+  lanes: NightScheduleLane[];
+  parallel: boolean;
+  methodology: string;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;
@@ -231,6 +251,7 @@ export interface OvernightPlan {
   route_inventory: ExecutionRouteInventory;
   candidates: OvernightCandidate[];
   run_drafts: NightRunDraft[];
+  schedule: NightSchedule;
   exclusions: ExcludedProject[];
   read_only: boolean;
   methodology: string;

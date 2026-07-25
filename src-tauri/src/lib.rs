@@ -240,6 +240,19 @@ mod live_tests {
                 && !draft.external_side_effects_allowed
         }));
         assert!(plan
+            .schedule
+            .lanes
+            .iter()
+            .all(|lane| lane.planned_hours <= plan.sleep_hours));
+        assert_eq!(
+            plan.schedule
+                .lanes
+                .iter()
+                .map(|lane| lane.slots.len())
+                .sum::<usize>(),
+            plan.candidates.len()
+        );
+        assert!(plan
             .candidates
             .iter()
             .all(|candidate| !candidate.evidence.is_empty()
