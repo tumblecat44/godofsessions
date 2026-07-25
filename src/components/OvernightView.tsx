@@ -57,9 +57,9 @@ import { ProviderMark } from "./ProviderMark";
 
 type PlanState =
   | { kind: "idle" }
-  | { kind: "loading" }
+  | { kind: "loading"; previous?: OvernightPlan }
   | { kind: "ready"; plan: OvernightPlan }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; previous?: OvernightPlan };
 
 const sleepOptions = [4, 6, 7, 8, 10];
 
@@ -1027,6 +1027,7 @@ function CandidateCard({
   startsAfterHours = 0,
   waitReasons = [],
   approvalLoading = false,
+  approvalDisabled = false,
   onRequestApproval,
   primary = false,
 }: {
@@ -1037,6 +1038,7 @@ function CandidateCard({
   startsAfterHours?: number;
   waitReasons?: ScheduleWaitReason[];
   approvalLoading?: boolean;
+  approvalDisabled?: boolean;
   onRequestApproval?: (preflight: DispatchPreflight) => void;
   primary?: boolean;
 }) {
@@ -1345,11 +1347,14 @@ function CandidateCard({
                     disabled={
                       preflight.state !== "ready_for_approval" ||
                       approvalLoading ||
+                      approvalDisabled ||
                       !onRequestApproval
                     }
                     onClick={() => onRequestApproval?.(preflight)}
                   >
-                    {approvalLoading ? (
+                    {approvalDisabled ? (
+                      "새 근거 확인 중"
+                    ) : approvalLoading ? (
                       <>
                         <RefreshCw className="is-spinning" size={12} />
                         승인 준비 중
@@ -1756,7 +1761,13 @@ export function OvernightView() {
   const generate = async () => {
     setApprovalError(null);
     revealNextPlanRef.current = true;
-    setState({ kind: "loading" });
+    const previous =
+      state.kind === "ready"
+        ? state.plan
+        : state.kind === "loading" || state.kind === "error"
+          ? state.previous
+          : undefined;
+    setState({ kind: "loading", previous });
     try {
       const plan = isTauri()
         ? await invoke<OvernightPlan>("generate_overnight_plan", { sleepHours })
@@ -1765,6 +1776,7 @@ export function OvernightView() {
     } catch (error) {
       setState({
         kind: "error",
+        previous,
         message:
           error instanceof Error
             ? error.message
@@ -1773,7 +1785,15 @@ export function OvernightView() {
     }
   };
 
-  const plan = state.kind === "ready" ? state.plan : null;
+  const plan =
+    state.kind === "ready"
+      ? state.plan
+      : state.kind === "loading" || state.kind === "error"
+        ? state.previous || null
+        : null;
+  const planIsReadOnly =
+    state.kind === "loading" ||
+    (state.kind === "error" && state.previous !== undefined);
   const readyPortfolioPreflights = plan
     ? readyPortfolioPreflightsForPlan(plan)
     : [];
@@ -2248,13 +2268,21 @@ export function OvernightView() {
       )}
 
       {state.kind === "loading" && (
-        <section className="plan-loading" aria-live="polite">
+        <section
+          className={`plan-loading ${state.previous ? "plan-loading--refresh" : ""}`}
+          aria-live="polite"
+        >
           <span className="startup-orbit" />
           <div>
-            <strong>오늘 밤의 기회비용을 계산하고 있습니다</strong>
+            <strong>
+              {state.previous
+                ? "현재 추천을 유지한 채 새 근거를 확인합니다"
+                : "오늘 밤의 기회비용을 계산하고 있습니다"}
+            </strong>
             <p>
-              프로젝트 맥락과 Claude·Codex·Grok 사용량을 함께 확인합니다. 로컬
-              인증 상태에 따라 20초 안팎 걸릴 수 있습니다.
+              {state.previous
+                ? "확인이 끝날 때까지 아래 계획은 읽기 전용이며 승인할 수 없습니다."
+                : "프로젝트 맥락과 Claude·Codex·Grok 사용량을 함께 확인합니다. 로컬 인증 상태에 따라 20초 안팎 걸릴 수 있습니다."}
             </p>
           </div>
         </section>
@@ -2274,7 +2302,11 @@ export function OvernightView() {
       )}
 
       {plan && (
-        <div className="plan-results" ref={planResultsRef}>
+        <div
+          className={`plan-results ${planIsReadOnly ? "plan-results--refreshing" : ""}`}
+          ref={planResultsRef}
+          aria-busy={state.kind === "loading"}
+        >
           <div className="plan-index-line">
             <span>
               <i className="index-pulse" />
@@ -2321,6 +2353,7 @@ export function OvernightView() {
                   plan.run_drafts.find((draft) => draft.candidate_rank === 1)
                     ?.id
                 }
+                approvalDisabled={planIsReadOnly}
                 onRequestApproval={(preflight) =>
                   void requestApproval(preflight)
                 }
@@ -2376,6 +2409,7 @@ export function OvernightView() {
                           (draft) => draft.candidate_rank === candidate.rank,
                         )?.id
                       }
+                      approvalDisabled={planIsReadOnly}
                       onRequestApproval={(preflight) =>
                         void requestApproval(preflight)
                       }
@@ -2485,7 +2519,11 @@ export function OvernightView() {
                   <button
                     type="button"
                     onClick={() => void requestPortfolioApproval()}
-                    disabled={isPreparingPortfolio || isDispatching}
+                    disabled={
+                      planIsReadOnly ||
+                      isPreparingPortfolio ||
+                      isDispatching
+                    }
                   >
                     {isPreparingPortfolio ? (
                       <>

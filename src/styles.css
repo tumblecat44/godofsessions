@@ -2462,6 +2462,14 @@ button:active:not(:disabled) {
   flex: 0 0 auto;
 }
 
+.plan-loading--refresh {
+  min-height: 82px;
+  background:
+    linear-gradient(125deg, rgba(228, 169, 74, 0.045), transparent 42%),
+    var(--console);
+  border-color: rgba(228, 169, 74, 0.18);
+}
+
 .plan-loading strong,
 .plan-error strong {
   color: var(--ink-primary);
@@ -2512,6 +2520,14 @@ button:active:not(:disabled) {
 
 .plan-results {
   scroll-margin-top: 48px;
+  transition:
+    opacity 160ms var(--ease-out),
+    filter 160ms var(--ease-out);
+}
+
+.plan-results--refreshing {
+  opacity: 0.72;
+  filter: saturate(0.62);
 }
 
 .plan-index-line span {

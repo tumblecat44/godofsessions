@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The prewarmed bedtime evidence M42 desktop slice is working.
+The stable refresh surface M43 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -120,6 +120,11 @@ observation before the operator asks for a plan. Concurrent requests share
 one in-process result for 60 seconds, so an immediate duplicate or
 regeneration does not repeat OpenClaw's expensive full status probe. Exact
 capacity revalidation at a scheduled start deliberately bypasses this cache.
+Refreshing an existing recommendation keeps the previous answer visible while
+new session and quota evidence is gathered. The retained plan is visibly
+muted and every single-run and portfolio approval is disabled until the new
+snapshot replaces it atomically; a failed refresh preserves it as read-only
+context instead of clearing the screen.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -166,6 +171,7 @@ capacity revalidation at a scheduled start deliberately bypasses this cache.
 - [Actionable-only recommendations M40](docs/overnight-m40.md)
 - [Visible no-run explanations M41](docs/overnight-m41.md)
 - [Prewarmed bedtime evidence M42](docs/overnight-m42.md)
+- [Stable recommendation refresh M43](docs/overnight-m43.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:
