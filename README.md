@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The actionable-only recommendation M40 desktop slice is working.
+The visible no-run explanation M41 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -111,6 +111,10 @@ actually be resumed, and a missing route is no longer mistaken for readiness.
 If no provider can execute a project through the exact required run shape, the
 project now appears only in the explained exclusions. The answer no longer
 presents a diagnostic, non-approvable route as tonight's best bet.
+When that leaves no candidates, the empty recommendation card itself shows up
+to three project-specific reasons immediately. The operator no longer has to
+cross the capacity and route diagnostics to discover why doing nothing is the
+safe answer.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -155,6 +159,7 @@ presents a diagnostic, non-approvable route as tonight's best bet.
 - [Billable-capacity identity M38](docs/overnight-m38.md)
 - [Writable-provider choice M39](docs/overnight-m39.md)
 - [Actionable-only recommendations M40](docs/overnight-m40.md)
+- [Visible no-run explanations M41](docs/overnight-m41.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:

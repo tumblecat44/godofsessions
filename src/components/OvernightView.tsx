@@ -2387,9 +2387,28 @@ export function OvernightView() {
               <MoonStar size={20} />
               <h2>안전하게 추천할 일이 없습니다</h2>
               <p>
-                최근 프로젝트가 이미 실행 중이거나 사람의 판단을 기다리고
-                있습니다. 오늘 밤 아무것도 돌리지 않는 것도 유효한 결론입니다.
+                각 프로젝트의 현재 상태와 실제 실행 경로를 확인했습니다. 오늘 밤
+                아무것도 돌리지 않는 것도 유효한 결론입니다.
               </p>
+              {plan.exclusions.length > 0 && (
+                <ul
+                  className="no-candidate-reasons"
+                  aria-label="추천하지 않은 주요 이유"
+                >
+                  {plan.exclusions.slice(0, 3).map((item) => (
+                    <li key={`${item.project}-${item.reason}`}>
+                      <strong>{item.project}</strong>
+                      <span>{item.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {plan.exclusions.length > 3 && (
+                <small className="no-candidate-more">
+                  그 밖의 {plan.exclusions.length - 3}개 프로젝트는 아래 전체
+                  제외 목록에서 확인할 수 있습니다.
+                </small>
+              )}
             </section>
           )}
 

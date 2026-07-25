@@ -4343,6 +4343,49 @@ button:active:not(:disabled) {
   line-height: 1.55;
 }
 
+.no-candidate-reasons {
+  width: min(680px, 100%);
+  margin: 18px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--ink-secondary);
+  list-style: none;
+  text-align: left;
+}
+
+.no-candidate-reasons li {
+  min-width: 0;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(90px, 0.28fr) 1fr;
+  gap: 12px;
+  align-items: baseline;
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+}
+
+.no-candidate-reasons strong {
+  overflow: hidden;
+  color: var(--ink-primary);
+  font-size: 9px;
+  font-weight: 570;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-candidate-reasons span,
+.no-candidates .no-candidate-more {
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.no-candidates .no-candidate-more {
+  margin-top: 8px;
+}
+
 .plan-footnotes {
   max-width: 1500px;
   margin: 12px auto 0;
@@ -5089,6 +5132,11 @@ button:active:not(:disabled) {
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+  .no-candidate-reasons li {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .sidebar {
