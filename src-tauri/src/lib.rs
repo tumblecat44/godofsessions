@@ -1,4 +1,5 @@
 mod approval;
+mod claude_dispatch;
 mod codex_dispatch;
 mod connectors;
 mod context_brief;
@@ -15,9 +16,9 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, DispatchReceipt, NightRunDetail, NightRunHistory, OvernightPlan, Provider,
-    PortfolioApprovalChallenge, PortfolioDispatchOutcome, PortfolioDispatchResult, Session,
-    Snapshot, StatusConfidence, WorkspaceOverview,
+    ApprovalChallenge, DispatchReceipt, NightRunDetail, NightRunHistory, OvernightPlan,
+    PortfolioApprovalChallenge, PortfolioDispatchOutcome, PortfolioDispatchResult, Provider,
+    Session, Snapshot, StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
@@ -25,6 +26,10 @@ type ApprovalState = Mutex<approval::ApprovalRegistry>;
 
 pub fn run_codex_night_worker() {
     codex_dispatch::run_night_worker_from_stdin();
+}
+
+pub fn run_claude_night_worker() {
+    claude_dispatch::run_night_worker_from_stdin();
 }
 
 #[tauri::command]
@@ -173,6 +178,37 @@ async fn dispatch_approved_codex(
 }
 
 #[tauri::command]
+async fn dispatch_approved_claude(
+    approval_id: String,
+    idempotency_key: String,
+    confirmation_phrase: String,
+    approvals: State<'_, ApprovalState>,
+) -> Result<DispatchReceipt, String> {
+    let approved = approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .consume(
+            &approval_id,
+            &idempotency_key,
+            &confirmation_phrase,
+            Utc::now(),
+        )
+        .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let budgets = usage::load_budgets();
+        let routes = execution_routes::load(&budgets, Utc::now());
+        let route = routes
+            .routes
+            .iter()
+            .find(|route| route.id == approved.draft.route_id)
+            .ok_or_else(|| "승인한 Claude 실행 경로를 더 이상 찾지 못했습니다.".to_owned())?;
+        claude_dispatch::execute_approved(approved, route)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn dispatch_approved_portfolio(
     approval_id: String,
     idempotency_key: String,
@@ -211,6 +247,7 @@ async fn dispatch_approved_portfolio(
                 .and_then(|route| match surface {
                     Provider::Hermes => dispatch::execute_approved(item, route),
                     Provider::Codex => codex_dispatch::execute_approved(item, route),
+                    Provider::Claude => claude_dispatch::execute_approved(item, route),
                     _ => Err(format!(
                         "{} 실행 어댑터는 아직 승인 실행을 지원하지 않습니다.",
                         surface.as_str()
@@ -282,6 +319,7 @@ async fn load_night_run_detail(
                 .ok_or_else(|| "Codex 야간 실행 상세에는 thread id가 필요합니다.".to_owned())?;
             codex_dispatch::load_night_run_detail(&task_id, thread_id)
         }
+        Provider::Claude => claude_dispatch::load_night_run_detail(&task_id),
         Provider::Hermes => dispatch::load_night_run_detail(&task_id),
         _ => Err("이 공급자의 야간 실행 상세 복구는 아직 지원하지 않습니다.".to_owned()),
     })
@@ -390,6 +428,7 @@ pub fn run() {
             cancel_dispatch_approval,
             dispatch_approved_hermes,
             dispatch_approved_codex,
+            dispatch_approved_claude,
             dispatch_approved_portfolio
         ])
         .run(tauri::generate_context!())

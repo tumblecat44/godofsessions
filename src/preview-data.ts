@@ -661,12 +661,16 @@ export const previewOvernightPlan: OvernightPlan = {
         state: "ready",
         configured: true,
         capabilities: ["resume_session", "mcp"],
-        adapter_readiness: "guardrail_required",
-        dispatch_interface: "Claude background agent",
-        receipt_source: "claude agents --json",
+        adapter_readiness: "contract_ready",
+        dispatch_interface: "Claude Code detached print worker",
+        receipt_source: "forked Claude transcript + JSON result",
         dispatch_guardrails: [
-          "background 모드용 allowedTools/deniedTools 정책 필요",
+          "기존 세션 컨텍스트는 fork하고 원본 세션은 보존",
+          "dontAsk + 명시적 built-in tool 집합",
+          "workspace 중심 read/write, network deny, 민감 환경변수 제거",
+          "엄격한 OS sandbox와 sandbox escape 차단",
           "bypassPermissions 금지",
+          "시간·turn 상한과 공급자 transcript idempotency marker 필수",
         ],
         source_label: "~/.local/bin/claude",
         message: null,
@@ -807,6 +811,40 @@ export const previewOvernightPlan: OvernightPlan = {
       risks: ["조사 범위가 열려 있어 종료 조건을 더 좁혀야 할 수 있습니다."],
       estimated_hours: 2.5,
     },
+    {
+      rank: 3,
+      project: "malgun-app",
+      cwd: "/Users/you/projects/malgun-app",
+      goal: "첫 사용 예약 흐름의 회귀를 고치고 검증 가능한 상태로 마무리",
+      provider: "claude",
+      execution_route_id: "claude:native",
+      execution_surface: "claude",
+      capacity_pool: "claude_subscription",
+      route_reason:
+        "기존 Claude 세션을 보존한 채 strict sandbox 안의 새 fork로 이어갑니다.",
+      native_session_id: "cl1",
+      resume_existing: true,
+      score: 73.8,
+      confidence: "medium",
+      evidence: [
+        "최근 24시간에 malgun-app 관련 세션 3개",
+        "가장 최근 근거: “첫 사용 예약 흐름 점검” · 약 3시간 전",
+        "Claude 세션의 작업공간과 로컬 transcript가 일치함",
+      ],
+      source_session_ids: ["claude:cl1", "codex:co3"],
+      provider_reason:
+        "Claude 구독 여유가 크고 이 프로젝트의 유휴 기존 세션을 안전하게 fork할 수 있습니다.",
+      expected_outcome:
+        "관련 화면의 회귀 수정, 테스트 결과, 사람이 확인할 남은 위험의 아침 보고",
+      verification: [
+        "관련 테스트와 타입 검사를 통과할 것",
+        "실패가 남으면 재현 조건과 막힌 지점을 명시할 것",
+      ],
+      risks: [
+        "MCP와 네트워크가 차단되어 외부 서비스가 필요한 검증은 수행하지 않습니다.",
+      ],
+      estimated_hours: 2,
+    },
   ],
   run_drafts: [
     {
@@ -869,6 +907,37 @@ export const previewOvernightPlan: OvernightPlan = {
       approval_required: true,
       dispatch_supported: true,
     },
+    {
+      id: "night:3:malgun-app:claude:native",
+      candidate_rank: 3,
+      project: "malgun-app",
+      route_id: "claude:native",
+      format: "structured_prompt",
+      run_mode: "resume_existing",
+      native_session_id: "cl1",
+      workspace: "/Users/you/projects/malgun-app",
+      time_budget_hours: 2,
+      continuation_turn_budget: null,
+      goal: "첫 사용 예약 흐름의 회귀를 고치고 검증 가능한 상태로 마무리",
+      contract: {
+        outcome:
+          "관련 화면의 회귀 수정, 테스트 결과, 사람이 확인할 남은 위험의 아침 보고",
+        verification:
+          "관련 테스트와 타입 검사를 통과할 것 / 실패가 남으면 재현 조건과 막힌 지점을 명시할 것",
+        constraints:
+          "기존 동작과 관련 없는 변경을 보존하고 외부 메시지, 배포, push, merge, 삭제를 하지 말 것.",
+        boundaries:
+          "/Users/you/projects/malgun-app 작업공간 안의 관련 파일과 로컬 검증만 사용",
+        stop_when:
+          "사람의 결정, 외부 시스템, 자격 증명, 파괴적 작업이 필요하면 이유를 남기고 멈출 것.",
+      },
+      prompt:
+        "Overnight goal\n첫 사용 예약 흐름의 회귀를 고치고 검증 가능한 상태로 마무리\n\nOutcome\n관련 화면의 회귀 수정과 테스트 결과\n\nVerification\n관련 테스트와 타입 검사를 통과할 것\n\nConstraints\n외부 메시지, 배포, push, merge, 삭제를 하지 말 것.\n\nBoundaries\n/Users/you/projects/malgun-app\n\nStop and report when\n사람의 결정이나 외부 시스템 변경이 필요할 때",
+      permission_profile: "workspace_write",
+      external_side_effects_allowed: false,
+      approval_required: true,
+      dispatch_supported: true,
+    },
   ],
   schedule: {
     parallel: true,
@@ -898,6 +967,19 @@ export const previewOvernightPlan: OvernightPlan = {
             route_id: "hermes:default",
             starts_after_hours: 0,
             time_budget_hours: 2.5,
+          },
+        ],
+      },
+      {
+        capacity_pool: "claude_subscription",
+        planned_hours: 2,
+        slots: [
+          {
+            candidate_rank: 3,
+            project: "malgun-app",
+            route_id: "claude:native",
+            starts_after_hours: 0,
+            time_budget_hours: 2,
           },
         ],
       },
@@ -1188,12 +1270,118 @@ export const previewOvernightPlan: OvernightPlan = {
       read_only: true,
       execution_enabled: false,
     },
+    {
+      draft_id: "night:3:malgun-app:claude:native",
+      state: "ready_for_approval",
+      surface: "claude",
+      adapter: "Claude Code forked print worker",
+      scope_label: "쓰기 가능한 Git 작업공간",
+      scope_value: "/Users/you/projects/malgun-app",
+      executor_label: "출처 세션 → 격리 fork",
+      executor_value: "cl1",
+      transport: "detached worker → Claude Code stdin",
+      idempotency_key:
+        "gos-claude-b8ea7721b803e85d37d2932aee4cc57c4f4aef716b53011d03a94845cd4c9853",
+      checks: [
+        {
+          key: "route",
+          level: "pass",
+          label: "Claude 실행 경로",
+          message: "Claude 구독과 네이티브 실행 경로가 준비되어 있습니다.",
+        },
+        {
+          key: "version",
+          level: "pass",
+          label: "엄격한 sandbox 버전",
+          message: "2.1.220 (Claude Code) · strict sandbox와 turn cap 지원",
+        },
+        {
+          key: "auth",
+          level: "pass",
+          label: "Claude 구독 로그인",
+          message: "claude.ai Max 구독 로그인 · 자격 증명 값은 읽지 않음",
+        },
+        {
+          key: "session",
+          level: "pass",
+          label: "기존 세션 fork",
+          message:
+            "같은 작업공간의 유휴 세션 컨텍스트를 새 세션으로 fork합니다.",
+        },
+        {
+          key: "workspace",
+          level: "pass",
+          label: "작업공간 경계",
+          message:
+            "정규화된 Git 작업공간 한 곳만 read/write 경계로 사용합니다.",
+        },
+        {
+          key: "idempotency",
+          level: "pass",
+          label: "영수증·공급자 원장 중복 방지",
+          message:
+            "같은 로컬 실행 영수증이나 Claude transcript marker가 없습니다.",
+        },
+        {
+          key: "contract",
+          level: "pass",
+          label: "Night Contract",
+          message:
+            "fork, workspace-write, 외부 부작용 금지, 시간 상한이 고정되어 있습니다.",
+        },
+      ],
+      commands: [
+        {
+          step: "start_claude_night_worker",
+          program: "/usr/bin/caffeinate",
+          arguments: [
+            "-i",
+            "/Applications/God of Sessions.app/Contents/MacOS/god-of-sessions",
+            "--claude-night-worker",
+          ],
+          mutates_local_state: false,
+          summary:
+            "GUI와 분리된 유휴 절전 방지 Claude 야간 작업자 시작",
+        },
+        {
+          step: "fork_claude_session",
+          program: "/Users/you/.local/bin/claude",
+          arguments: [
+            "--safe-mode",
+            "--no-chrome",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--permission-mode",
+            "dontAsk",
+            "--settings",
+            '{"permissions":{"defaultMode":"dontAsk","allow":["Read","Edit","Write","Glob","Grep","Bash"],"deny":["WebFetch","WebSearch","mcp__*","Agent","Bash(git push *)","Bash(gh *)"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true,"filesystem":{"denyRead":["~/"],"allowRead":["/Users/you/projects/malgun-app"],"denyWrite":["~/"],"allowWrite":["/Users/you/projects/malgun-app"]},"network":{"allowedDomains":[]}}}',
+            "--tools",
+            "Bash,Edit,Read,Write,Glob,Grep",
+            "--allowedTools",
+            "Bash,Edit,Read,Write,Glob,Grep",
+            "--max-turns",
+            "20",
+            "--output-format",
+            "json",
+            "--resume",
+            "cl1",
+            "--fork-session",
+            "-p",
+          ],
+          mutates_local_state: true,
+          summary:
+            "기존 세션을 fork하고 Night Contract를 노출되지 않는 stdin으로 전달",
+        },
+      ],
+      protocol_requests: [],
+      expected_receipt:
+        "원자적 worker 영수증 + fork된 Claude transcript의 marker/result",
+      read_only: true,
+      execution_enabled: false,
+    },
   ],
   exclusions: [
-    {
-      project: "malgun-app",
-      reason: "사람의 판단이나 승인이 먼저 필요한 상태입니다.",
-    },
     {
       project: "orca",
       reason: "이미 실행 중인 세션이 있어 중복 작업과 충돌 위험이 큽니다.",

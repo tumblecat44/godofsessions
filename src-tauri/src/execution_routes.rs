@@ -366,13 +366,16 @@ fn native_dispatch_profile(provider: Provider) -> DispatchProfile {
             ],
         },
         Provider::Claude => DispatchProfile {
-            readiness: AdapterReadiness::GuardrailRequired,
-            interface: "Claude background agent",
-            receipt: "claude agents --json",
+            readiness: AdapterReadiness::ContractReady,
+            interface: "Claude Code detached print worker",
+            receipt: "forked Claude transcript + JSON result",
             guardrails: &[
-                "background 모드용 allowedTools/deniedTools 정책 필요",
+                "기존 세션 컨텍스트는 fork하고 원본 세션은 보존",
+                "dontAsk + 명시적 built-in tool 집합",
+                "workspace 중심 read/write, network deny, 민감 환경변수 제거",
+                "엄격한 OS sandbox와 sandbox escape 차단",
                 "bypassPermissions 금지",
-                "중간 승인 요청이 생길 때 자동으로 Human Gate로 전환",
+                "시간·turn 상한과 공급자 transcript idempotency marker 필수",
             ],
         },
         Provider::Cursor => DispatchProfile {
@@ -694,7 +697,7 @@ mod tests {
         );
         assert_eq!(
             route("claude:native").adapter_readiness,
-            AdapterReadiness::GuardrailRequired
+            AdapterReadiness::ContractReady
         );
         assert_eq!(
             route("cursor:native").adapter_readiness,
@@ -704,5 +707,37 @@ mod tests {
             .dispatch_guardrails
             .iter()
             .any(|item| item.contains("--deliver")));
+    }
+
+    #[test]
+    fn native_claude_route_exposes_the_bounded_fork_contract() {
+        let (_directory, mut sources) = sources();
+        fs::write(&sources.claude_binary, "").expect("Claude binary");
+        sources.claude_binary = sources
+            .claude_binary
+            .canonicalize()
+            .expect("canonical Claude binary");
+
+        let inventory = load_from(
+            &sources,
+            &[budget(Provider::Claude)],
+            Utc.with_ymd_and_hms(2026, 7, 24, 8, 0, 0).unwrap(),
+        );
+        let route = inventory
+            .routes
+            .iter()
+            .find(|route| route.id == "claude:native")
+            .expect("Claude route");
+
+        assert_eq!(route.adapter_readiness, AdapterReadiness::ContractReady);
+        assert!(route.dispatch_interface.contains("detached"));
+        assert!(route
+            .dispatch_guardrails
+            .iter()
+            .any(|guardrail| guardrail.contains("fork")));
+        assert!(route
+            .dispatch_guardrails
+            .iter()
+            .any(|guardrail| guardrail.contains("network")));
     }
 }

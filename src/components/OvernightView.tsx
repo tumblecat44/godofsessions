@@ -117,6 +117,31 @@ const adapterReadinessLabels = {
   observe_only: "관측만",
 } as const;
 
+function dispatchCommandFor(surface: DispatchPreflight["surface"]) {
+  if (surface === "codex") return "dispatch_approved_codex";
+  if (surface === "claude") return "dispatch_approved_claude";
+  return "dispatch_approved_hermes";
+}
+
+function approvalEffectsFor(surface?: DispatchPreflight["surface"]) {
+  if (surface === "codex") {
+    return [
+      "승인한 기존 Codex 작업만 재개",
+      "단일 writable root · 네트워크 차단",
+    ];
+  }
+  if (surface === "claude") {
+    return [
+      "기존 Claude 세션은 보존하고 격리 fork",
+      "작업공간 중심 sandbox · 네트워크와 MCP 차단",
+    ];
+  }
+  return [
+    "전용 Hermes 보드만 사용",
+    "최대 한 작업자·계약된 시간과 턴만 허용",
+  ];
+}
+
 function RouteCard({ route }: { route: ExecutionRoute }) {
   return (
     <article className={`route-card route-card--${route.state}`}>
@@ -986,7 +1011,9 @@ export function OvernightView() {
             warning:
               preflight.surface === "codex"
                 ? "확인하면 이 기존 Codex 작업에 network-off workspace-write turn 하나를 시작합니다. GUI를 닫아도 전용 야간 작업자는 계속됩니다."
-                : "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
+                : preflight.surface === "claude"
+                  ? "확인하면 이 기존 Claude 세션을 strict sandbox 안에서 fork해 작업합니다. 원본 세션과 민감 환경변수는 넘기지 않습니다."
+                  : "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
           };
       setApproval(challenge);
       setConfirmationPhrase("");
@@ -1116,9 +1143,7 @@ export function OvernightView() {
       }
       if (!approval) return;
       const receipt = await invoke<DispatchReceipt>(
-        approvalPreflight?.surface === "codex"
-          ? "dispatch_approved_codex"
-          : "dispatch_approved_hermes",
+        dispatchCommandFor(approvalPreflight?.surface || "hermes"),
         {
           approvalId: approval.id,
           idempotencyKey: approval.idempotency_key,
@@ -1676,15 +1701,11 @@ export function OvernightView() {
             <div className="approval-effects">
               <p>
                 <Check size={12} />
-                {approvalPreflight?.surface === "codex"
-                  ? "승인한 기존 Codex 작업만 재개"
-                  : "전용 Hermes 보드만 사용"}
+                {approvalEffectsFor(approvalPreflight?.surface)[0]}
               </p>
               <p>
                 <Check size={12} />
-                {approvalPreflight?.surface === "codex"
-                  ? "단일 writable root · 네트워크 차단"
-                  : "최대 한 작업자·계약된 시간과 턴만 허용"}
+                {approvalEffectsFor(approvalPreflight?.surface)[1]}
               </p>
               <p>
                 <AlertTriangle size={12} />

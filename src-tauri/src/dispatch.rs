@@ -88,6 +88,7 @@ pub fn build_preflights(
         })
         .collect::<Vec<_>>();
     preflights.extend(crate::codex_dispatch::build_preflights(drafts, inventory));
+    preflights.extend(crate::claude_dispatch::build_preflights(drafts, inventory));
     preflights.sort_by_key(|preflight| {
         drafts
             .iter()
@@ -361,6 +362,9 @@ pub fn load_night_run_history() -> NightRunHistory {
     let (mut codex_runs, codex_warnings) = crate::codex_dispatch::load_night_run_history();
     runs.append(&mut codex_runs);
     warnings.extend(codex_warnings);
+    let (mut claude_runs, claude_warnings) = crate::claude_dispatch::load_night_run_history();
+    runs.append(&mut claude_runs);
+    warnings.extend(claude_warnings);
     runs.sort_by(|left, right| {
         let left_time = left
             .completed_at
@@ -382,7 +386,7 @@ pub fn load_night_run_history() -> NightRunHistory {
         runs,
         warnings,
         read_only: true,
-        methodology: "Hermes 전용 보드의 task/task_run과 Codex provider rollout의 clientUserMessageId turn을 읽기 전용으로 결합했습니다."
+        methodology: "Hermes 전용 보드, Codex provider rollout, Claude fork transcript와 로컬 실행 영수증을 읽기 전용으로 결합했습니다."
             .to_owned(),
     }
 }

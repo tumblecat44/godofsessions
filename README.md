@@ -29,11 +29,12 @@ It is not:
 
 ## Current phase
 
-The one-approval portfolio M16 desktop slice is working. Recommendation and
+The bounded Claude fork M17 desktop slice is working. Recommendation and
 preflight remain read-only; a provider process can start only after an exact,
 expiring, one-time approval in the desktop app. Hermes state is recovered after
-an app restart, while Codex uses the provider rollout as its idempotency and
-recovery ledger. Their records appear in one Morning Review while provider
+an app restart, Codex uses the provider rollout as its idempotency and recovery
+ledger, and Claude combines an atomic execution receipt with its forked
+provider transcript. Their records appear in one Morning Review while provider
 completion remains separate from human verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
@@ -55,6 +56,7 @@ completion remains separate from human verification.
 - [Unified provider-owned night history M14](docs/overnight-m14.md)
 - [Deep Codex adapter modules M15](docs/overnight-m15.md)
 - [One-approval night portfolio M16](docs/overnight-m16.md)
+- [Bounded Claude session forks M17](docs/overnight-m17.md)
 
 The app currently:
 
@@ -115,18 +117,29 @@ The app currently:
   budget with turn interrupt, and never retries an ambiguous start
 - recovers the accepted Codex contract from its provider rollout using the
   stable client message identity
-- combines Hermes task runs and Codex turns into one recent night history while
-  retaining each provider's native ids and evidence source
+- preflights an existing Claude session against its exact transcript, idle
+  state, canonical Git workspace, subscription login, and strict sandbox
+  version before enabling approval
+- preserves the original Claude session and starts a detached fork with
+  `dontAsk`, an explicit built-in tool set, network and MCP disabled, one
+  workspace-focused read/write boundary, a secret-free inherited environment,
+  destructive-command denies, and fixed time and turn limits
+- atomically claims each Claude contract before launch, records its bounded
+  process result, and requires the matching provider transcript marker before
+  calling a completed run ready to review
+- combines Hermes task runs, Codex turns, and Claude forks into one recent
+  night history while retaining each provider's native ids and evidence source
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
 The Overnight screen never dispatches before explicit approval. Eligible
-Hermes proposals and provenance-checked existing Codex threads have individual
-start controls, while immediately runnable independent lanes can be accepted
-as one frozen portfolio. The operator must review the effects and type the
-exact confirmation phrase. New Codex threads plus native Claude, Grok, Cursor,
-and OpenClaw dispatch remain disabled until their guardrail contracts are
-equally strong. The tools that created the sessions remain the source of truth.
+Hermes proposals plus provenance-checked existing Codex and Claude sessions
+have individual start controls, while immediately runnable independent lanes
+can be accepted as one frozen portfolio. The operator must review the effects
+and type the exact confirmation phrase. New Codex or Claude sessions plus
+native Grok, Cursor, and OpenClaw dispatch remain disabled until their
+guardrail contracts are equally strong. The tools that created the sessions
+remain the source of truth.
 
 ## Run locally
 

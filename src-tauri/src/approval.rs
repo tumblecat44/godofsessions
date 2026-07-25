@@ -183,6 +183,7 @@ impl ApprovalRegistry {
             idempotency_key
                 .trim_start_matches("gos-night-")
                 .trim_start_matches("gos-codex-")
+                .trim_start_matches("gos-claude-")
         );
         let confirmation_phrase = format!("{} 시작 승인", proposal.draft.project);
         let expires_at = now + Duration::minutes(CHALLENGE_TTL_MINUTES);
@@ -210,6 +211,10 @@ impl ApprovalRegistry {
                 Provider::Codex => concat!(
                     "확인하면 이 기존 Codex 작업에 network-off workspace-write turn 하나를 ",
                     "시작합니다. GUI를 닫아도 전용 야간 작업자는 계속됩니다."
+                ),
+                Provider::Claude => concat!(
+                    "확인하면 이 기존 Claude 세션을 fork해 strict sandbox, network-off, ",
+                    "workspace 중심 작업 하나를 시작합니다. 원본 세션과 민감 환경변수는 넘기지 않습니다."
                 ),
                 _ => "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
             }
@@ -397,8 +402,7 @@ impl ApprovalRegistry {
 
         self.pending_portfolios.remove(approval_id);
         for draft_id in &pending.draft_ids {
-            self.pending
-                .retain(|_, item| item.draft_id != *draft_id);
+            self.pending.retain(|_, item| item.draft_id != *draft_id);
             self.proposals.remove(draft_id);
         }
         Ok(approved)

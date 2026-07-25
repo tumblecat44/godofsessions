@@ -69,7 +69,10 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         external_side_effects_allowed: false,
         approval_required: true,
         dispatch_supported: format == RunDraftFormat::HermesGoal
-            || (candidate.execution_surface == Provider::Codex && candidate.resume_existing),
+            || (matches!(
+                candidate.execution_surface,
+                Provider::Codex | Provider::Claude
+            ) && candidate.resume_existing),
     }
 }
 
@@ -183,6 +186,16 @@ mod tests {
     fn codex_existing_thread_is_dispatchable_but_new_thread_is_not() {
         let resumed = build(&candidate(Provider::Codex, true));
         let fresh = build(&candidate(Provider::Codex, false));
+
+        assert!(resumed.dispatch_supported);
+        assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
+        assert!(!fresh.dispatch_supported);
+    }
+
+    #[test]
+    fn claude_existing_session_is_dispatchable_but_new_session_is_not() {
+        let resumed = build(&candidate(Provider::Claude, true));
+        let fresh = build(&candidate(Provider::Claude, false));
 
         assert!(resumed.dispatch_supported);
         assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
