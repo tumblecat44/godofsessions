@@ -174,6 +174,15 @@ fn build_overnight_plan_inner(
             .any(|session| session.status == SessionStatus::Failed);
         let context_goal = context_brief.and_then(latest_meaningful_user_goal);
         let goal_subject = context_goal.unwrap_or(title);
+        if crate::control_board::may_have_external_side_effect(goal_subject) {
+            exclusions.push(ExcludedProject {
+                project,
+                reason:
+                    "최근 목표에 외부 전송·배포·삭제·결제 가능성이 있어 사람의 승인이 먼저 필요합니다."
+                        .to_owned(),
+            });
+            continue;
+        }
         let goal = if failed {
             format!("실패 원인을 해결하고 검증까지 완료: {goal_subject}")
         } else {
@@ -315,6 +324,10 @@ fn build_overnight_plan_inner(
         candidate.rank = index + 1;
     }
     exclusions.sort_by(|left, right| left.project.cmp(&right.project));
+    let run_drafts = candidates
+        .iter()
+        .map(crate::night_contract::build)
+        .collect();
 
     OvernightPlan {
         generated_at: now.to_rfc3339(),
@@ -327,6 +340,7 @@ fn build_overnight_plan_inner(
             .cloned()
             .unwrap_or_else(|| empty_route_inventory(now)),
         candidates,
+        run_drafts,
         exclusions,
         read_only: true,
         methodology:
@@ -838,6 +852,57 @@ mod tests {
             .exclusions
             .iter()
             .any(|item| item.project == "gated" && item.reason.contains("사람의 판단")));
+    }
+
+    #[test]
+    fn external_action_in_recent_context_is_excluded_from_overnight_work() {
+        let snapshot = snapshot(vec![session(
+            Provider::Codex,
+            "outbound",
+            "launch",
+            "Finalize launch",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "launch".to_owned(),
+                workspace: Some("/work/launch".to_owned()),
+                session_ids: vec!["codex:outbound".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:outbound".to_owned(),
+                    role: ContextRole::User,
+                    text: "완성된 안내 메일을 고객에게 보내고 프로덕션에 배포해줘".to_owned(),
+                    timestamp: Some("2026-07-24T21:31:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan.exclusions.iter().any(|item| {
+            item.project == "launch"
+                && item.reason.contains("외부 전송")
+                && item.reason.contains("사람의 승인")
+        }));
     }
 
     #[test]

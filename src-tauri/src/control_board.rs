@@ -392,7 +392,7 @@ impl<'a> From<&'a str> for HermesTaskStatus<'a> {
     }
 }
 
-fn may_have_external_side_effect(title: &str) -> bool {
+pub(crate) fn may_have_external_side_effect(title: &str) -> bool {
     let normalized = title.to_lowercase();
     [
         "보내",

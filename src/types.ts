@@ -152,6 +152,38 @@ export interface ExecutionRouteInventory {
 
 export type RecommendationConfidence = "high" | "medium" | "low";
 
+export type RunDraftFormat = "hermes_goal" | "structured_prompt";
+export type RunMode = "resume_existing" | "new_session";
+export type PermissionProfile = "workspace_write";
+
+export interface GoalContract {
+  outcome: string;
+  verification: string;
+  constraints: string;
+  boundaries: string;
+  stop_when: string;
+}
+
+export interface NightRunDraft {
+  id: string;
+  candidate_rank: number;
+  project: string;
+  route_id: string;
+  format: RunDraftFormat;
+  run_mode: RunMode;
+  native_session_id: string | null;
+  workspace: string;
+  time_budget_hours: number;
+  continuation_turn_budget: number | null;
+  goal: string;
+  contract: GoalContract;
+  prompt: string;
+  permission_profile: PermissionProfile;
+  external_side_effects_allowed: boolean;
+  approval_required: boolean;
+  dispatch_supported: boolean;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;
@@ -189,6 +221,7 @@ export interface OvernightPlan {
   budgets: ResourceBudget[];
   route_inventory: ExecutionRouteInventory;
   candidates: OvernightCandidate[];
+  run_drafts: NightRunDraft[];
   exclusions: ExcludedProject[];
   read_only: boolean;
   methodology: string;

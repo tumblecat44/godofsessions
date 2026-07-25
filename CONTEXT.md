@@ -58,14 +58,25 @@ A time-bounded, ranked proposal of Work Items and Execution Routes for an
 unattended period.
 _Avoid_: Schedule, queue
 
+**Run Draft**:
+The exact, reviewable prompt, completion contract, permission boundary, and
+Execution Route proposed for one Run. It is inert until an operator approves
+that exact draft.
+_Avoid_: Run, dispatch
+
+**Goal Contract**:
+The outcome, verification, constraints, boundaries, and stop condition used
+to decide whether an unattended Run is complete or needs a person.
+_Avoid_: Prompt, task description
+
 **Human Gate**:
 A decision, permission, credential, or external side effect that prevents a
 Work Item from being safe for unattended execution.
 _Avoid_: Error, blocker
 
 **Dispatch**:
-An operator-approved instruction to start or resume a Run in a chosen
-Provider.
+An operator-approved instruction to start or resume a Run using the exact
+reviewed Run Draft.
 _Avoid_: Recommendation, assignment
 
 **Control Board**:

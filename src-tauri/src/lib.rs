@@ -3,6 +3,7 @@ mod context_brief;
 mod control_board;
 mod execution_routes;
 mod model;
+mod night_contract;
 mod recommendation;
 mod time_utils;
 mod usage;
@@ -232,6 +233,12 @@ mod live_tests {
         assert_eq!(hermes_route.model_provider, Some(Provider::Grok));
         assert_eq!(hermes_route.capacity_pool, CapacityPool::GrokSubscription);
         assert!(!plan.candidates.is_empty());
+        assert_eq!(plan.run_drafts.len(), plan.candidates.len());
+        assert!(plan.run_drafts.iter().all(|draft| {
+            draft.approval_required
+                && !draft.dispatch_supported
+                && !draft.external_side_effects_allowed
+        }));
         assert!(plan
             .candidates
             .iter()

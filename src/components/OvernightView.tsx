@@ -24,6 +24,7 @@ import type {
   OvernightCandidate,
   OvernightPlan,
   ExecutionRoute,
+  NightRunDraft,
   ResourceBudget,
 } from "../types";
 import { ProviderMark } from "./ProviderMark";
@@ -142,9 +143,11 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
 
 function CandidateCard({
   candidate,
+  draft,
   primary = false,
 }: {
   candidate: OvernightCandidate;
+  draft?: NightRunDraft;
   primary?: boolean;
 }) {
   return (
@@ -232,6 +235,65 @@ function CandidateCard({
           ))}
         </ul>
       </details>
+
+      {draft && (
+        <details className="night-contract">
+          <summary>
+            <span>
+              <strong>승인 전 실행 계약</strong>
+              <small>
+                {draft.format === "hermes_goal"
+                  ? "Hermes /goal 형식"
+                  : "구조화 프롬프트"}
+              </small>
+            </span>
+            <em>아직 실행되지 않음</em>
+          </summary>
+          <div className="contract-grid">
+            <section>
+              <span>완료 결과</span>
+              <p>{draft.contract.outcome}</p>
+            </section>
+            <section>
+              <span>검증</span>
+              <p>{draft.contract.verification}</p>
+            </section>
+            <section>
+              <span>보존할 것</span>
+              <p>{draft.contract.constraints}</p>
+            </section>
+            <section>
+              <span>작업 경계</span>
+              <p>{draft.contract.boundaries}</p>
+            </section>
+            <section>
+              <span>멈추고 보고할 때</span>
+              <p>{draft.contract.stop_when}</p>
+            </section>
+          </div>
+          <div className="contract-prompt">
+            <header>
+              <span>에이전트에게 전달될 원문</span>
+              <span>
+                최대 {draft.time_budget_hours}시간
+                {draft.continuation_turn_budget
+                  ? ` · ${draft.continuation_turn_budget}턴`
+                  : ""}
+              </span>
+            </header>
+            <pre>{draft.prompt}</pre>
+          </div>
+          <footer>
+            <span>
+              <ShieldCheck size={12} /> 작업공간 쓰기만
+            </span>
+            <span>
+              <AlertTriangle size={12} /> 외부 부작용 금지
+            </span>
+            <strong>사람 승인 필요</strong>
+          </footer>
+        </details>
+      )}
     </article>
   );
 }
@@ -437,7 +499,11 @@ export function OvernightView() {
 
           {plan.candidates.length > 0 ? (
             <section className="candidate-stack">
-              <CandidateCard candidate={plan.candidates[0]} primary />
+              <CandidateCard
+                candidate={plan.candidates[0]}
+                draft={plan.run_drafts.find((draft) => draft.candidate_rank === 1)}
+                primary
+              />
               {plan.candidates.length > 1 && (
                 <div
                   className={`alternative-grid ${
@@ -447,7 +513,13 @@ export function OvernightView() {
                   }`}
                 >
                   {plan.candidates.slice(1).map((candidate) => (
-                    <CandidateCard candidate={candidate} key={candidate.project} />
+                    <CandidateCard
+                      candidate={candidate}
+                      draft={plan.run_drafts.find(
+                        (draft) => draft.candidate_rank === candidate.rank,
+                      )}
+                      key={candidate.project}
+                    />
                   ))}
                 </div>
               )}

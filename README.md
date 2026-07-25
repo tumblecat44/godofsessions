@@ -3,10 +3,10 @@
 God of Sessions is a local-first control plane for AI work sessions and
 overnight engineering decisions.
 
-It does not replace Claude Code, Codex, Cursor, or Grok Build. It discovers
-sessions created in those tools, normalizes their metadata, shows which work
-needs attention, and recommends which project and provider offer the best
-explainable overnight bet.
+It does not replace Claude Code, Codex, Cursor, Grok Build, Hermes, or
+OpenClaw. It discovers sessions created in those tools, normalizes their
+metadata, shows which work needs attention, and recommends which project and
+execution route offer the best explainable overnight bet.
 
 ## Product boundary
 
@@ -15,8 +15,8 @@ God of Sessions is:
 - a session inbox
 - a live activity and attention dashboard
 - a cross-agent task and session graph
-- a read-only overnight portfolio planner
-- a native-session launcher and control surface
+- a read-only overnight portfolio planner with reviewable Run Drafts
+- a future native-session launcher and approval-gated control surface
 - local-only by default
 
 It is not:
@@ -29,11 +29,14 @@ It is not:
 
 ## Current phase
 
-The read-only M1 desktop slice is working.
+The read-only M4 desktop slice is working.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
 - [Overnight recommendation M1](docs/overnight-m1.md)
+- [Control Board and Today Context M2](docs/overnight-m2.md)
+- [Execution Routes M3](docs/overnight-m3.md)
+- [Night Contracts M4](docs/overnight-m4.md)
 
 The app currently:
 
@@ -54,6 +57,11 @@ The app currently:
   extension, and Claude usage through the local OpenClaw adapter
 - returns up to three ranked overnight candidates with evidence, exclusions,
   provider rationale, risks, and a verification contract
+- distinguishes the execution surface from the model provider and shared
+  subscription Capacity Pool
+- detects the current Hermes route without exposing credential values
+- compiles each candidate into an inert, operator-reviewable Night Contract
+- holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
 The Overnight screen is recommendation-only. Native open/resume and dispatch
@@ -95,12 +103,17 @@ God of Sessions is local-only. It does not use an account, cloud service,
 telemetry, or transcript upload.
 
 - Vendor databases are opened read-only and query-only.
-- The Cursor adapter queries only `composer.composerHeaders`.
-- Claude's defensive JSONL parser retains only selected metadata fields.
-- Grok's adapter reads `summary.json`; it does not open chat history.
-- Hermes reads session metadata and message timestamps, never message content.
-- OpenClaw reads `sessions.json`, never transcript JSONL.
+- The Cursor adapter queries only `composer.composerHeaders`; Cursor
+  conversation text remains unsupported.
+- When the operator requests the Control Board or Night Plan, bounded Context
+  Brief readers inspect only recent user and final-assistant text from
+  supported provider transcripts.
+- Context Briefs exclude system/developer instructions, tool calls, tool
+  results, and reasoning; they are held in memory and are not persisted.
+- Connector metadata views still avoid message content.
 - The app caches only normalized provider usage windows so an intermittent
   provider check can show the last successful observation.
 - ChatGPT Chat/Work and Claude Desktop local-work areas are excluded.
-- Credential stores and cryptographic material are never traversed.
+- Route detection reads only safe Hermes model keys and checks provider-key
+  presence in auth metadata. Credential values are never displayed or
+  persisted.

@@ -488,6 +488,68 @@ export const previewOvernightPlan: OvernightPlan = {
       estimated_hours: 2.5,
     },
   ],
+  run_drafts: [
+    {
+      id: "night:1:godofsessions:codex:native",
+      candidate_rank: 1,
+      project: "godofsessions",
+      route_id: "codex:native",
+      format: "structured_prompt",
+      run_mode: "resume_existing",
+      native_session_id: "co1",
+      workspace: "/Users/you/projects/godofsessions",
+      time_budget_hours: 3.5,
+      continuation_turn_budget: null,
+      goal: "Overnight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행",
+      contract: {
+        outcome:
+          "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고",
+        verification:
+          "프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것 / 변경 범위와 생성된 산출물을 아침 보고에 명시할 것 / 검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인을 남길 것",
+        constraints:
+          "기존 동작과 사용자의 관련 없는 변경을 보존할 것. 외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것. 검증 근거 없이 완료라고 보고하지 말 것.",
+        boundaries:
+          "/Users/you/projects/godofsessions 작업공간 안의 이 목표와 직접 관련된 파일·테스트·로컬 도구만 사용",
+        stop_when:
+          "자격 증명·사람의 결정·외부 시스템 변경·파괴적 작업이 필요하거나 관련 없는 기존 실패 때문에 검증할 수 없으면 막힌 이유를 남길 것. 목표가 일찍 끝나면 시간을 채우기 위한 새 일을 만들지 말 것.",
+      },
+      prompt:
+        "Overnight goal\nOvernight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행\n\nOutcome\n범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고\n\nVerification\n프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것\n\nConstraints\n외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것.\n\nBoundaries\n/Users/you/projects/godofsessions\n\nStop and report when\n사람의 결정이나 외부 시스템 변경이 필요할 때",
+      permission_profile: "workspace_write",
+      external_side_effects_allowed: false,
+      approval_required: true,
+      dispatch_supported: false,
+    },
+    {
+      id: "night:2:agent-research:grok:native",
+      candidate_rank: 2,
+      project: "agent-research",
+      route_id: "grok:native",
+      format: "structured_prompt",
+      run_mode: "resume_existing",
+      native_session_id: "g1",
+      workspace: "/Users/you/projects/agent-research",
+      time_budget_hours: 2.5,
+      continuation_turn_budget: null,
+      goal: "로컬 에이전트 시장 조사 — 검증 가능한 결과까지 진행",
+      contract: {
+        outcome: "근거 링크가 포함된 경쟁 제품 비교와 남은 조사 질문",
+        verification: "모든 핵심 주장에 출처가 있을 것",
+        constraints:
+          "기존 동작과 사용자의 관련 없는 변경을 보존할 것. 외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것.",
+        boundaries:
+          "/Users/you/projects/agent-research 작업공간 안의 이 목표와 직접 관련된 파일·테스트·로컬 도구만 사용",
+        stop_when:
+          "사람의 결정이나 외부 시스템 변경이 필요하면 막힌 이유를 남길 것. 목표가 일찍 끝나면 시간을 채우기 위한 새 일을 만들지 말 것.",
+      },
+      prompt:
+        "Overnight goal\n로컬 에이전트 시장 조사 — 검증 가능한 결과까지 진행\n\nOutcome\n근거 링크가 포함된 경쟁 제품 비교와 남은 조사 질문\n\nVerification\n모든 핵심 주장에 출처가 있을 것",
+      permission_profile: "workspace_write",
+      external_side_effects_allowed: false,
+      approval_required: true,
+      dispatch_supported: false,
+    },
+  ],
   exclusions: [
     {
       project: "malgun-app",

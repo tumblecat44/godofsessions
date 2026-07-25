@@ -1889,6 +1889,144 @@ button:active:not(:disabled) {
   line-height: 1.5;
 }
 
+.night-contract {
+  border-top: 1px solid var(--etched-edge-soft);
+}
+
+.night-contract > summary {
+  min-height: 48px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.night-contract > summary > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.night-contract > summary strong {
+  color: var(--ink-secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.night-contract > summary small {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-contract > summary em {
+  color: var(--signal-amber);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.contract-grid {
+  padding: 2px 20px 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.contract-grid section {
+  min-width: 0;
+  padding: 10px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+}
+
+.contract-grid section:last-child {
+  grid-column: 1 / -1;
+}
+
+.contract-grid span {
+  color: var(--signal-teal);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.contract-grid p {
+  margin: 6px 0 0;
+  color: var(--ink-tertiary);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.contract-prompt {
+  margin: 0 20px 16px;
+  overflow: hidden;
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.contract-prompt header {
+  min-height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--etched-edge-soft);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.contract-prompt pre {
+  max-height: 280px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: var(--ink-secondary);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 8px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.night-contract > footer {
+  min-height: 40px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--ink-muted);
+  border-top: 1px solid var(--etched-edge-soft);
+  font-size: 8px;
+}
+
+.night-contract > footer span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.night-contract > footer svg {
+  color: var(--signal-teal);
+}
+
+.night-contract > footer span:nth-child(2) svg {
+  color: var(--signal-amber);
+}
+
+.night-contract > footer strong {
+  margin-left: auto;
+  color: var(--signal-amber);
+  font-size: 8px;
+  font-weight: 600;
+}
+
 .alternative-grid {
   margin-top: 10px;
   display: grid;
@@ -2782,6 +2920,26 @@ button:active:not(:disabled) {
 
   .candidate-details {
     grid-template-columns: 1fr;
+  }
+
+  .contract-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-grid section:last-child {
+    grid-column: auto;
+  }
+
+  .night-contract > footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .night-contract > footer strong {
+    margin-left: 0;
   }
 
   .board-header-actions,

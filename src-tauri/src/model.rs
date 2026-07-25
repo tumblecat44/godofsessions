@@ -214,6 +214,56 @@ pub enum RecommendationConfidence {
     Low,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunDraftFormat {
+    HermesGoal,
+    StructuredPrompt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunMode {
+    ResumeExisting,
+    NewSession,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionProfile {
+    WorkspaceWrite,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GoalContract {
+    pub outcome: String,
+    pub verification: String,
+    pub constraints: String,
+    pub boundaries: String,
+    pub stop_when: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightRunDraft {
+    pub id: String,
+    pub candidate_rank: usize,
+    pub project: String,
+    pub route_id: String,
+    pub format: RunDraftFormat,
+    pub run_mode: RunMode,
+    pub native_session_id: Option<String>,
+    pub workspace: String,
+    pub time_budget_hours: f64,
+    pub continuation_turn_budget: Option<u32>,
+    pub goal: String,
+    pub contract: GoalContract,
+    pub prompt: String,
+    pub permission_profile: PermissionProfile,
+    pub external_side_effects_allowed: bool,
+    pub approval_required: bool,
+    pub dispatch_supported: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
@@ -254,6 +304,7 @@ pub struct OvernightPlan {
     pub budgets: Vec<ResourceBudget>,
     pub route_inventory: ExecutionRouteInventory,
     pub candidates: Vec<OvernightCandidate>,
+    pub run_drafts: Vec<NightRunDraft>,
     pub exclusions: Vec<ExcludedProject>,
     pub read_only: bool,
     pub methodology: String,
