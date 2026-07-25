@@ -881,8 +881,8 @@ export const previewOvernightPlan: OvernightPlan = {
       windows: [
         {
           label: "5시간",
-          used_percent: 2,
-          resets_at: new Date(now + 4 * 60 * 60 * 1000).toISOString(),
+          used_percent: 100,
+          resets_at: new Date(now + 75 * 60 * 1000).toISOString(),
         },
         {
           label: "7일",
@@ -1054,6 +1054,7 @@ export const previewOvernightPlan: OvernightPlan = {
       source_session_ids: ["codex:co1", "claude:cl1", "grok:g1"],
       provider_reason:
         "Codex에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 87% 남아 있습니다.",
+      capacity_ready_after_hours: 0,
       expected_outcome:
         "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고",
       verification: [
@@ -1089,6 +1090,7 @@ export const previewOvernightPlan: OvernightPlan = {
       source_session_ids: ["grok:g1", "codex:co2"],
       provider_reason:
         "Hermes가 Grok 구독을 사용하면서 여러 세션의 조사 맥락을 새 goal로 묶을 수 있습니다.",
+      capacity_ready_after_hours: 0,
       expected_outcome: "근거 링크가 포함된 경쟁 제품 비교와 남은 조사 질문",
       verification: ["모든 핵심 주장에 출처가 있을 것"],
       risks: ["조사 범위가 열려 있어 종료 조건을 더 좁혀야 할 수 있습니다."],
@@ -1116,7 +1118,8 @@ export const previewOvernightPlan: OvernightPlan = {
       ],
       source_session_ids: ["claude:cl1", "codex:co3"],
       provider_reason:
-        "Claude 구독 여유가 크고 이 프로젝트의 유휴 기존 세션을 안전하게 fork할 수 있습니다.",
+        "Claude의 현재 5시간 창은 소진됐지만 약 1시간 15분 뒤 초기화됩니다. 그 시각에 사용량을 다시 확인한 뒤 시작할 수 있습니다.",
+      capacity_ready_after_hours: 1.25,
       expected_outcome:
         "관련 화면의 회귀 수정, 테스트 결과, 사람이 확인할 남은 위험의 아침 보고",
       verification: [
@@ -1255,13 +1258,13 @@ export const previewOvernightPlan: OvernightPlan = {
       },
       {
         capacity_pool: "claude_subscription",
-        planned_hours: 2,
+        planned_hours: 3.25,
         slots: [
           {
             candidate_rank: 3,
             project: "malgun-app",
             route_id: "claude:native",
-            starts_after_hours: 0,
+            starts_after_hours: 1.25,
             time_budget_hours: 2,
           },
         ],

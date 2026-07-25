@@ -30,6 +30,7 @@ struct ProviderChoice<'a> {
     resumable_session: Option<&'a Session>,
     reason: String,
     score: f64,
+    capacity_ready_after_hours: f64,
 }
 
 #[cfg(test)]
@@ -190,7 +191,7 @@ fn build_overnight_plan_inner(
             continue;
         };
 
-        let provider_choice = choose_provider(sessions, latest, &budgets);
+        let provider_choice = choose_provider(sessions, latest, &budgets, now, sleep_hours);
         let provider = provider_choice.provider;
         let provider_session = provider_choice.resumable_session;
         let title = latest
@@ -241,7 +242,9 @@ fn build_overnight_plan_inner(
             + if latest.cwd.is_some() { 10.0 } else { 0.0 }
             + if failed { 6.0 } else { 0.0 }
             + if context_goal.is_some() { 12.0 } else { 0.0 };
-        let score = (project_score + provider_choice.score * 0.35).clamp(0.0, 100.0);
+        let score = (project_score + provider_choice.score * 0.35
+            - provider_choice.capacity_ready_after_hours * 2.0)
+            .clamp(0.0, 100.0);
         let budget_is_ready = budgets
             .iter()
             .any(|budget| budget.provider == provider && budget.state == ResourceState::Ready);
@@ -250,6 +253,7 @@ fn build_overnight_plan_inner(
             && latest.cwd.is_some()
             && budget_is_ready
             && resume_existing
+            && provider_choice.capacity_ready_after_hours == 0.0
         {
             RecommendationConfidence::High
         } else if latest.title.is_some() && budget_is_ready {
@@ -280,6 +284,12 @@ fn build_overnight_plan_inner(
         if !budget_is_ready {
             risks.push("현재 사용량을 확인하지 못해 공급자 선택 확신이 낮습니다.".to_owned());
         }
+        if provider_choice.capacity_ready_after_hours > 0.0 {
+            risks.push(
+                "보고된 초기화는 시작 기회일 뿐 용량 보증이 아닙니다. 시작 직전 재확인에서 부족하면 원래 마감 안에서 계속 기다리거나 건너뜁니다."
+                    .to_owned(),
+            );
+        }
 
         let cwd = latest
             .cwd
@@ -304,7 +314,24 @@ fn build_overnight_plan_inner(
                 if brief.truncated { " (bookends)" } else { "" }
             ));
         }
+        if provider_choice.capacity_ready_after_hours > 0.0 {
+            evidence.push(format!(
+                "제한 창 초기화 뒤 {}부터 시작 가능성을 다시 확인",
+                duration_label(provider_choice.capacity_ready_after_hours)
+            ));
+        }
 
+        let provider_reason = if provider_session.is_some()
+            && !resume_existing
+            && execution_surface == Provider::Hermes
+        {
+            format!(
+                "{} 아직 연결되지 않은 네이티브 재개 대신 승인 가능한 Hermes goal 경로를 사용합니다.",
+                provider_choice.reason
+            )
+        } else {
+            provider_choice.reason
+        };
         candidates.push(OvernightCandidate {
             rank: 0,
             project: project.clone(),
@@ -328,17 +355,8 @@ fn build_overnight_plan_inner(
                 .iter()
                 .map(|session| format!("{}:{}", session.provider.as_str(), session.native_id))
                 .collect(),
-            provider_reason: if provider_session.is_some()
-                && !resume_existing
-                && execution_surface == Provider::Hermes
-            {
-                format!(
-                    "{}의 최근 프로젝트 맥락과 구독 여유를 근거로 삼되, 아직 연결되지 않은 네이티브 재개 대신 승인 가능한 Hermes goal 경로를 사용합니다.",
-                    provider_display_name(provider)
-                )
-            } else {
-                provider_choice.reason
-            },
+            provider_reason,
+            capacity_ready_after_hours: provider_choice.capacity_ready_after_hours,
             expected_outcome: "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고"
                 .to_owned(),
             verification: vec![
@@ -382,12 +400,21 @@ fn build_overnight_plan_inner(
             .get(&workspace_key)
             .copied()
             .unwrap_or_default();
-        let starts_after_hours = lane_ready_at.max(workspace_ready_at);
+        let starts_after_hours = lane_ready_at
+            .max(workspace_ready_at)
+            .max(candidate.capacity_ready_after_hours);
         let remaining = floor_half((sleep_hours - starts_after_hours).max(0.0));
         if remaining < 1.0 {
             exclusions.push(ExcludedProject {
                 project: candidate.project,
-                reason: if workspace_ready_at > lane_ready_at {
+                reason: if candidate.capacity_ready_after_hours
+                    > lane_ready_at.max(workspace_ready_at)
+                {
+                    format!(
+                        "{} 초기화 뒤에는 검증 가능한 최소 시간이 남지 않습니다.",
+                        capacity_pool_display_name(candidate.capacity_pool)
+                    )
+                } else if workspace_ready_at > lane_ready_at {
                     "같은 Git worktree의 더 높은 순위 작업 뒤에는 검증 가능한 최소 시간이 남지 않습니다."
                         .to_owned()
                 } else {
@@ -456,7 +483,10 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
             .get(&workspace_key)
             .copied()
             .unwrap_or_default();
-        let starts_after_hours = lane.planned_hours.max(workspace_ready_at);
+        let starts_after_hours = lane
+            .planned_hours
+            .max(workspace_ready_at)
+            .max(candidate.capacity_ready_after_hours);
         let ends_at = starts_after_hours + candidate.estimated_hours;
         lane.slots.push(NightScheduleSlot {
             candidate_rank: candidate.rank,
@@ -492,7 +522,7 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
         parallel,
         lanes,
         methodology:
-            "같은 구독 풀과 같은 실제 Git worktree의 작업은 각각 한 번에 하나씩 순차 실행합니다. 서로 다른 구독이더라도 한 checkout을 공유하면 앞 작업의 종료 근거 뒤로 미루며, 별도 worktree는 병렬 실행할 수 있습니다. 수면시간을 넘기거나 남는 시간을 채우기 위한 작업은 만들지 않습니다."
+            "같은 구독 풀과 같은 실제 Git worktree의 작업은 각각 한 번에 하나씩 순차 실행합니다. 보고된 사용량 창이 수면 중 초기화되면 그 뒤를 가장 이른 시작 기회로 삼되 시작 직전에 다시 확인합니다. 서로 다른 구독이더라도 한 checkout을 공유하면 앞 작업의 종료 근거 뒤로 미루며, 별도 worktree는 병렬 실행할 수 있습니다. 수면시간을 넘기거나 남는 시간을 채우기 위한 작업은 만들지 않습니다."
                 .to_owned(),
     }
 }
@@ -649,6 +679,8 @@ fn choose_provider<'a>(
     sessions: &[&'a Session],
     latest: &'a Session,
     budgets: &[ResourceBudget],
+    now: DateTime<Utc>,
+    sleep_hours: f64,
 ) -> ProviderChoice<'a> {
     let execution_providers = [Provider::Claude, Provider::Codex, Provider::Grok];
     execution_providers
@@ -664,7 +696,9 @@ fn choose_provider<'a>(
                 .copied()
                 .find(|session| session.capabilities.contains(&Capability::Resume));
             let budget = budgets.iter().find(|budget| budget.provider == provider);
-            let capacity = budget.map(remaining_capacity).unwrap_or(35.0);
+            let (capacity, capacity_ready_after_hours) = budget
+                .map(|budget| capacity_opportunity(budget, now, sleep_hours))
+                .unwrap_or((35.0, 0.0));
             let budget_penalty = match budget.map(|budget| budget.state) {
                 Some(ResourceState::Ready) => 0.0,
                 Some(ResourceState::Degraded) => 12.0,
@@ -678,9 +712,18 @@ fn choose_provider<'a>(
             let context_score = provider_sessions.len().min(3) as f64
                 + if latest.provider == provider { 2.0 } else { 0.0 }
                 + if resumable.is_some() { 3.0 } else { 0.0 };
-            let score = capacity + context_score - budget_penalty - scarcity_penalty;
+            let score = capacity + context_score
+                - budget_penalty
+                - scarcity_penalty
+                - capacity_ready_after_hours * 3.0;
             let provider_name = provider_display_name(provider);
-            let reason = match (resumable, budget) {
+            let reason = if capacity_ready_after_hours > 0.0 {
+                format!(
+                    "{provider_name}의 현재 제한 창은 소진됐지만 약 {} 뒤 초기화됩니다. 그 시각에 사용량을 다시 확인한 뒤 시작할 수 있습니다.",
+                    duration_label(capacity_ready_after_hours)
+                )
+            } else {
+                match (resumable, budget) {
                 (Some(_), Some(budget)) if budget.state == ResourceState::Ready => format!(
                     "{provider_name}에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 {:.0}% 남아 있습니다.",
                     capacity
@@ -695,12 +738,14 @@ fn choose_provider<'a>(
                 _ => format!(
                     "{provider_name} 사용량을 확인하지 못해 세션 맥락을 중심으로 임시 선택했습니다."
                 ),
+                }
             };
             ProviderChoice {
                 provider,
                 resumable_session: resumable,
                 reason,
                 score,
+                capacity_ready_after_hours,
             }
         })
         .max_by(|left, right| {
@@ -716,6 +761,60 @@ fn choose_provider<'a>(
         .expect("execution provider list is not empty")
 }
 
+fn capacity_opportunity(
+    budget: &ResourceBudget,
+    now: DateTime<Utc>,
+    sleep_hours: f64,
+) -> (f64, f64) {
+    let current = remaining_capacity(budget);
+    if budget.state != ResourceState::Ready || current > 0.5 {
+        return (current, 0.0);
+    }
+    let deadline = now + Duration::milliseconds((sleep_hours * 3_600_000.0).round() as i64);
+    let exhausted = budget
+        .windows
+        .iter()
+        .filter(|window| 100.0 - window.used_percent <= 0.5)
+        .collect::<Vec<_>>();
+    let reset_at = exhausted
+        .iter()
+        .filter_map(|window| window.resets_at.as_deref().and_then(parse_time))
+        .filter(|reset_at| *reset_at > now && *reset_at < deadline)
+        .max();
+    let Some(reset_at) = reset_at.filter(|_| {
+        exhausted.iter().all(|window| {
+            window
+                .resets_at
+                .as_deref()
+                .and_then(parse_time)
+                .is_some_and(|value| value > now && value < deadline)
+        })
+    }) else {
+        return (current, 0.0);
+    };
+    let remaining_after_reset = budget
+        .windows
+        .iter()
+        .map(|window| {
+            let resets_by_then = window
+                .resets_at
+                .as_deref()
+                .and_then(parse_time)
+                .is_some_and(|value| value <= reset_at);
+            if resets_by_then {
+                100.0
+            } else {
+                (100.0 - window.used_percent).clamp(0.0, 100.0)
+            }
+        })
+        .fold(100.0, f64::min);
+    if remaining_after_reset <= 0.5 {
+        return (current, 0.0);
+    }
+    let hours = (reset_at - now).num_seconds().max(1) as f64 / 3_600.0;
+    (remaining_after_reset, ceil_quarter(hours))
+}
+
 fn remaining_capacity(budget: &ResourceBudget) -> f64 {
     if budget.windows.is_empty() {
         return if budget.credits.is_some() { 60.0 } else { 35.0 };
@@ -725,6 +824,21 @@ fn remaining_capacity(budget: &ResourceBudget) -> f64 {
         .iter()
         .map(|window| (100.0 - window.used_percent).clamp(0.0, 100.0))
         .fold(100.0, f64::min)
+}
+
+fn duration_label(hours: f64) -> String {
+    let minutes = (hours * 60.0).round().max(0.0) as i64;
+    if minutes < 60 {
+        format!("{minutes}분")
+    } else {
+        let whole_hours = minutes / 60;
+        let remaining_minutes = minutes % 60;
+        if remaining_minutes == 0 {
+            format!("{whole_hours}시간")
+        } else {
+            format!("{whole_hours}시간 {remaining_minutes}분")
+        }
+    }
 }
 
 fn provider_display_name(provider: Provider) -> &'static str {
@@ -758,6 +872,10 @@ fn round_one(value: f64) -> f64 {
 
 fn floor_half(value: f64) -> f64 {
     (value * 2.0).floor() / 2.0
+}
+
+fn ceil_quarter(value: f64) -> f64 {
+    (value * 4.0).ceil() / 4.0
 }
 
 #[cfg(test)]
@@ -1172,6 +1290,111 @@ mod tests {
         );
 
         assert_eq!(plan.candidates[0].provider, Provider::Codex);
+    }
+
+    #[test]
+    fn a_reset_inside_sleep_becomes_a_revalidated_not_before_opportunity() {
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let recovering = ResourceBudget {
+            provider: Provider::Grok,
+            state: ResourceState::Ready,
+            plan: Some("test".to_owned()),
+            windows: vec![
+                UsageWindow {
+                    label: "5시간".to_owned(),
+                    used_percent: 100.0,
+                    resets_at: Some("2026-07-24T23:00:00Z".to_owned()),
+                },
+                UsageWindow {
+                    label: "주간".to_owned(),
+                    used_percent: 20.0,
+                    resets_at: Some("2026-07-28T00:00:00Z".to_owned()),
+                },
+            ],
+            credits: None,
+            observed_at: now.to_rfc3339(),
+            source_label: "test".to_owned(),
+            message: None,
+        };
+        assert_eq!(capacity_opportunity(&recovering, now, 7.0), (80.0, 1.0));
+
+        let context = ContextIndex {
+            generated_at: now.to_rfc3339(),
+            window_hours: 24,
+            projects: Vec::new(),
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let inventory = ExecutionRouteInventory {
+            generated_at: now.to_rfc3339(),
+            routes: vec![
+                route(
+                    "grok:native",
+                    Provider::Grok,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "hermes:default",
+                    Provider::Hermes,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+        let plan = build_overnight_plan_with_context_and_routes(
+            &snapshot(vec![session(
+                Provider::Grok,
+                "reset-session",
+                "alpha",
+                "Continue after quota reset",
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            )]),
+            vec![recovering],
+            &context,
+            &inventory,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+
+        assert_eq!(plan.candidates[0].capacity_ready_after_hours, 1.0);
+        assert!(plan.candidates[0]
+            .provider_reason
+            .contains("사용량을 다시 확인"));
+        assert_eq!(plan.schedule.lanes[0].slots[0].starts_after_hours, 1.0);
+        assert!(plan.run_drafts[0].dispatch_supported);
+    }
+
+    #[test]
+    fn an_exhausted_window_without_an_in_sleep_reset_stays_exhausted() {
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let unavailable_tonight = ResourceBudget {
+            provider: Provider::Claude,
+            state: ResourceState::Ready,
+            plan: Some("test".to_owned()),
+            windows: vec![UsageWindow {
+                label: "주간".to_owned(),
+                used_percent: 100.0,
+                resets_at: Some("2026-07-26T22:00:00Z".to_owned()),
+            }],
+            credits: None,
+            observed_at: now.to_rfc3339(),
+            source_label: "test".to_owned(),
+            message: None,
+        };
+
+        assert_eq!(
+            capacity_opportunity(&unavailable_tonight, now, 7.0),
+            (0.0, 0.0)
+        );
     }
 
     #[test]

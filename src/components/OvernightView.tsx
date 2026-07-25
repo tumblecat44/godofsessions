@@ -17,6 +17,7 @@ import {
 import {
   compactPath,
   capacityPoolLabels,
+  durationHoursLabel,
   providerNames,
   recommendationConfidenceLabels,
   relativeTime,
@@ -1056,7 +1057,11 @@ function CandidateCard({
             )}
           </div>
           <span>{candidate.resume_existing ? "기존 세션 재개" : "새 세션 필요"}</span>
-          <small>예상 {candidate.estimated_hours}시간</small>
+          <small>
+            {candidate.capacity_ready_after_hours > 0 &&
+              `${durationHoursLabel(candidate.capacity_ready_after_hours)} 뒤 용량 재확인 · `}
+            최대 {durationHoursLabel(candidate.estimated_hours)}
+          </small>
         </div>
       </div>
 
@@ -2355,9 +2360,9 @@ export function OvernightView() {
                             <small>
                               {slot.starts_after_hours === 0
                                 ? "바로 시작"
-                                : `${slot.starts_after_hours}시간 후`}
+                                : `${durationHoursLabel(slot.starts_after_hours)} 후`}
                               {" · "}
-                              최대 {slot.time_budget_hours}시간
+                              최대 {durationHoursLabel(slot.time_budget_hours)}
                             </small>
                           </div>
                         );
@@ -2603,7 +2608,7 @@ export function OvernightView() {
                       {capacityPoolLabels[item.capacity_pool]} · 최대{" "}
                       {item.time_budget_hours}시간 ·{" "}
                       {item.starts_after_hours > 0
-                        ? `약 ${item.starts_after_hours}시간 뒤`
+                        ? `약 ${durationHoursLabel(item.starts_after_hours)} 뒤`
                         : "바로 시작"}{" "}
                       · {compactPath(item.workspace)}
                     </em>

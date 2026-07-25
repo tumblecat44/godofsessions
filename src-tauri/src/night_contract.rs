@@ -147,6 +147,7 @@ mod tests {
             evidence: vec!["evidence".to_owned()],
             source_session_ids: vec!["grok:session-1".to_owned()],
             provider_reason: "test".to_owned(),
+            capacity_ready_after_hours: 0.0,
             expected_outcome: "변경과 테스트 결과".to_owned(),
             verification: vec![
                 "cargo test 통과".to_owned(),

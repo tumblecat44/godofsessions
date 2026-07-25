@@ -715,6 +715,7 @@ pub struct OvernightCandidate {
     pub evidence: Vec<String>,
     pub source_session_ids: Vec<String>,
     pub provider_reason: String,
+    pub capacity_ready_after_hours: f64,
     pub expected_outcome: String,
     pub verification: Vec<String>,
     pub risks: Vec<String>,

@@ -584,6 +584,7 @@ export interface OvernightCandidate {
   evidence: string[];
   source_session_ids: string[];
   provider_reason: string;
+  capacity_ready_after_hours: number;
   expected_outcome: string;
   verification: string[];
   risks: string[];

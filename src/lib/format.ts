@@ -101,6 +101,16 @@ export function compactNumber(value: number): string {
   }).format(value);
 }
 
+export function durationHoursLabel(hours: number): string {
+  const minutes = Math.max(0, Math.round(hours * 60));
+  if (minutes < 60) return `${minutes}분`;
+  const wholeHours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes === 0
+    ? `${wholeHours}시간`
+    : `${wholeHours}시간 ${remainingMinutes}분`;
+}
+
 export function compactPath(value: string | null): string {
   if (!value) return "프로젝트 정보 없음";
   const homeMatch = value.match(/^\/Users\/[^/]+(\/.*)?$/);
