@@ -2,8 +2,9 @@
 
 Verified against the installed CLIs on 2026-07-24 and their current official
 documentation. “Contract ready” means the provider exposes enough structured
-control and receipt primitives to implement an adapter; it does not mean God
-of Sessions dispatches yet.
+control and receipt primitives to implement an adapter. Hermes now has the
+first approval-gated writable adapter; the label remains feasibility-only for
+the other surfaces.
 
 | Surface | Proposed interface | Resume | Durable receipt | Readiness | Required guardrail |
 |---|---|---:|---|---|---|

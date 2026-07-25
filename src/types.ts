@@ -245,6 +245,42 @@ export interface DispatchPreflight {
   execution_enabled: boolean;
 }
 
+export interface ApprovalChallenge {
+  id: string;
+  draft_id: string;
+  idempotency_key: string;
+  project: string;
+  goal: string;
+  workspace: string;
+  confirmation_phrase: string;
+  expires_at: string;
+  warning: string;
+}
+
+export type DispatchReceiptState =
+  | "started"
+  | "completed"
+  | "queued"
+  | "blocked"
+  | "uncertain";
+
+export interface DispatchReceipt {
+  received_at: string;
+  draft_id: string;
+  project: string;
+  adapter: string;
+  board: string;
+  task_id: string;
+  state: DispatchReceiptState;
+  task_status: string;
+  run_id: number | null;
+  worker_pid: number | null;
+  session_id: string | null;
+  idempotency_key: string;
+  receipt_source: string;
+  message: string;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;

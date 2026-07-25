@@ -23,6 +23,6 @@ Recent user goals are also checked for external-side-effect language before a
 candidate is produced. This closes the gap where a Human Gate on the Control
 Board could otherwise reappear as a seemingly safe Night Plan candidate.
 
-M4 drafts are deliberately inert. Provider adapters, approval persistence,
-staleness checks, and dispatch receipts must exist before `dispatch_supported`
-can become true.
+M4 drafts are deliberately inert. M7–M9 add those checks for the Hermes route
+without changing the draft itself into authority: an exact, fresh, single-use
+Approval Challenge is still required before dispatch.

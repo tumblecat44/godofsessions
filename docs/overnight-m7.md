@@ -6,6 +6,9 @@ M7 turns a Hermes Run Draft into an exact, still-inert dispatch proposal.
 
 - Preflight checks for the selected Hermes route, local executable, default
   worker profile, canonical Git workspace, Night Contract, and isolated board.
+- Read-only inspection of the isolated board queue. Any unrelated nonterminal
+  task blocks approval because Hermes may promote it during dispatch; one
+  ready task with the same idempotency key is the only recovery exception.
 - A dedicated `god-of-sessions-night` board. The existing Hermes `default`
   board is never selected, switched, or dispatched.
 - A stable SHA-256-derived idempotency key over the adapter version, isolated
@@ -15,7 +18,8 @@ M7 turns a Hermes Run Draft into an exact, still-inert dispatch proposal.
   2. creating one goal task with the reviewed contract;
   3. dispatching at most one worker from that board.
 - Required runtime and turn limits, one retry, explicit workspace binding, and
-  JSON receipts.
+  JSON receipts. The installed Hermes parser is exercised in an isolated
+  temporary home to verify that the created goal is persisted as `ready`.
 - A literal argument boundary before the task title, so an untrusted title
   beginning with `--` cannot become a Hermes option.
 - A GUI panel that shows every check, local mutation, idempotency key, and

@@ -576,7 +576,7 @@ export const previewOvernightPlan: OvernightPlan = {
       permission_profile: "workspace_write",
       external_side_effects_allowed: false,
       approval_required: true,
-      dispatch_supported: false,
+      dispatch_supported: true,
     },
   ],
   schedule: {
@@ -729,7 +729,7 @@ export const previewOvernightPlan: OvernightPlan = {
         },
       ],
       expected_receipt:
-        "create JSON의 task id + dispatch JSON의 worker pid/session id + task_events/task_runs",
+        "create JSON의 task id + dispatch spawned task id + task_events/task_runs의 pid/session",
       read_only: true,
       execution_enabled: false,
     },

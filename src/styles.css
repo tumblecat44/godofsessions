@@ -2394,7 +2394,7 @@ button:active:not(:disabled) {
 }
 
 .dispatch-preflight > footer {
-  min-height: 42px;
+  min-height: 48px;
   padding: 8px 20px;
   display: flex;
   align-items: center;
@@ -2403,17 +2403,317 @@ button:active:not(:disabled) {
   border-top: 1px solid var(--etched-edge-soft);
 }
 
-.dispatch-preflight > footer span {
+.expected-receipt {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.expected-receipt span {
   flex: 0 0 auto;
   color: var(--signal-teal);
   font-size: 7px;
   font-weight: 600;
 }
 
-.dispatch-preflight > footer p {
+.expected-receipt p {
   margin: 0;
   font-size: 7px;
   line-height: 1.45;
+}
+
+.request-approval-button {
+  min-height: 30px;
+  margin-left: auto;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #101512;
+  background: var(--signal-teal);
+  border: 1px solid rgba(128, 231, 207, 0.5);
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 670;
+}
+
+.request-approval-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.request-approval-button:disabled {
+  color: var(--ink-muted);
+  background: var(--deck);
+  border-color: var(--etched-edge);
+  cursor: not-allowed;
+}
+
+.dispatch-receipt {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 10px;
+}
+
+.dispatch-receipt > span {
+  padding: 3px 6px;
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.08);
+  border-radius: 4px;
+  font-size: 7px;
+  font-weight: 650;
+}
+
+.dispatch-receipt--queued > span,
+.dispatch-receipt--blocked > span,
+.dispatch-receipt--uncertain > span {
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.08);
+}
+
+.dispatch-receipt strong {
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dispatch-receipt p,
+.dispatch-receipt small {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.dispatch-receipt small {
+  font-family: "JetBrains Mono Variable", monospace;
+}
+
+.approval-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  padding: 28px;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 6, 5, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+.approval-dialog {
+  width: min(520px, 100%);
+  overflow: hidden;
+  color: var(--ink-secondary);
+  background: var(--console);
+  border: 1px solid rgba(228, 169, 74, 0.38);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.48),
+    inset 0 2px 0 rgba(228, 169, 74, 0.62);
+}
+
+.approval-dialog > header {
+  min-height: 72px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--etched-edge-soft);
+}
+
+.approval-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.08);
+  border: 1px solid rgba(228, 169, 74, 0.2);
+  border-radius: 50%;
+}
+
+.approval-dialog h2 {
+  margin: 3px 0 0;
+  color: var(--ink-primary);
+  font-size: 17px;
+  font-weight: 580;
+  letter-spacing: -0.025em;
+}
+
+.approval-summary {
+  margin: 16px 20px 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.approval-summary span {
+  color: var(--signal-amber);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.approval-summary strong {
+  color: var(--ink-primary);
+  font-size: 11px;
+  font-weight: 590;
+  line-height: 1.45;
+}
+
+.approval-summary small {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-effects {
+  margin: 12px 20px 0;
+  display: grid;
+  gap: 6px;
+}
+
+.approval-effects p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-tertiary);
+  font-size: 8px;
+}
+
+.approval-effects svg {
+  flex: 0 0 auto;
+  color: var(--signal-teal);
+}
+
+.approval-effects p:last-child svg {
+  color: var(--signal-amber);
+}
+
+.approval-phrase {
+  margin: 16px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.approval-phrase > span {
+  color: var(--ink-muted);
+  font-size: 8px;
+}
+
+.approval-phrase code {
+  color: var(--signal-amber);
+  font-family: "JetBrains Mono Variable", monospace;
+}
+
+.approval-phrase input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  color: var(--ink-primary);
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge);
+  border-radius: 5px;
+  outline: none;
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 9px;
+}
+
+.approval-phrase input:focus {
+  border-color: rgba(228, 169, 74, 0.52);
+  box-shadow: 0 0 0 2px rgba(228, 169, 74, 0.08);
+}
+
+.approval-warning,
+.approval-error {
+  margin: 10px 20px 0;
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.approval-error {
+  padding: 8px 9px;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.07);
+  border: 1px solid rgba(228, 169, 74, 0.18);
+  border-radius: 5px;
+}
+
+.approval-inline-error {
+  max-width: 1500px;
+  margin: 10px auto 0;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.06);
+  border: 1px solid rgba(228, 169, 74, 0.16);
+  border-radius: var(--radius-control);
+}
+
+.approval-inline-error p {
+  margin: 0;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.approval-dialog > footer {
+  margin-top: 16px;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--deck);
+  border-top: 1px solid var(--etched-edge-soft);
+}
+
+.approval-dialog > footer button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.approval-cancel {
+  color: var(--ink-secondary);
+  background: transparent;
+  border: 1px solid var(--etched-edge);
+}
+
+.approval-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #16120a;
+  background: var(--signal-amber);
+  border: 1px solid rgba(255, 202, 108, 0.56);
+}
+
+.approval-confirm:disabled {
+  color: var(--ink-muted);
+  background: var(--control-inset);
+  border-color: var(--etched-edge);
+  cursor: not-allowed;
 }
 
 .alternative-grid {
@@ -3339,6 +3639,17 @@ button:active:not(:disabled) {
   .dispatch-preflight > footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .expected-receipt {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .request-approval-button {
+    width: 100%;
+    margin-left: 0;
   }
 
   .preflight-safety > small {

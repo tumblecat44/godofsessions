@@ -68,7 +68,7 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         permission_profile: PermissionProfile::WorkspaceWrite,
         external_side_effects_allowed: false,
         approval_required: true,
-        dispatch_supported: false,
+        dispatch_supported: format == RunDraftFormat::HermesGoal,
     }
 }
 
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(draft.continuation_turn_budget, Some(20));
         assert!(!draft.external_side_effects_allowed);
         assert!(draft.approval_required);
-        assert!(!draft.dispatch_supported);
+        assert!(draft.dispatch_supported);
     }
 
     #[test]
@@ -175,6 +175,7 @@ mod tests {
         assert_eq!(draft.native_session_id.as_deref(), Some("session-1"));
         assert_eq!(draft.continuation_turn_budget, None);
         assert!(!draft.prompt.starts_with("/goal "));
+        assert!(!draft.dispatch_supported);
     }
 
     #[test]

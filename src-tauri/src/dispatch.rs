@@ -1,20 +1,39 @@
-use std::path::{Path, PathBuf};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::Duration,
+};
 
+use chrono::Utc;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
+use wait_timeout::ChildExt;
 
+use crate::approval::ApprovedDispatch;
 use crate::model::{
     AdapterReadiness, DispatchCommandPreview, DispatchPreflight, DispatchPreflightState,
-    ExecutionRoute, ExecutionRouteInventory, NightRunDraft, PreflightCheck, PreflightLevel,
-    Provider, ResourceState, RunDraftFormat, RunMode,
+    DispatchReceipt, DispatchReceiptState, ExecutionRoute, ExecutionRouteInventory, NightRunDraft,
+    PreflightCheck, PreflightLevel, Provider, ResourceState, RunDraftFormat, RunMode,
 };
 
 const BOARD: &str = "god-of-sessions-night";
 const ASSIGNEE: &str = "default";
 
+#[derive(Debug, Clone, Default)]
+pub struct HermesBoardQueue {
+    pub running_count: usize,
+    pub ready_idempotency_keys: Vec<Option<String>>,
+    pub completed_idempotency_keys: Vec<Option<String>>,
+    pub other_nonterminal_count: usize,
+    pub inspection_error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HermesDispatchEnvironment {
     pub binary: PathBuf,
     pub board_exists: bool,
+    pub board_queue: HermesBoardQueue,
     pub assignee_exists: bool,
     pub workspace_is_git: bool,
     pub workspace_canonical: Option<PathBuf>,
@@ -35,11 +54,13 @@ impl HermesDispatchEnvironment {
         let workspace_is_git = workspace_canonical
             .as_deref()
             .is_some_and(|path| path.join(".git").exists());
+        let board_directory = home.join(format!(".hermes/kanban/boards/{BOARD}"));
+        let board_db = board_directory.join("kanban.db");
+        let board_exists = board_db.is_file() || board_directory.join("board.json").is_file();
         Self {
             binary,
-            board_exists: home
-                .join(format!(".hermes/kanban/boards/{BOARD}/kanban.db"))
-                .is_file(),
+            board_exists,
+            board_queue: inspect_board_queue(&board_db, board_exists),
             assignee_exists: home.join(".hermes/config.yaml").is_file(),
             workspace_is_git,
             workspace_canonical,
@@ -75,7 +96,7 @@ pub fn preview_hermes(
         .workspace_canonical
         .as_deref()
         .unwrap_or_else(|| Path::new(&draft.workspace));
-    let idempotency_key = idempotency_key(draft);
+    let idempotency_key = idempotency_key(draft, route);
     let mut checks = vec![
         check(
             "route",
@@ -120,20 +141,7 @@ pub fn preview_hermes(
             "계약 형식, 시간 범위, 재개 방식 또는 외부행동 게이트가 안전 조건을 만족하지 않습니다.",
         ),
     ];
-    checks.push(PreflightCheck {
-        key: "board".to_owned(),
-        level: if environment.board_exists {
-            PreflightLevel::Pass
-        } else {
-            PreflightLevel::Info
-        },
-        label: "전용 보드".to_owned(),
-        message: if environment.board_exists {
-            "기존 God of Sessions 전용 보드를 재사용합니다.".to_owned()
-        } else {
-            "승인 후 전용 보드를 새로 만들며 기본 보드는 건드리지 않습니다.".to_owned()
-        },
-    });
+    checks.push(board_check(environment, &idempotency_key));
 
     let blocked = checks
         .iter()
@@ -197,10 +205,441 @@ pub fn preview_hermes(
         checks,
         commands,
         expected_receipt:
-            "create JSON의 task id + dispatch JSON의 worker pid/session id + task_events/task_runs"
+            "create JSON의 task id + dispatch spawned task id + task_events/task_runs의 pid/session"
                 .to_owned(),
         read_only: true,
         execution_enabled: false,
+    }
+}
+
+pub fn execute_approved(
+    approved: ApprovedDispatch,
+    route: &ExecutionRoute,
+) -> Result<DispatchReceipt, String> {
+    let first_environment = HermesDispatchEnvironment::local(Path::new(&approved.draft.workspace));
+    let first_preflight = preview_hermes(&approved.draft, route, &first_environment);
+    validate_approved_preflight(&approved.preflight, &first_preflight)?;
+
+    if let Some(command) = first_preflight
+        .commands
+        .iter()
+        .find(|command| command.step == "ensure_board")
+    {
+        run_command(command, Duration::from_secs(15))?;
+    }
+
+    let ready_environment = HermesDispatchEnvironment::local(Path::new(&approved.draft.workspace));
+    let ready_preflight = preview_hermes(&approved.draft, route, &ready_environment);
+    validate_approved_preflight(&approved.preflight, &ready_preflight)?;
+    let create = ready_preflight
+        .commands
+        .iter()
+        .find(|command| command.step == "create_task")
+        .ok_or_else(|| "Hermes 작업 생성 단계를 찾지 못했습니다.".to_owned())?;
+    let created = run_command(create, Duration::from_secs(20))?;
+    let task_id = serde_json::from_str::<Value>(&created)
+        .ok()
+        .and_then(|value| value.get("id")?.as_str().map(str::to_owned))
+        .ok_or_else(|| "Hermes 작업 생성 영수증에서 task id를 찾지 못했습니다.".to_owned())?;
+    let board_db = hermes_board_db();
+    let before_dispatch = load_task_receipt(&board_db, &task_id)?;
+    if let Err(error) = verify_created_task(&approved, &before_dispatch) {
+        return Ok(receipt(
+            &approved,
+            &before_dispatch,
+            DispatchReceiptState::Uncertain,
+            format!("작업은 생성되었지만 계약 재검증에 실패해 시작하지 않았습니다: {error}"),
+        ));
+    }
+    if before_dispatch.status == "running" {
+        return Ok(receipt(
+            &approved,
+            &before_dispatch,
+            DispatchReceiptState::Started,
+            "동일 계약 작업이 이미 실행 중이라 중복 dispatch를 생략했습니다.".to_owned(),
+        ));
+    }
+
+    let dispatch_environment =
+        HermesDispatchEnvironment::local(Path::new(&approved.draft.workspace));
+    let dispatch_preflight = preview_hermes(&approved.draft, route, &dispatch_environment);
+    validate_approved_preflight(&approved.preflight, &dispatch_preflight)?;
+    let dispatch = dispatch_preflight
+        .commands
+        .iter()
+        .find(|command| command.step == "dispatch_one")
+        .ok_or_else(|| "Hermes 단일 실행 단계를 찾지 못했습니다.".to_owned())?;
+    let dispatch_result = run_command(dispatch, Duration::from_secs(25));
+    let after_dispatch = load_task_receipt(&board_db, &task_id)?;
+    match dispatch_result {
+        Ok(output) => {
+            let spawned = spawned_task_ids(&output);
+            if spawned.iter().any(|spawned_id| spawned_id != &task_id) {
+                return Ok(receipt(
+                    &approved,
+                    &after_dispatch,
+                    DispatchReceiptState::Uncertain,
+                    "전용 보드가 승인한 task id와 다른 작업을 시작했다고 보고했습니다.".to_owned(),
+                ));
+            }
+            let (state, message) = receipt_state(&after_dispatch);
+            Ok(receipt(&approved, &after_dispatch, state, message))
+        }
+        Err(error) => {
+            let recovered_state = match after_dispatch.status.as_str() {
+                "running" => DispatchReceiptState::Started,
+                "done" => DispatchReceiptState::Completed,
+                _ => DispatchReceiptState::Uncertain,
+            };
+            Ok(receipt(
+                &approved,
+                &after_dispatch,
+                recovered_state,
+                format!(
+                    "dispatch 응답은 잃었지만 provider task 상태를 다시 읽었습니다. 자동 재시도하지 않습니다: {error}"
+                ),
+            ))
+        }
+    }
+}
+
+fn validate_approved_preflight(
+    approved: &DispatchPreflight,
+    current: &DispatchPreflight,
+) -> Result<(), String> {
+    if current.state != DispatchPreflightState::ReadyForApproval {
+        return Err("실행 직전 사전점검이 더 이상 통과하지 않습니다.".to_owned());
+    }
+    if approved.draft_id != current.draft_id
+        || approved.idempotency_key != current.idempotency_key
+        || approved.board != current.board
+        || approved.assignee != current.assignee
+    {
+        return Err("승인한 계약과 실행 직전 계약이 달라졌습니다.".to_owned());
+    }
+    Ok(())
+}
+
+fn hermes_board_db() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(format!(".hermes/kanban/boards/{BOARD}/kanban.db"))
+}
+
+#[derive(Debug)]
+struct HermesTaskReceipt {
+    id: String,
+    status: String,
+    assignee: Option<String>,
+    workspace_kind: String,
+    workspace_path: Option<String>,
+    idempotency_key: Option<String>,
+    max_runtime_seconds: Option<i64>,
+    goal_mode: bool,
+    goal_max_turns: Option<i64>,
+    run_id: Option<i64>,
+    worker_pid: Option<i64>,
+    session_id: Option<String>,
+}
+
+fn load_task_receipt(path: &Path, task_id: &str) -> Result<HermesTaskReceipt, String> {
+    let connection =
+        crate::connectors::open_read_only_sqlite(path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "
+            SELECT t.id, t.status, t.assignee, t.workspace_kind, t.workspace_path,
+                   t.idempotency_key, t.max_runtime_seconds, t.goal_mode,
+                   t.goal_max_turns, t.current_run_id,
+                   COALESCE(r.worker_pid, t.worker_pid), t.session_id
+            FROM tasks t
+            LEFT JOIN task_runs r ON r.id = t.current_run_id
+            WHERE t.id = ?1
+            ",
+            [task_id],
+            |row| {
+                Ok(HermesTaskReceipt {
+                    id: row.get(0)?,
+                    status: row.get(1)?,
+                    assignee: row.get(2)?,
+                    workspace_kind: row.get(3)?,
+                    workspace_path: row.get(4)?,
+                    idempotency_key: row.get(5)?,
+                    max_runtime_seconds: row.get(6)?,
+                    goal_mode: row.get::<_, i64>(7)? == 1,
+                    goal_max_turns: row.get(8)?,
+                    run_id: row.get(9)?,
+                    worker_pid: row.get(10)?,
+                    session_id: row.get(11)?,
+                })
+            },
+        )
+        .map_err(|error| format!("Hermes task receipt를 읽지 못했습니다: {error}"))
+}
+
+fn verify_created_task(
+    approved: &ApprovedDispatch,
+    task: &HermesTaskReceipt,
+) -> Result<(), String> {
+    let expected_workspace = Path::new(&approved.draft.workspace)
+        .canonicalize()
+        .map_err(|_| "승인한 작업공간을 다시 확인하지 못했습니다.".to_owned())?;
+    let actual_workspace = task
+        .workspace_path
+        .as_deref()
+        .map(Path::new)
+        .and_then(|path| path.canonicalize().ok());
+    let expected_runtime = (approved.draft.time_budget_hours * 3_600.0).round() as i64;
+    if task.idempotency_key.as_deref() != Some(&approved.preflight.idempotency_key)
+        || task.assignee.as_deref() != Some(ASSIGNEE)
+        || task.workspace_kind != "dir"
+        || actual_workspace.as_deref() != Some(expected_workspace.as_path())
+        || task.max_runtime_seconds != Some(expected_runtime)
+        || !task.goal_mode
+        || task.goal_max_turns.map(|turns| turns as u32) != approved.draft.continuation_turn_budget
+        || !matches!(task.status.as_str(), "ready" | "running")
+    {
+        return Err("Hermes에 저장된 task가 승인한 경계와 일치하지 않습니다.".to_owned());
+    }
+    Ok(())
+}
+
+fn receipt_state(task: &HermesTaskReceipt) -> (DispatchReceiptState, String) {
+    match task.status.as_str() {
+        "running" => (
+            DispatchReceiptState::Started,
+            "Hermes가 전용 보드의 승인 작업을 시작했습니다.".to_owned(),
+        ),
+        "done" => (
+            DispatchReceiptState::Completed,
+            "Hermes가 승인 작업을 시작하고 이미 완료했습니다.".to_owned(),
+        ),
+        "ready" => (
+            DispatchReceiptState::Queued,
+            "작업은 전용 보드에 생성됐지만 작업자가 아직 시작되지 않았습니다.".to_owned(),
+        ),
+        "blocked" => (
+            DispatchReceiptState::Blocked,
+            "Hermes가 작업을 시작하지 못하고 사람 확인 상태로 전환했습니다.".to_owned(),
+        ),
+        _ => (
+            DispatchReceiptState::Uncertain,
+            format!(
+                "Hermes task 상태가 예상 범위를 벗어났습니다: {}",
+                task.status
+            ),
+        ),
+    }
+}
+
+fn receipt(
+    approved: &ApprovedDispatch,
+    task: &HermesTaskReceipt,
+    state: DispatchReceiptState,
+    message: String,
+) -> DispatchReceipt {
+    DispatchReceipt {
+        received_at: Utc::now().to_rfc3339(),
+        draft_id: approved.draft.id.clone(),
+        project: approved.draft.project.clone(),
+        adapter: approved.preflight.adapter.clone(),
+        board: approved.preflight.board.clone(),
+        task_id: task.id.clone(),
+        state,
+        task_status: task.status.clone(),
+        run_id: task.run_id,
+        worker_pid: task.worker_pid,
+        session_id: task.session_id.clone(),
+        idempotency_key: approved.preflight.idempotency_key.clone(),
+        receipt_source: "Hermes task + task_runs".to_owned(),
+        message,
+    }
+}
+
+fn spawned_task_ids(output: &str) -> Vec<String> {
+    serde_json::from_str::<Value>(output)
+        .ok()
+        .and_then(|value| value.get("spawned")?.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|item| item.get("task_id")?.as_str().map(str::to_owned))
+        .collect()
+}
+
+fn run_command(command: &DispatchCommandPreview, timeout: Duration) -> Result<String, String> {
+    let mut child = Command::new(&command.program)
+        .args(&command.arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{} 단계를 시작하지 못했습니다: {error}", command.step))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Hermes stdout을 열지 못했습니다.".to_owned())?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Hermes stderr를 열지 못했습니다.".to_owned())?;
+    let wait_result = match child.wait_timeout(timeout) {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("Hermes 실행 상태를 확인하지 못했습니다: {error}"));
+        }
+    };
+    let status = match wait_result {
+        Some(status) => status,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{} 단계가 {}초 안에 끝나지 않아 중단했습니다.",
+                command.step,
+                timeout.as_secs()
+            ));
+        }
+    };
+    let mut output = String::new();
+    let mut error = String::new();
+    stdout
+        .read_to_string(&mut output)
+        .map_err(|read_error| format!("Hermes stdout을 읽지 못했습니다: {read_error}"))?;
+    stderr
+        .read_to_string(&mut error)
+        .map_err(|read_error| format!("Hermes stderr를 읽지 못했습니다: {read_error}"))?;
+    if !status.success() {
+        let detail = error
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(500)
+            .collect::<String>();
+        return Err(format!(
+            "{} 단계가 실패했습니다{}",
+            command.step,
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!(": {detail}")
+            }
+        ));
+    }
+    Ok(output)
+}
+
+fn inspect_board_queue(path: &Path, board_exists: bool) -> HermesBoardQueue {
+    if !board_exists || !path.is_file() {
+        return HermesBoardQueue::default();
+    }
+    let load = || -> Result<HermesBoardQueue, String> {
+        let connection =
+            crate::connectors::open_read_only_sqlite(path).map_err(|error| error.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT status, idempotency_key FROM tasks
+                 WHERE status != 'archived'
+                 ORDER BY priority DESC, created_at ASC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        let mut running_count = 0;
+        let mut ready_idempotency_keys = Vec::new();
+        let mut completed_idempotency_keys = Vec::new();
+        let mut other_nonterminal_count = 0;
+        for (status, key) in rows {
+            match status.as_str() {
+                "running" => running_count += 1,
+                "ready" => ready_idempotency_keys.push(key),
+                "done" => completed_idempotency_keys.push(key),
+                _ => other_nonterminal_count += 1,
+            }
+        }
+        Ok(HermesBoardQueue {
+            running_count,
+            ready_idempotency_keys,
+            completed_idempotency_keys,
+            other_nonterminal_count,
+            inspection_error: None,
+        })
+    };
+    load().unwrap_or_else(|error| HermesBoardQueue {
+        inspection_error: Some(error),
+        ..HermesBoardQueue::default()
+    })
+}
+
+fn board_check(environment: &HermesDispatchEnvironment, idempotency_key: &str) -> PreflightCheck {
+    if !environment.board_exists {
+        return PreflightCheck {
+            key: "board".to_owned(),
+            level: PreflightLevel::Info,
+            label: "전용 보드".to_owned(),
+            message: "승인 후 전용 보드를 새로 만들며 기본 보드는 건드리지 않습니다.".to_owned(),
+        };
+    }
+    if environment.board_queue.inspection_error.is_some() {
+        return PreflightCheck {
+            key: "board".to_owned(),
+            level: PreflightLevel::Block,
+            label: "전용 보드".to_owned(),
+            message: "전용 보드의 실행 대기열을 읽지 못해 실행을 막았습니다.".to_owned(),
+        };
+    }
+    if environment
+        .board_queue
+        .completed_idempotency_keys
+        .iter()
+        .any(|key| key.as_deref() == Some(idempotency_key))
+    {
+        return PreflightCheck {
+            key: "board".to_owned(),
+            level: PreflightLevel::Block,
+            label: "전용 보드".to_owned(),
+            message: "동일한 계약이 이미 완료되어 중복 실행을 막았습니다.".to_owned(),
+        };
+    }
+    let matching_ready = environment.board_queue.ready_idempotency_keys.len() == 1
+        && environment.board_queue.ready_idempotency_keys[0].as_deref() == Some(idempotency_key);
+    let empty = environment.board_queue.ready_idempotency_keys.is_empty()
+        && environment.board_queue.running_count == 0
+        && environment.board_queue.other_nonterminal_count == 0;
+    if empty
+        || (matching_ready
+            && environment.board_queue.running_count == 0
+            && environment.board_queue.other_nonterminal_count == 0)
+    {
+        return PreflightCheck {
+            key: "board".to_owned(),
+            level: PreflightLevel::Pass,
+            label: "전용 보드".to_owned(),
+            message: if matching_ready {
+                "동일 계약의 대기 작업 하나만 있어 중복 생성 없이 이어서 시작할 수 있습니다."
+                    .to_owned()
+            } else {
+                "전용 보드에 실행 중이거나 대기 중인 다른 작업이 없습니다.".to_owned()
+            },
+        };
+    }
+    PreflightCheck {
+        key: "board".to_owned(),
+        level: PreflightLevel::Block,
+        label: "전용 보드".to_owned(),
+        message: format!(
+            "전용 보드에 실행 중 {}개·대기 중 {}개·기타 미종료 {}개가 있어 다른 작업을 잘못 시작하지 않도록 막았습니다.",
+            environment.board_queue.running_count,
+            environment.board_queue.ready_idempotency_keys.len(),
+            environment.board_queue.other_nonterminal_count,
+        ),
     }
 }
 
@@ -251,7 +690,7 @@ fn render_contract(draft: &NightRunDraft) -> String {
     )
 }
 
-fn idempotency_key(draft: &NightRunDraft) -> String {
+fn idempotency_key(draft: &NightRunDraft, route: &ExecutionRoute) -> String {
     let mut hash = Sha256::new();
     for value in ["god-of-sessions/hermes-dispatch/v1", BOARD, ASSIGNEE] {
         hash.update((value.len() as u64).to_le_bytes());
@@ -260,6 +699,10 @@ fn idempotency_key(draft: &NightRunDraft) -> String {
     let serialized = serde_json::to_vec(draft).expect("NightRunDraft must remain serializable");
     hash.update((serialized.len() as u64).to_le_bytes());
     hash.update(serialized);
+    let serialized_route =
+        serde_json::to_vec(route).expect("ExecutionRoute must remain serializable");
+    hash.update((serialized_route.len() as u64).to_le_bytes());
+    hash.update(serialized_route);
     let digest = hash.finalize();
     let suffix = digest[..10]
         .iter()
@@ -351,6 +794,7 @@ mod tests {
         HermesDispatchEnvironment {
             binary: binary.to_path_buf(),
             board_exists: false,
+            board_queue: HermesBoardQueue::default(),
             assignee_exists: true,
             workspace_is_git: true,
             workspace_canonical: Some(workspace.to_path_buf()),
@@ -497,5 +941,194 @@ mod tests {
             preview_hermes(&original, &route(), &environment).idempotency_key,
             preview_hermes(&changed, &route(), &environment).idempotency_key,
         );
+    }
+
+    #[test]
+    fn changing_the_underlying_route_changes_idempotency_key() {
+        let directory = tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let binary = directory.path().join("hermes");
+        std::fs::write(&binary, "").expect("binary");
+        let environment = environment(&workspace, &binary);
+        let draft = draft(&workspace);
+        let original_route = route();
+        let mut changed_route = original_route.clone();
+        changed_route.model = Some("grok-next".to_owned());
+
+        assert_ne!(
+            preview_hermes(&draft, &original_route, &environment).idempotency_key,
+            preview_hermes(&draft, &changed_route, &environment).idempotency_key,
+        );
+    }
+
+    #[test]
+    fn another_ready_task_on_the_isolated_board_blocks_dispatch() {
+        let directory = tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let binary = directory.path().join("hermes");
+        std::fs::write(&binary, "").expect("binary");
+        let mut environment = environment(&workspace, &binary);
+        environment.board_exists = true;
+        environment.board_queue.ready_idempotency_keys =
+            vec![Some("someone-elses-task".to_owned())];
+
+        let preview = preview_hermes(&draft(&workspace), &route(), &environment);
+
+        assert_eq!(preview.state, DispatchPreflightState::Blocked);
+        assert!(preview
+            .checks
+            .iter()
+            .any(|check| check.key == "board" && check.level == PreflightLevel::Block));
+    }
+
+    #[test]
+    fn a_nonterminal_task_that_dispatch_could_promote_blocks_dispatch() {
+        let directory = tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let binary = directory.path().join("hermes");
+        std::fs::write(&binary, "").expect("binary");
+        let mut environment = environment(&workspace, &binary);
+        environment.board_exists = true;
+        environment.board_queue.other_nonterminal_count = 1;
+
+        let preview = preview_hermes(&draft(&workspace), &route(), &environment);
+
+        assert_eq!(preview.state, DispatchPreflightState::Blocked);
+        assert!(preview.checks.iter().any(|check| {
+            check.key == "board"
+                && check.level == PreflightLevel::Block
+                && check.message.contains("기타 미종료 1개")
+        }));
+    }
+
+    #[test]
+    fn an_already_completed_identical_contract_blocks_duplicate_work() {
+        let directory = tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let binary = directory.path().join("hermes");
+        std::fs::write(&binary, "").expect("binary");
+        let draft = draft(&workspace);
+        let mut environment = environment(&workspace, &binary);
+        let first = preview_hermes(&draft, &route(), &environment);
+        environment.board_exists = true;
+        environment.board_queue.completed_idempotency_keys = vec![Some(first.idempotency_key)];
+
+        let preview = preview_hermes(&draft, &route(), &environment);
+
+        assert_eq!(preview.state, DispatchPreflightState::Blocked);
+        assert!(preview.checks.iter().any(|check| {
+            check.key == "board"
+                && check.level == PreflightLevel::Block
+                && check.message.contains("이미 완료")
+        }));
+    }
+
+    #[test]
+    fn dispatch_json_and_fast_completion_are_reconciled_as_receipts() {
+        assert_eq!(
+            spawned_task_ids(r#"{"spawned":[{"task_id":"task-1"}]}"#),
+            vec!["task-1".to_owned()]
+        );
+        let task = HermesTaskReceipt {
+            id: "task-1".to_owned(),
+            status: "done".to_owned(),
+            assignee: Some("default".to_owned()),
+            workspace_kind: "dir".to_owned(),
+            workspace_path: Some("/work/alpha".to_owned()),
+            idempotency_key: Some("gos-night-exact".to_owned()),
+            max_runtime_seconds: Some(3_600),
+            goal_mode: true,
+            goal_max_turns: Some(20),
+            run_id: Some(7),
+            worker_pid: Some(42),
+            session_id: Some("session-1".to_owned()),
+        };
+
+        assert_eq!(receipt_state(&task).0, DispatchReceiptState::Completed);
+    }
+
+    #[test]
+    fn the_same_ready_task_can_be_recovered_idempotently() {
+        let directory = tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let binary = directory.path().join("hermes");
+        std::fs::write(&binary, "").expect("binary");
+        let draft = draft(&workspace);
+        let mut environment = environment(&workspace, &binary);
+        let first = preview_hermes(&draft, &route(), &environment);
+        environment.board_exists = true;
+        environment.board_queue.ready_idempotency_keys = vec![Some(first.idempotency_key.clone())];
+
+        let recovered = preview_hermes(&draft, &route(), &environment);
+
+        assert_eq!(recovered.state, DispatchPreflightState::ReadyForApproval);
+        assert!(recovered.checks.iter().any(|check| {
+            check.key == "board"
+                && check.level == PreflightLevel::Pass
+                && check.message.contains("동일 계약")
+        }));
+    }
+
+    #[test]
+    #[ignore = "uses the installed Hermes CLI with an isolated temporary HERMES_HOME"]
+    fn installed_hermes_parser_creates_a_ready_goal_without_touching_live_state() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let binary = home.join(".local/bin/hermes");
+        if !binary.is_file() {
+            return;
+        }
+        let directory = tempdir().expect("tempdir");
+        let hermes_home = directory.path().join("hermes-home");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
+        let board = Command::new(&binary)
+            .env("HERMES_HOME", &hermes_home)
+            .args([
+                "kanban",
+                "boards",
+                "create",
+                BOARD,
+                "--name",
+                "God of Sessions Night",
+            ])
+            .output()
+            .expect("board command");
+        assert!(
+            board.status.success(),
+            "{}",
+            String::from_utf8_lossy(&board.stderr)
+        );
+
+        let draft = draft(&workspace);
+        let output = Command::new(&binary)
+            .env("HERMES_HOME", &hermes_home)
+            .args(create_task_arguments(
+                &draft,
+                &workspace,
+                "gos-night-parser",
+            ))
+            .output()
+            .expect("create command");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).expect("create JSON");
+        assert_eq!(value.get("status").and_then(Value::as_str), Some("ready"));
+        assert_eq!(
+            value.get("workspace_kind").and_then(Value::as_str),
+            Some("dir")
+        );
+        assert!(hermes_home
+            .join(format!("kanban/boards/{BOARD}/kanban.db"))
+            .is_file());
     }
 }

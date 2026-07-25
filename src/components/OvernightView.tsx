@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
@@ -21,7 +21,9 @@ import {
 } from "../lib/format";
 import { previewOvernightPlan } from "../preview-data";
 import type {
+  ApprovalChallenge,
   DispatchPreflight,
+  DispatchReceipt,
   OvernightCandidate,
   OvernightPlan,
   ExecutionRoute,
@@ -170,11 +172,17 @@ function CandidateCard({
   candidate,
   draft,
   preflight,
+  receipt,
+  approvalLoading = false,
+  onRequestApproval,
   primary = false,
 }: {
   candidate: OvernightCandidate;
   draft?: NightRunDraft;
   preflight?: DispatchPreflight;
+  receipt?: DispatchReceipt;
+  approvalLoading?: boolean;
+  onRequestApproval?: (preflight: DispatchPreflight) => void;
   primary?: boolean;
 }) {
   return (
@@ -407,8 +415,60 @@ function CandidateCard({
           </div>
 
           <footer>
-            <span>예상 실행 영수증</span>
-            <p>{preflight.expected_receipt}</p>
+            {receipt ? (
+              <div
+                className={`dispatch-receipt dispatch-receipt--${receipt.state}`}
+              >
+                <span>
+                  {receipt.state === "started"
+                    ? "작업 시작됨"
+                    : receipt.state === "completed"
+                      ? "작업 완료"
+                    : receipt.state === "queued"
+                      ? "보드에서 대기 중"
+                      : receipt.state === "blocked"
+                        ? "사람 확인 필요"
+                        : "상태 확인 필요"}
+                </span>
+                <strong>{receipt.task_id}</strong>
+                <p>{receipt.message}</p>
+                <small>
+                  {receipt.receipt_source}
+                  {receipt.run_id ? ` · run ${receipt.run_id}` : ""}
+                </small>
+              </div>
+            ) : (
+              <>
+                <div className="expected-receipt">
+                  <span>예상 실행 영수증</span>
+                  <p>{preflight.expected_receipt}</p>
+                </div>
+                <button
+                  className="request-approval-button"
+                  type="button"
+                  disabled={
+                    preflight.state !== "ready_for_approval" ||
+                    approvalLoading ||
+                    !onRequestApproval
+                  }
+                  onClick={() => onRequestApproval?.(preflight)}
+                >
+                  {approvalLoading ? (
+                    <>
+                      <RefreshCw className="is-spinning" size={12} />
+                      승인 준비 중
+                    </>
+                  ) : preflight.state === "ready_for_approval" ? (
+                    <>
+                      <ShieldCheck size={12} />
+                      검토하고 1개 시작
+                    </>
+                  ) : (
+                    "차단 이유 먼저 해결"
+                  )}
+                </button>
+              </>
+            )}
           </footer>
         </details>
       )}
@@ -419,8 +479,33 @@ function CandidateCard({
 export function OvernightView() {
   const [sleepHours, setSleepHours] = useState(7);
   const [state, setState] = useState<PlanState>({ kind: "idle" });
+  const [approval, setApproval] = useState<ApprovalChallenge | null>(null);
+  const [confirmationPhrase, setConfirmationPhrase] = useState("");
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [preparingDraftId, setPreparingDraftId] = useState<string | null>(null);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [receipts, setReceipts] = useState<Record<string, DispatchReceipt>>({});
+
+  useEffect(() => {
+    if (!approval || isDispatching) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const approvalId = approval.id;
+      setApproval(null);
+      setConfirmationPhrase("");
+      setApprovalError(null);
+      if (isTauri()) {
+        void invoke("cancel_dispatch_approval", { approvalId }).catch(
+          () => undefined,
+        );
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [approval, isDispatching]);
 
   const generate = async () => {
+    setApprovalError(null);
     setState({ kind: "loading" });
     try {
       const plan = isTauri()
@@ -439,6 +524,106 @@ export function OvernightView() {
   };
 
   const plan = state.kind === "ready" ? state.plan : null;
+  const approvalDraft = approval
+    ? plan?.run_drafts.find((draft) => draft.id === approval.draft_id)
+    : undefined;
+  const approvalCandidate = approvalDraft
+    ? plan?.candidates.find(
+        (candidate) => candidate.rank === approvalDraft.candidate_rank,
+      )
+    : undefined;
+
+  const requestApproval = async (preflight: DispatchPreflight) => {
+    setPreparingDraftId(preflight.draft_id);
+    setApprovalError(null);
+    try {
+      const challenge = isTauri()
+        ? await invoke<ApprovalChallenge>("prepare_dispatch_approval", {
+            draftId: preflight.draft_id,
+            idempotencyKey: preflight.idempotency_key,
+          })
+        : {
+            id: `preview-${preflight.draft_id}`,
+            draft_id: preflight.draft_id,
+            idempotency_key: preflight.idempotency_key,
+            project:
+              plan?.run_drafts.find(
+                (draft) => draft.id === preflight.draft_id,
+              )?.project || "preview",
+            goal:
+              plan?.run_drafts.find(
+                (draft) => draft.id === preflight.draft_id,
+              )?.goal || "미리보기 goal",
+            workspace:
+              plan?.run_drafts.find(
+                (draft) => draft.id === preflight.draft_id,
+              )?.workspace || "",
+            confirmation_phrase: `${
+              plan?.run_drafts.find(
+                (draft) => draft.id === preflight.draft_id,
+              )?.project || "preview"
+            } 시작 승인`,
+            expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+            warning:
+              "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
+          };
+      setApproval(challenge);
+      setConfirmationPhrase("");
+    } catch (error) {
+      setApprovalError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setPreparingDraftId(null);
+    }
+  };
+
+  const cancelApproval = async () => {
+    const current = approval;
+    setApproval(null);
+    setConfirmationPhrase("");
+    setApprovalError(null);
+    if (current && isTauri()) {
+      await invoke("cancel_dispatch_approval", {
+        approvalId: current.id,
+      }).catch(() => undefined);
+    }
+  };
+
+  const confirmAndDispatch = async () => {
+    if (!approval || confirmationPhrase !== approval.confirmation_phrase) {
+      setApprovalError("아래 확인 문구를 정확히 입력해 주세요.");
+      return;
+    }
+    if (!isTauri()) {
+      setApprovalError("실제 실행은 데스크톱 앱에서만 사용할 수 있습니다.");
+      return;
+    }
+    setIsDispatching(true);
+    setApprovalError(null);
+    try {
+      const receipt = await invoke<DispatchReceipt>(
+        "dispatch_approved_hermes",
+        {
+          approvalId: approval.id,
+          idempotencyKey: approval.idempotency_key,
+          confirmationPhrase,
+        },
+      );
+      setReceipts((current) => ({
+        ...current,
+        [receipt.draft_id]: receipt,
+      }));
+      setApproval(null);
+      setConfirmationPhrase("");
+    } catch (error) {
+      setApprovalError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsDispatching(false);
+    }
+  };
 
   return (
     <main className="workspace overnight-workspace">
@@ -454,8 +639,8 @@ export function OvernightView() {
         <div className="read-only-seal">
           <ShieldCheck size={15} />
           <span>
-            <strong>추천 전용</strong>
-            <small>실행·수정·전송 없음</small>
+            <strong>승인 전 안전</strong>
+            <small>명시적 승인 없이는 실행 없음</small>
           </span>
         </div>
       </header>
@@ -521,6 +706,13 @@ export function OvernightView() {
         </button>
       </section>
 
+      {approvalError && !approval && (
+        <section className="approval-inline-error" role="alert">
+          <AlertTriangle size={14} />
+          <p>{approvalError}</p>
+        </section>
+      )}
+
       {state.kind === "idle" && (
         <section className="overnight-empty">
           <span className="overnight-orbit">
@@ -529,8 +721,8 @@ export function OvernightView() {
           <h2>오늘의 흩어진 맥락을 한 번에 판단합니다</h2>
           <p>
             Codex, Claude, Grok, Cursor, Hermes, OpenClaw의 로컬 세션
-            메타데이터를 프로젝트별로 묶습니다. 대화 본문과 자격 증명은 읽지
-            않습니다.
+            메타데이터를 프로젝트별로 묶습니다. 오늘의 사용자·최종 응답
+            일부는 메모리에서만 읽고 저장하지 않습니다.
           </p>
           <div>
             <span>
@@ -681,6 +873,20 @@ export function OvernightView() {
                     plan.run_drafts.find((draft) => draft.candidate_rank === 1)
                       ?.id,
                 )}
+                receipt={
+                  receipts[
+                    plan.run_drafts.find((draft) => draft.candidate_rank === 1)
+                      ?.id || ""
+                  ]
+                }
+                approvalLoading={
+                  preparingDraftId ===
+                  plan.run_drafts.find((draft) => draft.candidate_rank === 1)
+                    ?.id
+                }
+                onRequestApproval={(preflight) =>
+                  void requestApproval(preflight)
+                }
                 primary
               />
               {plan.candidates.length > 1 && (
@@ -704,6 +910,22 @@ export function OvernightView() {
                             (draft) => draft.candidate_rank === candidate.rank,
                           )?.id,
                       )}
+                      receipt={
+                        receipts[
+                          plan.run_drafts.find(
+                            (draft) => draft.candidate_rank === candidate.rank,
+                          )?.id || ""
+                        ]
+                      }
+                      approvalLoading={
+                        preparingDraftId ===
+                        plan.run_drafts.find(
+                          (draft) => draft.candidate_rank === candidate.rank,
+                        )?.id
+                      }
+                      onRequestApproval={(preflight) =>
+                        void requestApproval(preflight)
+                      }
                       key={candidate.project}
                     />
                   ))}
@@ -744,6 +966,111 @@ export function OvernightView() {
             </div>
           </section>
         </>
+      )}
+
+      {approval && (
+        <div className="approval-backdrop" role="presentation">
+          <section
+            className="approval-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="approval-title"
+          >
+            <header>
+              <span className="approval-mark">
+                <MoonStar size={17} />
+              </span>
+              <div>
+                <span className="eyebrow">ONE-TIME APPROVAL</span>
+                <h2 id="approval-title">이 작업 하나를 시작할까요?</h2>
+              </div>
+            </header>
+
+            <div className="approval-summary">
+              <span>{approval.project}</span>
+              <strong>{approval.goal}</strong>
+              <small title={approval.workspace}>
+                {compactPath(approval.workspace)}
+              </small>
+            </div>
+
+            <div className="approval-effects">
+              <p>
+                <Check size={12} />
+                전용 Hermes 보드만 사용
+              </p>
+              <p>
+                <Check size={12} />
+                최대 한 작업자·계약된 시간과 턴만 허용
+              </p>
+              <p>
+                <AlertTriangle size={12} />
+                프로젝트 파일이 바뀌고{" "}
+                {`${
+                  approvalCandidate
+                    ? capacityPoolLabels[approvalCandidate.capacity_pool]
+                    : "연결된 구독"
+                }이 사용될 수 있음`}
+              </p>
+            </div>
+
+            <label className="approval-phrase">
+              <span>
+                실행하려면 <code>{approval.confirmation_phrase}</code> 입력
+              </span>
+              <input
+                autoFocus
+                value={confirmationPhrase}
+                onChange={(event) => {
+                  setConfirmationPhrase(event.target.value);
+                  setApprovalError(null);
+                }}
+                disabled={isDispatching}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+
+            <p className="approval-warning">{approval.warning}</p>
+            {approvalError && (
+              <p className="approval-error" role="alert">
+                {approvalError}
+              </p>
+            )}
+
+            <footer>
+              <button
+                className="approval-cancel"
+                type="button"
+                onClick={() => void cancelApproval()}
+                disabled={isDispatching}
+              >
+                취소
+              </button>
+              <button
+                className="approval-confirm"
+                type="button"
+                onClick={() => void confirmAndDispatch()}
+                disabled={
+                  isDispatching ||
+                  confirmationPhrase !== approval.confirmation_phrase
+                }
+              >
+                {isDispatching ? (
+                  <>
+                    <RefreshCw className="is-spinning" size={13} />
+                    계약 재확인 후 시작 중
+                  </>
+                ) : (
+                  <>
+                    <MoonStar size={13} />
+                    승인하고 1개 시작
+                  </>
+                )}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
     </main>
   );

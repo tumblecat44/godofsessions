@@ -347,6 +347,47 @@ pub struct DispatchPreflight {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ApprovalChallenge {
+    pub id: String,
+    pub draft_id: String,
+    pub idempotency_key: String,
+    pub project: String,
+    pub goal: String,
+    pub workspace: String,
+    pub confirmation_phrase: String,
+    pub expires_at: String,
+    pub warning: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchReceiptState {
+    Started,
+    Completed,
+    Queued,
+    Blocked,
+    Uncertain,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DispatchReceipt {
+    pub received_at: String,
+    pub draft_id: String,
+    pub project: String,
+    pub adapter: String,
+    pub board: String,
+    pub task_id: String,
+    pub state: DispatchReceiptState,
+    pub task_status: String,
+    pub run_id: Option<i64>,
+    pub worker_pid: Option<i64>,
+    pub session_id: Option<String>,
+    pub idempotency_key: String,
+    pub receipt_source: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
     pub project: String,

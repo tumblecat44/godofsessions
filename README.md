@@ -29,8 +29,9 @@ It is not:
 
 ## Current phase
 
-The approval-preflight M7 desktop slice is working. Recommendation and
-preflight remain read-only; no provider process is started.
+The approval-gated Hermes M9 desktop slice is working. Recommendation and
+preflight remain read-only; a provider process can start only after an exact,
+expiring, one-time approval in the desktop app.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -42,6 +43,8 @@ preflight remain read-only; no provider process is started.
 - [Dispatch readiness M5](docs/overnight-m5.md)
 - [Capacity-aware Night Portfolio M6](docs/overnight-m6.md)
 - [Hermes approval preflight M7](docs/overnight-m7.md)
+- [Exact one-time approval M8](docs/overnight-m8.md)
+- [Hermes one-pass dispatch and receipt M9](docs/overnight-m9.md)
 
 The app currently:
 
@@ -73,12 +76,19 @@ The app currently:
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt
+- invalidates approvals when the plan changes, expires review challenges after
+  five minutes, and consumes a valid approval exactly once
+- re-runs the complete preflight immediately before dispatch, creates at most
+  one Hermes goal task, starts at most one worker, and returns the
+  provider-owned task/run receipt
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
-The Overnight screen does not dispatch yet. It shows the exact local mutations
-that a later approval would authorize, but the execution switch remains off.
-The tools that created the sessions remain the source of truth.
+The Overnight screen never auto-dispatches. Only an eligible Hermes proposal
+has a start control, and the operator must review the effects and type the
+project-specific confirmation phrase. Native Codex, Claude, Grok, Cursor, and
+OpenClaw dispatch remain disabled until their guardrail contracts are equally
+strong. The tools that created the sessions remain the source of truth.
 
 ## Run locally
 

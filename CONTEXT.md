@@ -85,6 +85,12 @@ conditions, idempotency identity, and expected receipt for a proposed
 Dispatch. Passing preflight means ready for approval, not approved.
 _Avoid_: Dispatch, dry run, approval
 
+**Approval Challenge**:
+A short-lived, single-use request for the operator to authorize one exact Run
+Draft and Execution Route. It is invalidated by plan changes and consumed
+before dispatch.
+_Avoid_: Persistent permission, provider login, confirmation toast
+
 **Run Receipt**:
 Provider-owned evidence that a Dispatch was accepted and what happened next,
 such as a thread/turn ID, ACP completion, Kanban run, or durable task record.

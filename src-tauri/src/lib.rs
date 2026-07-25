@@ -1,3 +1,4 @@
+mod approval;
 mod connectors;
 mod context_brief;
 mod control_board;
@@ -9,10 +10,16 @@ mod recommendation;
 mod time_utils;
 mod usage;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
-use model::{OvernightPlan, Session, Snapshot, StatusConfidence, WorkspaceOverview};
+use model::{
+    ApprovalChallenge, DispatchReceipt, OvernightPlan, Session, Snapshot, StatusConfidence,
+    WorkspaceOverview,
+};
+use tauri::State;
+
+type ApprovalState = Mutex<approval::ApprovalRegistry>;
 
 #[tauri::command]
 async fn load_snapshot() -> Result<Snapshot, String> {
@@ -22,9 +29,12 @@ async fn load_snapshot() -> Result<Snapshot, String> {
 }
 
 #[tauri::command]
-async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, String> {
+async fn generate_overnight_plan(
+    sleep_hours: f64,
+    approvals: State<'_, ApprovalState>,
+) -> Result<OvernightPlan, String> {
     let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let plan = tauri::async_runtime::spawn_blocking(move || -> Result<OvernightPlan, String> {
         let snapshot_thread = std::thread::spawn(build_snapshot);
         let budgets = usage::load_budgets();
         let snapshot = snapshot_thread
@@ -43,6 +53,67 @@ async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, Stri
         );
         plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
         Ok(plan)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .replace_plan(&plan.run_drafts, &plan.dispatch_preflights, Utc::now());
+    Ok(plan)
+}
+
+#[tauri::command]
+fn prepare_dispatch_approval(
+    draft_id: String,
+    idempotency_key: String,
+    approvals: State<'_, ApprovalState>,
+) -> Result<ApprovalChallenge, String> {
+    approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .begin(&draft_id, &idempotency_key, Utc::now())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_dispatch_approval(
+    approval_id: String,
+    approvals: State<'_, ApprovalState>,
+) -> Result<(), String> {
+    approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .cancel(&approval_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn dispatch_approved_hermes(
+    approval_id: String,
+    idempotency_key: String,
+    confirmation_phrase: String,
+    approvals: State<'_, ApprovalState>,
+) -> Result<DispatchReceipt, String> {
+    let approved = approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .consume(
+            &approval_id,
+            &idempotency_key,
+            &confirmation_phrase,
+            Utc::now(),
+        )
+        .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let budgets = usage::load_budgets();
+        let routes = execution_routes::load(&budgets, Utc::now());
+        let route = routes
+            .routes
+            .iter()
+            .find(|route| route.id == approved.draft.route_id)
+            .ok_or_else(|| "승인한 Hermes 실행 경로를 더 이상 찾지 못했습니다.".to_owned())?;
+        dispatch::execute_approved(approved, route)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -144,10 +215,14 @@ fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ApprovalState::default())
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             load_workspace_overview,
-            generate_overnight_plan
+            generate_overnight_plan,
+            prepare_dispatch_approval,
+            cancel_dispatch_approval,
+            dispatch_approved_hermes
         ])
         .run(tauri::generate_context!())
         .expect("error while running God of Sessions");
@@ -199,7 +274,7 @@ mod live_tests {
         let now = chrono::Utc::now();
         let context = context_brief::build_context_index(&snapshot, now);
         let routes = execution_routes::load(&budgets, now);
-        let plan = recommendation::build_overnight_plan_with_context_and_routes(
+        let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
             &snapshot,
             budgets,
             &context,
@@ -207,12 +282,15 @@ mod live_tests {
             recommendation::SleepHours::new(7.0).expect("valid sleep duration"),
             now,
         );
+        plan.dispatch_preflights =
+            dispatch::build_preflights(&plan.run_drafts, &plan.route_inventory);
 
         eprintln!(
-            "sessions={} projects={} candidates={} budgets={:?}",
+            "sessions={} projects={} candidates={} preflights={} budgets={:?}",
             plan.sessions_considered,
             plan.projects_considered,
             plan.candidates.len(),
+            plan.dispatch_preflights.len(),
             plan.budgets
                 .iter()
                 .map(|budget| (
@@ -237,8 +315,9 @@ mod live_tests {
         assert_eq!(plan.run_drafts.len(), plan.candidates.len());
         assert!(plan.run_drafts.iter().all(|draft| {
             draft.approval_required
-                && !draft.dispatch_supported
                 && !draft.external_side_effects_allowed
+                && (draft.dispatch_supported
+                    == (draft.format == crate::model::RunDraftFormat::HermesGoal))
         }));
         assert!(plan
             .schedule
@@ -253,6 +332,11 @@ mod live_tests {
                 .sum::<usize>(),
             plan.candidates.len()
         );
+        assert!(plan.dispatch_preflights.iter().all(|preflight| {
+            preflight.read_only
+                && !preflight.execution_enabled
+                && preflight.board == "god-of-sessions-night"
+        }));
         assert!(plan
             .candidates
             .iter()
