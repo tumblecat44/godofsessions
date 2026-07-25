@@ -29,7 +29,8 @@ It is not:
 
 ## Current phase
 
-The read-only M4 desktop slice is working.
+The approval-preflight M7 desktop slice is working. Recommendation and
+preflight remain read-only; no provider process is started.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -40,6 +41,7 @@ The read-only M4 desktop slice is working.
 - [Dispatch adapter feasibility](docs/dispatch-feasibility.md)
 - [Dispatch readiness M5](docs/overnight-m5.md)
 - [Capacity-aware Night Portfolio M6](docs/overnight-m6.md)
+- [Hermes approval preflight M7](docs/overnight-m7.md)
 
 The app currently:
 
@@ -68,12 +70,15 @@ The app currently:
   for every route
 - builds parallel lanes per subscription while keeping work inside each shared
   Capacity Pool sequential and within the sleep window
+- compiles Hermes candidates into a read-only Dispatch Preflight with an
+  isolated board, exact argument-vector preview, stable idempotency key,
+  bounded runtime, one worker, and expected receipt
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
-The Overnight screen is recommendation-only. Native open/resume and dispatch
-controls are deliberately deferred. The tools that created the sessions remain
-the source of truth.
+The Overnight screen does not dispatch yet. It shows the exact local mutations
+that a later approval would authorize, but the execution switch remains off.
+The tools that created the sessions remain the source of truth.
 
 ## Run locally
 

@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -144,8 +147,8 @@ fn native_route(
     provider: Provider,
     runtime: &str,
     capacity_pool: CapacityPool,
-    binary: &PathBuf,
-    required_auth: Option<&PathBuf>,
+    binary: &Path,
+    required_auth: Option<&Path>,
     budget: Option<&ResourceBudget>,
 ) -> ExecutionRoute {
     let binary_present = binary.is_file();
@@ -405,7 +408,7 @@ fn budget_for(budgets: &[ResourceBudget], provider: Provider) -> Option<&Resourc
     budgets.iter().find(|budget| budget.provider == provider)
 }
 
-fn auth_has_provider(path: &PathBuf, provider: &str) -> bool {
+fn auth_has_provider(path: &Path, provider: &str) -> bool {
     if provider.is_empty() {
         return false;
     }
@@ -421,7 +424,7 @@ fn auth_has_provider(path: &PathBuf, provider: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn read_hermes_model_config(path: &PathBuf) -> Result<HermesModelConfig, String> {
+fn read_hermes_model_config(path: &Path) -> Result<HermesModelConfig, String> {
     let text =
         fs::read_to_string(path).map_err(|_| "Hermes 설정 파일을 찾지 못했습니다.".to_owned())?;
     let mut in_model = false;

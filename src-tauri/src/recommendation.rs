@@ -32,6 +32,7 @@ struct ProviderChoice<'a> {
     score: f64,
 }
 
+#[cfg(test)]
 pub fn build_overnight_plan(
     snapshot: &Snapshot,
     budgets: Vec<ResourceBudget>,
@@ -41,6 +42,7 @@ pub fn build_overnight_plan(
     build_overnight_plan_inner(snapshot, budgets, None, None, sleep_hours, now)
 }
 
+#[cfg(test)]
 pub fn build_overnight_plan_with_context(
     snapshot: &Snapshot,
     budgets: Vec<ResourceBudget>,
@@ -366,6 +368,7 @@ fn build_overnight_plan_inner(
         candidates,
         run_drafts,
         schedule,
+        dispatch_preflights: Vec::new(),
         exclusions,
         read_only: true,
         methodology:

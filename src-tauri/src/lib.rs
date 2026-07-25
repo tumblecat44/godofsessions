@@ -1,6 +1,7 @@
 mod connectors;
 mod context_brief;
 mod control_board;
+mod dispatch;
 mod execution_routes;
 mod model;
 mod night_contract;
@@ -32,16 +33,16 @@ async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, Stri
         let now = Utc::now();
         let context = context_brief::build_context_index(&snapshot, now);
         let routes = execution_routes::load(&budgets, now);
-        Ok(
-            recommendation::build_overnight_plan_with_context_and_routes(
-                &snapshot,
-                budgets,
-                &context,
-                &routes,
-                sleep_hours,
-                now,
-            ),
-        )
+        let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
+            &snapshot,
+            budgets,
+            &context,
+            &routes,
+            sleep_hours,
+            now,
+        );
+        plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
+        Ok(plan)
     })
     .await
     .map_err(|error| error.to_string())?

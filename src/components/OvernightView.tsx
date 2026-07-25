@@ -21,6 +21,7 @@ import {
 } from "../lib/format";
 import { previewOvernightPlan } from "../preview-data";
 import type {
+  DispatchPreflight,
   OvernightCandidate,
   OvernightPlan,
   ExecutionRoute,
@@ -168,10 +169,12 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
 function CandidateCard({
   candidate,
   draft,
+  preflight,
   primary = false,
 }: {
   candidate: OvernightCandidate;
   draft?: NightRunDraft;
+  preflight?: DispatchPreflight;
   primary?: boolean;
 }) {
   return (
@@ -315,6 +318,97 @@ function CandidateCard({
               <AlertTriangle size={12} /> 외부 부작용 금지
             </span>
             <strong>사람 승인 필요</strong>
+          </footer>
+        </details>
+      )}
+
+      {preflight && (
+        <details className="dispatch-preflight">
+          <summary>
+            <span>
+              <strong>Hermes 전달 사전점검</strong>
+              <small>{preflight.adapter}</small>
+            </span>
+            <em
+              className={
+                preflight.state === "ready_for_approval"
+                  ? "is-ready"
+                  : "is-blocked"
+              }
+            >
+              {preflight.state === "ready_for_approval"
+                ? "승인만 남음"
+                : "실행 차단"}
+            </em>
+          </summary>
+
+          <div className="preflight-safety">
+            <span>
+              <ShieldCheck size={13} />
+              읽기 전용 점검
+            </span>
+            <strong>실행 꺼짐</strong>
+            <small>
+              기본 Hermes 보드 대신 <code>{preflight.board}</code>만 사용
+            </small>
+          </div>
+
+          <div className="preflight-checks">
+            {preflight.checks.map((check) => (
+              <section
+                className={`preflight-check preflight-check--${check.level}`}
+                key={check.key}
+              >
+                <span aria-hidden="true">
+                  {check.level === "pass" ? (
+                    <Check size={11} />
+                  ) : (
+                    <AlertTriangle size={11} />
+                  )}
+                </span>
+                <div>
+                  <strong>{check.label}</strong>
+                  <p>{check.message}</p>
+                </div>
+              </section>
+            ))}
+          </div>
+
+          <div className="preflight-identity">
+            <span>
+              작업자 <code>{preflight.assignee}</code>
+            </span>
+            <span>
+              중복 방지 <code>{preflight.idempotency_key}</code>
+            </span>
+          </div>
+
+          <div className="preflight-commands">
+            <header>
+              <span>승인 후 실행될 단계</span>
+              <small>셸을 거치지 않고 인자를 그대로 전달</small>
+            </header>
+            {preflight.commands.map((command, index) => (
+              <details key={command.step}>
+                <summary>
+                  <span>{index + 1}</span>
+                  <strong>{command.summary}</strong>
+                  <small>로컬 변경</small>
+                </summary>
+                <pre>
+                  {[command.program, ...command.arguments]
+                    .map((argument) =>
+                      /\s/.test(argument) ? JSON.stringify(argument) : argument,
+                    )
+                    .join(" ")}
+                </pre>
+              </details>
+            ))}
+          </div>
+
+          <footer>
+            <span>예상 실행 영수증</span>
+            <p>{preflight.expected_receipt}</p>
           </footer>
         </details>
       )}
@@ -581,6 +675,12 @@ export function OvernightView() {
               <CandidateCard
                 candidate={plan.candidates[0]}
                 draft={plan.run_drafts.find((draft) => draft.candidate_rank === 1)}
+                preflight={plan.dispatch_preflights.find(
+                  (preflight) =>
+                    preflight.draft_id ===
+                    plan.run_drafts.find((draft) => draft.candidate_rank === 1)
+                      ?.id,
+                )}
                 primary
               />
               {plan.candidates.length > 1 && (
@@ -596,6 +696,13 @@ export function OvernightView() {
                       candidate={candidate}
                       draft={plan.run_drafts.find(
                         (draft) => draft.candidate_rank === candidate.rank,
+                      )}
+                      preflight={plan.dispatch_preflights.find(
+                        (preflight) =>
+                          preflight.draft_id ===
+                          plan.run_drafts.find(
+                            (draft) => draft.candidate_rank === candidate.rank,
+                          )?.id,
                       )}
                       key={candidate.project}
                     />

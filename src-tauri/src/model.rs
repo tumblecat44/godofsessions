@@ -299,6 +299,53 @@ pub struct NightSchedule {
     pub methodology: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreflightLevel {
+    Pass,
+    Info,
+    Block,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchPreflightState {
+    ReadyForApproval,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreflightCheck {
+    pub key: String,
+    pub level: PreflightLevel,
+    pub label: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DispatchCommandPreview {
+    pub step: String,
+    pub program: String,
+    pub arguments: Vec<String>,
+    pub mutates_local_state: bool,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DispatchPreflight {
+    pub draft_id: String,
+    pub state: DispatchPreflightState,
+    pub adapter: String,
+    pub board: String,
+    pub assignee: String,
+    pub idempotency_key: String,
+    pub checks: Vec<PreflightCheck>,
+    pub commands: Vec<DispatchCommandPreview>,
+    pub expected_receipt: String,
+    pub read_only: bool,
+    pub execution_enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
@@ -341,6 +388,7 @@ pub struct OvernightPlan {
     pub candidates: Vec<OvernightCandidate>,
     pub run_drafts: Vec<NightRunDraft>,
     pub schedule: NightSchedule,
+    pub dispatch_preflights: Vec<DispatchPreflight>,
     pub exclusions: Vec<ExcludedProject>,
     pub read_only: bool,
     pub methodology: String,

@@ -213,6 +213,38 @@ export interface NightSchedule {
   methodology: string;
 }
 
+export type PreflightLevel = "pass" | "info" | "block";
+export type DispatchPreflightState = "ready_for_approval" | "blocked";
+
+export interface PreflightCheck {
+  key: string;
+  level: PreflightLevel;
+  label: string;
+  message: string;
+}
+
+export interface DispatchCommandPreview {
+  step: string;
+  program: string;
+  arguments: string[];
+  mutates_local_state: boolean;
+  summary: string;
+}
+
+export interface DispatchPreflight {
+  draft_id: string;
+  state: DispatchPreflightState;
+  adapter: string;
+  board: string;
+  assignee: string;
+  idempotency_key: string;
+  checks: PreflightCheck[];
+  commands: DispatchCommandPreview[];
+  expected_receipt: string;
+  read_only: boolean;
+  execution_enabled: boolean;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;
@@ -252,6 +284,7 @@ export interface OvernightPlan {
   candidates: OvernightCandidate[];
   run_drafts: NightRunDraft[];
   schedule: NightSchedule;
+  dispatch_preflights: DispatchPreflight[];
   exclusions: ExcludedProject[];
   read_only: boolean;
   methodology: string;
