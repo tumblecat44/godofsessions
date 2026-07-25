@@ -31,6 +31,10 @@ approval contract. A working protocol connection alone is not sufficient.
   version 1. The runtime advertised load-session, MCP, prompt, session, and
   authentication capabilities. The probe terminated before creating a session
   or invoking a model or tool.
+- The live capability response reported `loadSession: true`, embedded prompt
+  context support, and HTTP/SSE MCP transport support. Native resume therefore
+  has a documented and runtime-advertised `session/load` path; it does not need
+  to be simulated by copying a transcript into a new prompt.
 - `GROK_HOME` can isolate the Grok configuration directory, but it also changes
   the home used for sessions and authentication; using it naively would break
   native-session resume.
