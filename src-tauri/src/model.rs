@@ -417,6 +417,63 @@ pub struct NightRunHistory {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct NightRunAttempt {
+    pub run_id: i64,
+    pub profile: Option<String>,
+    pub status: String,
+    pub outcome: Option<String>,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub duration_seconds: Option<i64>,
+    pub worker_pid: Option<i64>,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightRunEvent {
+    pub event_id: i64,
+    pub run_id: Option<i64>,
+    pub kind: String,
+    pub created_at: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NightRunVerdict {
+    InProgress,
+    ReadyToReview,
+    NeedsAttention,
+    Uncertain,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightRunDetail {
+    pub generated_at: String,
+    pub task_id: String,
+    pub title: String,
+    pub project: String,
+    pub workspace: Option<String>,
+    pub task_status: String,
+    pub body: Option<String>,
+    pub assignee: Option<String>,
+    pub max_runtime_seconds: Option<i64>,
+    pub goal_mode: bool,
+    pub goal_max_turns: Option<i64>,
+    pub max_retries: Option<i64>,
+    pub idempotency_key: String,
+    pub provenance_verified: bool,
+    pub verdict: NightRunVerdict,
+    pub verdict_reason: String,
+    pub attempts: Vec<NightRunAttempt>,
+    pub events: Vec<NightRunEvent>,
+    pub warnings: Vec<String>,
+    pub read_only: bool,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
     pub project: String,

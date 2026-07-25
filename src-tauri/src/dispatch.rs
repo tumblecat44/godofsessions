@@ -13,9 +13,10 @@ use wait_timeout::ChildExt;
 use crate::approval::ApprovedDispatch;
 use crate::model::{
     AdapterReadiness, DispatchCommandPreview, DispatchPreflight, DispatchPreflightState,
-    DispatchReceipt, DispatchReceiptState, ExecutionRoute, ExecutionRouteInventory, NightRunDraft,
-    NightRunHistory, NightRunRecord, PreflightCheck, PreflightLevel, Provider, ResourceState,
-    RunDraftFormat, RunMode,
+    DispatchReceipt, DispatchReceiptState, ExecutionRoute, ExecutionRouteInventory,
+    NightRunAttempt, NightRunDetail, NightRunDraft, NightRunEvent, NightRunHistory, NightRunRecord,
+    NightRunVerdict, PreflightCheck, PreflightLevel, Provider, ResourceState, RunDraftFormat,
+    RunMode,
 };
 
 const BOARD: &str = "god-of-sessions-night";
@@ -424,6 +425,241 @@ fn bounded_receipt_text(value: Option<String>) -> Option<String> {
         return None;
     }
     Some(compact.chars().take(1_200).collect())
+}
+
+pub fn load_night_run_detail(task_id: &str) -> Result<NightRunDetail, String> {
+    let path = hermes_board_db();
+    if !path.is_file() {
+        return Err("Hermes 전용 야간 보드를 찾지 못했습니다.".to_owned());
+    }
+    load_night_run_detail_from_path(&path, task_id)
+}
+
+fn load_night_run_detail_from_path(path: &Path, task_id: &str) -> Result<NightRunDetail, String> {
+    let connection =
+        crate::connectors::open_read_only_sqlite(path).map_err(|error| error.to_string())?;
+    let task = connection
+        .query_row(
+            "
+            SELECT id, title, workspace_path, status, body, assignee,
+                   max_runtime_seconds, goal_mode, goal_max_turns, max_retries,
+                   idempotency_key
+            FROM tasks
+            WHERE id = ?
+              AND created_by = 'god-of-sessions'
+              AND idempotency_key LIKE 'gos-night-%'
+            LIMIT 1
+            ",
+            [task_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, String>(10)?,
+                ))
+            },
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => {
+                "God of Sessions가 만든 야간 작업이 아닙니다.".to_owned()
+            }
+            other => other.to_string(),
+        })?;
+
+    let mut attempts_statement = connection
+        .prepare(
+            "
+            SELECT id, profile, status, outcome, started_at, ended_at,
+                   worker_pid, summary, error
+            FROM task_runs
+            WHERE task_id = ?
+            ORDER BY id DESC
+            LIMIT 10
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let attempts = attempts_statement
+        .query_map([task_id], |row| {
+            let started_at = row.get::<_, Option<i64>>(4)?;
+            let ended_at = row.get::<_, Option<i64>>(5)?;
+            Ok(NightRunAttempt {
+                run_id: row.get(0)?,
+                profile: row.get(1)?,
+                status: row.get(2)?,
+                outcome: row.get(3)?,
+                started_at: started_at.and_then(crate::time_utils::unix_seconds_to_rfc3339),
+                ended_at: ended_at.and_then(crate::time_utils::unix_seconds_to_rfc3339),
+                duration_seconds: started_at
+                    .zip(ended_at)
+                    .map(|(start, end)| end.max(start) - start),
+                worker_pid: row.get(6)?,
+                summary: bounded_receipt_text(row.get(7)?),
+                error: bounded_receipt_text(row.get(8)?),
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    let mut events_statement = connection
+        .prepare(
+            "
+            SELECT id, run_id, kind, payload, created_at
+            FROM (
+                SELECT id, run_id, kind, payload, created_at
+                FROM task_events
+                WHERE task_id = ?
+                ORDER BY id DESC
+                LIMIT 50
+            )
+            ORDER BY id ASC
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let events = events_statement
+        .query_map([task_id], |row| {
+            Ok(NightRunEvent {
+                event_id: row.get(0)?,
+                run_id: row.get(1)?,
+                kind: row.get(2)?,
+                note: event_note(row.get(3)?),
+                created_at: row
+                    .get::<_, Option<i64>>(4)?
+                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    let (verdict, verdict_reason) = night_run_verdict(&task.3, attempts.first());
+    let project = task
+        .2
+        .as_deref()
+        .and_then(|value| Path::new(value).file_name())
+        .and_then(|value| value.to_str())
+        .unwrap_or("이름 없는 프로젝트")
+        .to_owned();
+    Ok(NightRunDetail {
+        generated_at: Utc::now().to_rfc3339(),
+        task_id: task.0,
+        title: task.1,
+        project,
+        workspace: task.2,
+        task_status: task.3,
+        body: bounded_contract_text(task.4),
+        assignee: task.5,
+        max_runtime_seconds: task.6,
+        goal_mode: task.7 == 1,
+        goal_max_turns: task.8,
+        max_retries: task.9,
+        idempotency_key: task.10,
+        provenance_verified: true,
+        verdict,
+        verdict_reason,
+        attempts,
+        events,
+        warnings: Vec::new(),
+        read_only: true,
+        methodology: "Hermes task, task_runs, task_events를 읽기 전용으로 결합했습니다. 완료 이벤트는 실행 수명주기를 증명하지만 결과의 정확성까지 자동 증명하지는 않습니다."
+            .to_owned(),
+    })
+}
+
+fn bounded_contract_text(value: Option<String>) -> Option<String> {
+    let text = value?.trim().to_owned();
+    (!text.is_empty()).then(|| text.chars().take(12_000).collect())
+}
+
+fn event_note(value: Option<String>) -> Option<String> {
+    let value = serde_json::from_str::<Value>(&value?).ok()?;
+    let object = value.as_object()?;
+    let note = [
+        "reason",
+        "message",
+        "error",
+        "summary",
+        "outcome",
+        "profile",
+        "pid",
+        "routed_to",
+    ]
+    .iter()
+    .filter_map(|key| {
+        let value = object.get(*key)?;
+        let rendered = value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        Some(format!("{key}: {rendered}"))
+    })
+    .collect::<Vec<_>>()
+    .join(" · ");
+    bounded_receipt_text((!note.is_empty()).then_some(note))
+        .map(|note| note.chars().take(400).collect())
+}
+
+fn night_run_verdict(
+    task_status: &str,
+    latest_attempt: Option<&NightRunAttempt>,
+) -> (NightRunVerdict, String) {
+    if matches!(task_status, "ready" | "running" | "scheduled" | "todo") {
+        return (
+            NightRunVerdict::InProgress,
+            "Hermes 원장에 아직 끝나지 않은 작업으로 기록되어 있습니다.".to_owned(),
+        );
+    }
+    if matches!(task_status, "blocked" | "review" | "triage") {
+        return (
+            NightRunVerdict::NeedsAttention,
+            "Hermes가 사람의 확인 또는 개입이 필요한 상태로 라우팅했습니다.".to_owned(),
+        );
+    }
+    if task_status == "done" {
+        return match latest_attempt {
+            Some(attempt)
+                if attempt.outcome.as_deref() == Some("completed")
+                    && attempt.summary.as_deref().is_some_and(|text| !text.is_empty()) =>
+            {
+                (
+                    NightRunVerdict::ReadyToReview,
+                    "Hermes 완료 수명주기와 작업자의 인계 요약이 모두 있습니다. 실제 변경과 검증은 사람이 확인해야 합니다."
+                        .to_owned(),
+                )
+            }
+            Some(attempt) if attempt.outcome.as_deref() == Some("completed") => (
+                NightRunVerdict::NeedsAttention,
+                "완료 기록은 있지만 작업자의 인계 요약이 없어 결과 확인이 필요합니다.".to_owned(),
+            ),
+            _ => (
+                NightRunVerdict::Uncertain,
+                "작업은 완료로 표시됐지만 대응하는 완료 실행 시도를 확인하지 못했습니다.".to_owned(),
+            ),
+        };
+    }
+    if latest_attempt.is_some_and(|attempt| {
+        matches!(
+            attempt.outcome.as_deref(),
+            Some("blocked" | "crashed" | "timed_out" | "spawn_failed" | "gave_up")
+        )
+    }) {
+        return (
+            NightRunVerdict::NeedsAttention,
+            "최근 실행 시도가 실패·시간 초과·차단 중 하나로 끝났습니다.".to_owned(),
+        );
+    }
+    (
+        NightRunVerdict::Uncertain,
+        "알려진 완료·진행·개입 상태와 일치하지 않아 원본 이벤트 확인이 필요합니다.".to_owned(),
+    )
 }
 
 #[derive(Debug)]
@@ -1211,6 +1447,115 @@ mod tests {
         assert_eq!(runs[0].run_id, Some(2));
         assert_eq!(runs[0].summary.as_deref(), Some("최신 검증 요약"));
         assert_eq!(runs[0].session_id.as_deref(), Some("session-1"));
+    }
+
+    #[test]
+    fn night_detail_requires_provenance_and_keeps_provider_evidence() {
+        let directory = tempdir().expect("tempdir");
+        let path = directory.path().join("kanban.db");
+        let connection = rusqlite::Connection::open(&path).expect("sqlite");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    workspace_path TEXT,
+                    status TEXT NOT NULL,
+                    body TEXT,
+                    assignee TEXT,
+                    max_runtime_seconds INTEGER,
+                    goal_mode INTEGER NOT NULL DEFAULT 0,
+                    goal_max_turns INTEGER,
+                    max_retries INTEGER,
+                    idempotency_key TEXT,
+                    created_by TEXT
+                );
+                CREATE TABLE task_runs (
+                    id INTEGER PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    profile TEXT,
+                    status TEXT NOT NULL,
+                    outcome TEXT,
+                    started_at INTEGER,
+                    ended_at INTEGER,
+                    worker_pid INTEGER,
+                    summary TEXT,
+                    error TEXT
+                );
+                CREATE TABLE task_events (
+                    id INTEGER PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id INTEGER,
+                    kind TEXT NOT NULL,
+                    payload TEXT,
+                    created_at INTEGER
+                );
+                INSERT INTO tasks VALUES (
+                    'task-verified', '검증 가능한 결과', '/work/alpha', 'done',
+                    'Outcome: 결과\\nVerification: 테스트', 'default',
+                    3600, 1, 20, 1, 'gos-night-exact', 'god-of-sessions'
+                );
+                INSERT INTO task_runs VALUES (
+                    7, 'task-verified', 'default', 'done', 'completed',
+                    100, 160, 42, '테스트 12개 통과', NULL
+                );
+                INSERT INTO task_events VALUES (
+                    1, 'task-verified', NULL, 'created', NULL, 90
+                );
+                INSERT INTO task_events VALUES (
+                    2, 'task-verified', 7, 'spawned', '{\"pid\":42}', 101
+                );
+                INSERT INTO task_events VALUES (
+                    3, 'task-verified', 7, 'completed', '{\"outcome\":\"completed\"}', 160
+                );
+                INSERT INTO tasks VALUES (
+                    'task-foreign', '다른 앱 작업', '/work/other', 'done',
+                    NULL, 'default', 60, 0, NULL, NULL, 'foreign', 'other'
+                );
+                ",
+            )
+            .expect("schema");
+        drop(connection);
+
+        let detail =
+            load_night_run_detail_from_path(&path, "task-verified").expect("verified detail");
+
+        assert!(detail.provenance_verified);
+        assert_eq!(detail.verdict, NightRunVerdict::ReadyToReview);
+        assert_eq!(detail.attempts.len(), 1);
+        assert_eq!(detail.attempts[0].duration_seconds, Some(60));
+        assert_eq!(detail.events.len(), 3);
+        assert_eq!(detail.events[1].note.as_deref(), Some("pid: 42"));
+        assert_eq!(
+            load_night_run_detail_from_path(&path, "task-foreign").unwrap_err(),
+            "God of Sessions가 만든 야간 작업이 아닙니다."
+        );
+    }
+
+    #[test]
+    fn completed_run_without_handoff_needs_attention() {
+        let attempt = NightRunAttempt {
+            run_id: 1,
+            profile: None,
+            status: "done".to_owned(),
+            outcome: Some("completed".to_owned()),
+            started_at: None,
+            ended_at: None,
+            duration_seconds: None,
+            worker_pid: None,
+            summary: None,
+            error: None,
+        };
+
+        assert_eq!(
+            night_run_verdict("done", Some(&attempt)).0,
+            NightRunVerdict::NeedsAttention
+        );
+        assert_eq!(
+            night_run_verdict("running", Some(&attempt)).0,
+            NightRunVerdict::InProgress
+        );
     }
 
     #[test]

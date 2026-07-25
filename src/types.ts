@@ -308,6 +308,57 @@ export interface NightRunHistory {
   methodology: string;
 }
 
+export interface NightRunAttempt {
+  run_id: number;
+  profile: string | null;
+  status: string;
+  outcome: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  worker_pid: number | null;
+  summary: string | null;
+  error: string | null;
+}
+
+export interface NightRunEvent {
+  event_id: number;
+  run_id: number | null;
+  kind: string;
+  created_at: string | null;
+  note: string | null;
+}
+
+export type NightRunVerdict =
+  | "in_progress"
+  | "ready_to_review"
+  | "needs_attention"
+  | "uncertain";
+
+export interface NightRunDetail {
+  generated_at: string;
+  task_id: string;
+  title: string;
+  project: string;
+  workspace: string | null;
+  task_status: string;
+  body: string | null;
+  assignee: string | null;
+  max_runtime_seconds: number | null;
+  goal_mode: boolean;
+  goal_max_turns: number | null;
+  max_retries: number | null;
+  idempotency_key: string;
+  provenance_verified: boolean;
+  verdict: NightRunVerdict;
+  verdict_reason: string;
+  attempts: NightRunAttempt[];
+  events: NightRunEvent[];
+  warnings: string[];
+  read_only: boolean;
+  methodology: string;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;

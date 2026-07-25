@@ -103,6 +103,12 @@ receipts. It survives control-app restarts without becoming a second source of
 truth.
 _Avoid_: App run database, activity log, approval history
 
+**Morning Review**:
+An evidence view that places the approved Goal Contract beside provider-owned
+attempts, handoffs, and lifecycle events. It decides what needs inspection; it
+does not certify that the work is correct.
+_Avoid_: Automatic acceptance, success screen, test report
+
 **Control Board**:
 A cross-provider projection of Work Items and Runs for supervision. It is not
 the source of truth for provider-owned state.

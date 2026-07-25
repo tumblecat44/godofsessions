@@ -1248,14 +1248,31 @@ button:active:not(:disabled) {
 
 .night-run-card {
   min-width: 0;
-  padding: 12px;
   background: var(--console);
   border: 1px solid var(--etched-edge);
   border-radius: var(--radius-control);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
 }
 
-.night-run-card > header,
-.night-run-card > footer {
+.night-run-card:hover,
+.night-run-card.is-selected {
+  background: var(--control-inset);
+  border-color: rgba(228, 169, 74, 0.26);
+}
+
+.night-run-card > button {
+  width: 100%;
+  padding: 12px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+
+.night-run-card > button > header,
+.night-run-card > button > footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1286,13 +1303,13 @@ button:active:not(:disabled) {
   background: rgba(228, 169, 74, 0.08);
 }
 
-.night-run-card > header small {
+.night-run-card > button > header small {
   color: var(--ink-muted);
   font-family: "JetBrains Mono Variable", monospace;
   font-size: 7px;
 }
 
-.night-run-card > strong {
+.night-run-card > button > strong {
   margin-top: 10px;
   display: block;
   color: var(--ink-primary);
@@ -1300,7 +1317,7 @@ button:active:not(:disabled) {
   font-weight: 590;
 }
 
-.night-run-card > p {
+.night-run-card > button > p {
   margin: 4px 0 0;
   overflow: hidden;
   color: var(--ink-muted);
@@ -1313,6 +1330,7 @@ button:active:not(:disabled) {
 .night-run-result {
   margin-top: 10px;
   padding: 8px 9px;
+  display: block;
   color: var(--ink-tertiary);
   background: var(--deck);
   border: 1px solid var(--etched-edge-soft);
@@ -1326,7 +1344,7 @@ button:active:not(:disabled) {
   border-color: rgba(228, 169, 74, 0.18);
 }
 
-.night-run-card > footer {
+.night-run-card > button > footer {
   margin-top: 10px;
   padding-top: 8px;
   color: var(--ink-muted);
@@ -1335,11 +1353,307 @@ button:active:not(:disabled) {
   font-size: 7px;
 }
 
-.night-run-card > footer code {
+.night-run-card > button > footer code {
   overflow: hidden;
   color: var(--ink-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.night-run-card > button > footer > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.night-run-card > button > footer svg {
+  transition: transform 140ms ease;
+}
+
+.night-run-card.is-selected > button > footer svg {
+  transform: rotate(90deg);
+}
+
+.night-evidence-loading,
+.night-evidence-error {
+  margin-top: 8px;
+  min-height: 68px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ink-muted);
+  background: var(--console);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+  font-size: 8px;
+}
+
+.night-evidence-error {
+  color: var(--signal-amber);
+  border-color: rgba(228, 169, 74, 0.18);
+}
+
+.night-evidence-panel {
+  margin-top: 8px;
+  padding: 16px;
+  background:
+    linear-gradient(135deg, rgba(79, 190, 166, 0.025), transparent 32%),
+    var(--console);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-panel);
+}
+
+.night-evidence-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.night-evidence-panel > header h3 {
+  margin: 5px 0 0;
+  color: var(--ink-primary);
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: -0.02em;
+}
+
+.night-evidence-panel > header p {
+  max-width: 720px;
+  margin: 5px 0 0;
+  color: var(--ink-tertiary);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.night-verdict {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  color: var(--ink-muted);
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 999px;
+  font-size: 7px;
+  font-weight: 650;
+}
+
+.night-verdict--in_progress {
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.07);
+  border-color: rgba(79, 190, 166, 0.16);
+}
+
+.night-verdict--ready_to_review {
+  color: var(--signal-teal);
+}
+
+.night-verdict--needs_attention,
+.night-verdict--uncertain {
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.07);
+  border-color: rgba(228, 169, 74, 0.16);
+}
+
+.night-evidence-trust {
+  margin-top: 12px;
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-tertiary);
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+  font-size: 7px;
+}
+
+.night-evidence-trust > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.night-evidence-trust > span:first-child {
+  color: var(--signal-teal);
+}
+
+.night-evidence-trust > small {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 7px;
+}
+
+.night-evidence-columns {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 8px;
+}
+
+.night-evidence-columns > section,
+.night-event-timeline {
+  min-width: 0;
+  padding: 12px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+}
+
+.night-evidence-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.night-evidence-heading small {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-weight: 450;
+}
+
+.night-evidence-columns pre {
+  max-height: 240px;
+  margin: 10px 0 0;
+  overflow: auto;
+  color: var(--ink-tertiary);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.night-attempts {
+  margin-top: 9px;
+  display: grid;
+  gap: 6px;
+}
+
+.night-attempts > article {
+  padding: 9px;
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+}
+
+.night-attempts header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.night-attempts header strong,
+.night-attempts header span,
+.night-attempts header small {
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-attempts header strong {
+  color: var(--ink-secondary);
+}
+
+.night-attempts header span {
+  padding: 2px 4px;
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.07);
+  border-radius: 3px;
+}
+
+.night-attempts header small {
+  margin-left: auto;
+  color: var(--ink-muted);
+}
+
+.night-attempts > article > p,
+.night-evidence-placeholder {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 7px;
+}
+
+.night-attempts blockquote {
+  margin: 8px 0 0;
+  padding: 8px;
+  color: var(--ink-tertiary);
+  background: var(--deck);
+  border-left: 2px solid var(--signal-teal);
+  border-radius: 0 4px 4px 0;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.night-attempts blockquote.is-error {
+  color: var(--signal-amber);
+  border-left-color: var(--signal-amber);
+}
+
+.night-event-timeline {
+  margin-top: 8px;
+}
+
+.night-event-timeline ol {
+  margin: 11px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+  gap: 7px;
+  list-style: none;
+}
+
+.night-event-timeline li {
+  min-width: 0;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: 4px 7px;
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+}
+
+.night-event-timeline li > i {
+  width: 5px;
+  height: 5px;
+  margin-top: 3px;
+  background: var(--signal-teal);
+  border-radius: 50%;
+}
+
+.night-event-timeline li > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.night-event-timeline li strong {
+  color: var(--ink-secondary);
+  font-size: 7px;
+  font-weight: 600;
+}
+
+.night-event-timeline li small {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-event-timeline time {
+  grid-column: 2;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6px;
 }
 
 .night-history-warning {
@@ -3769,6 +4083,20 @@ button:active:not(:disabled) {
   }
 
   .night-history-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .night-evidence-panel > header,
+  .night-evidence-trust {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .night-evidence-trust > small {
+    margin-left: 0;
+  }
+
+  .night-evidence-columns {
     grid-template-columns: 1fr;
   }
 

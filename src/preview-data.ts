@@ -1,5 +1,6 @@
 import type {
   ControlBoard,
+  NightRunDetail,
   NightRunHistory,
   OvernightPlan,
   Provider,
@@ -337,6 +338,149 @@ export const previewNightRunHistory: NightRunHistory = {
     },
   ],
 };
+
+const previewNightRunDetails: Record<string, NightRunDetail> = {
+  "task-night-running": {
+    generated_at: new Date().toISOString(),
+    task_id: "task-night-running",
+    title: "에이전트 메모리 인덱스 검증",
+    project: "overnight-eval",
+    workspace: "/Users/you/projects/overnight-eval",
+    task_status: "running",
+    body:
+      "Outcome: 메모리 인덱스 경계와 누락 사례를 검증한다.\nVerification: 관련 테스트와 재현 명령을 통과시킨다.\nConstraints: 기존 데이터는 읽기 전용으로 취급한다.\nBoundaries: 외부 서비스 호출과 배포를 하지 않는다.\nStop when: 테스트 증거와 인계 요약이 준비된다.",
+    assignee: "default",
+    max_runtime_seconds: 25_200,
+    goal_mode: true,
+    goal_max_turns: 20,
+    max_retries: 1,
+    idempotency_key: "gos-night-preview-running",
+    provenance_verified: true,
+    verdict: "in_progress",
+    verdict_reason:
+      "Hermes 원장에 아직 끝나지 않은 작업으로 기록되어 있습니다.",
+    attempts: [
+      {
+        run_id: 14,
+        profile: "default",
+        status: "running",
+        outcome: null,
+        started_at: new Date(now - 94 * 60_000).toISOString(),
+        ended_at: null,
+        duration_seconds: null,
+        worker_pid: 48102,
+        summary: null,
+        error: null,
+      },
+    ],
+    events: [
+      {
+        event_id: 21,
+        run_id: null,
+        kind: "created",
+        created_at: new Date(now - 95 * 60_000).toISOString(),
+        note: null,
+      },
+      {
+        event_id: 22,
+        run_id: 14,
+        kind: "claimed",
+        created_at: new Date(now - 94 * 60_000).toISOString(),
+        note: "profile: default",
+      },
+      {
+        event_id: 23,
+        run_id: 14,
+        kind: "spawned",
+        created_at: new Date(now - 94 * 60_000 + 4_000).toISOString(),
+        note: "pid: 48102",
+      },
+      {
+        event_id: 24,
+        run_id: 14,
+        kind: "heartbeat",
+        created_at: new Date(now - 4 * 60_000).toISOString(),
+        note: null,
+      },
+    ],
+    warnings: [],
+    read_only: true,
+    methodology:
+      "Hermes task, task_runs, task_events를 읽기 전용으로 결합했습니다. 완료 이벤트는 실행 수명주기를 증명하지만 결과의 정확성까지 자동 증명하지는 않습니다.",
+  },
+  "task-night-done": {
+    generated_at: new Date().toISOString(),
+    task_id: "task-night-done",
+    title: "세션 커넥터 경계와 회귀 테스트 정리",
+    project: "control-plane-notes",
+    workspace: "/Users/you/projects/control-plane-notes",
+    task_status: "done",
+    body:
+      "Outcome: 커넥터별 읽기 경계를 문서화하고 회귀 테스트를 추가한다.\nVerification: 전체 자동 테스트와 문서 링크를 확인한다.\nConstraints: 세션 원본을 수정하지 않는다.\nBoundaries: 커밋, 배포, 외부 메시지를 하지 않는다.\nStop when: 테스트 통과와 변경 요약이 모두 남는다.",
+    assignee: "default",
+    max_runtime_seconds: 10_800,
+    goal_mode: true,
+    goal_max_turns: 20,
+    max_retries: 1,
+    idempotency_key: "gos-night-preview-done",
+    provenance_verified: true,
+    verdict: "ready_to_review",
+    verdict_reason:
+      "Hermes 완료 수명주기와 작업자의 인계 요약이 모두 있습니다. 실제 변경과 검증은 사람이 확인해야 합니다.",
+    attempts: [
+      {
+        run_id: 9,
+        profile: "default",
+        status: "done",
+        outcome: "completed",
+        started_at: new Date(
+          now - 11 * 60 * 60_000 + 60_000,
+        ).toISOString(),
+        ended_at: new Date(now - 8 * 60 * 60_000).toISOString(),
+        duration_seconds: 10_740,
+        worker_pid: 47381,
+        summary:
+          "커넥터별 읽기 경계를 문서화하고 관련 테스트를 추가했습니다. 검증 명령은 모두 통과했습니다.",
+        error: null,
+      },
+    ],
+    events: [
+      {
+        event_id: 11,
+        run_id: null,
+        kind: "created",
+        created_at: new Date(now - 11 * 60 * 60_000).toISOString(),
+        note: null,
+      },
+      {
+        event_id: 12,
+        run_id: 9,
+        kind: "spawned",
+        created_at: new Date(
+          now - 11 * 60 * 60_000 + 62_000,
+        ).toISOString(),
+        note: "pid: 47381",
+      },
+      {
+        event_id: 13,
+        run_id: 9,
+        kind: "completed",
+        created_at: new Date(now - 8 * 60 * 60_000).toISOString(),
+        note: "outcome: completed",
+      },
+    ],
+    warnings: [],
+    read_only: true,
+    methodology:
+      "Hermes task, task_runs, task_events를 읽기 전용으로 결합했습니다. 완료 이벤트는 실행 수명주기를 증명하지만 결과의 정확성까지 자동 증명하지는 않습니다.",
+  },
+};
+
+export function previewNightRunDetail(taskId: string): NightRunDetail {
+  const detail = previewNightRunDetails[taskId];
+  if (!detail) throw new Error("미리보기 실행 기록을 찾지 못했습니다.");
+  return detail;
+}
 
 export const previewOvernightPlan: OvernightPlan = {
   generated_at: new Date().toISOString(),

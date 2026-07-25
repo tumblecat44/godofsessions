@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronRight,
   Clock3,
   Database,
   MoonStar,
@@ -19,11 +20,16 @@ import {
   relativeTime,
   timeUntil,
 } from "../lib/format";
-import { previewNightRunHistory, previewOvernightPlan } from "../preview-data";
+import {
+  previewNightRunDetail,
+  previewNightRunHistory,
+  previewOvernightPlan,
+} from "../preview-data";
 import type {
   ApprovalChallenge,
   DispatchPreflight,
   DispatchReceipt,
+  NightRunDetail,
   NightRunHistory,
   NightRunRecord,
   OvernightCandidate,
@@ -187,10 +193,43 @@ function nightRunStatus(run: NightRunRecord) {
 }
 
 function NightRunHistorySection({ history }: { history: NightRunHistory }) {
-  if (history.runs.length === 0 && history.warnings.length === 0) return null;
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<NightRunDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequest = useRef(0);
   const active = history.runs.filter((run) =>
     ["running", "ready"].includes(run.status),
   ).length;
+
+  if (history.runs.length === 0 && history.warnings.length === 0) return null;
+
+  const inspectRun = async (taskId: string) => {
+    const request = detailRequest.current + 1;
+    detailRequest.current = request;
+    if (selectedTaskId === taskId) {
+      setSelectedTaskId(null);
+      setDetail(null);
+      setDetailError(null);
+      return;
+    }
+    setSelectedTaskId(taskId);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const next = isTauri()
+        ? await invoke<NightRunDetail>("load_night_run_detail", { taskId })
+        : previewNightRunDetail(taskId);
+      if (detailRequest.current !== request) return;
+      setDetail(next);
+    } catch (error) {
+      if (detailRequest.current !== request) return;
+      setDetailError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (detailRequest.current === request) setDetailLoading(false);
+    }
+  };
 
   return (
     <section className="night-history-section">
@@ -216,34 +255,64 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
             const timestamp =
               run.completed_at || run.started_at || run.created_at;
             return (
-              <article className="night-run-card" key={run.task_id}>
-                <header>
-                  <span className={`night-run-state night-run-state--${state.tone}`}>
-                    {state.label}
-                  </span>
-                  <small>{timestamp ? relativeTime(timestamp) : "시각 없음"}</small>
-                </header>
-                <strong>{run.title}</strong>
-                <p title={run.workspace || undefined}>
-                  {run.project}
-                  {run.workspace ? ` · ${compactPath(run.workspace)}` : ""}
-                </p>
-                {(run.summary || run.error) && (
-                  <div className={run.error ? "night-run-result is-error" : "night-run-result"}>
-                    {run.summary || run.error}
-                  </div>
-                )}
-                <footer>
-                  <code>{run.task_id}</code>
-                  <span>
-                    {run.run_id ? `run ${run.run_id}` : "run 대기"}
-                    {run.session_id ? " · session 연결" : ""}
-                  </span>
-                </footer>
+              <article
+                className={`night-run-card ${
+                  selectedTaskId === run.task_id ? "is-selected" : ""
+                }`}
+                key={run.task_id}
+              >
+                <button
+                  type="button"
+                  onClick={() => void inspectRun(run.task_id)}
+                  aria-expanded={selectedTaskId === run.task_id}
+                >
+                  <header>
+                    <span
+                      className={`night-run-state night-run-state--${state.tone}`}
+                    >
+                      {state.label}
+                    </span>
+                    <small>
+                      {timestamp ? relativeTime(timestamp) : "시각 없음"}
+                    </small>
+                  </header>
+                  <strong>{run.title}</strong>
+                  <p title={run.workspace || undefined}>
+                    {run.project}
+                    {run.workspace ? ` · ${compactPath(run.workspace)}` : ""}
+                  </p>
+                  {(run.summary || run.error) && (
+                    <span
+                      className={
+                        run.error
+                          ? "night-run-result is-error"
+                          : "night-run-result"
+                      }
+                    >
+                      {run.summary || run.error}
+                    </span>
+                  )}
+                  <footer>
+                    <code>{run.task_id}</code>
+                    <span>
+                      {run.run_id ? `run ${run.run_id}` : "run 대기"}
+                      {run.session_id ? " · session 연결" : ""}
+                      <ChevronRight size={10} />
+                    </span>
+                  </footer>
+                </button>
               </article>
             );
           })}
         </div>
+      )}
+
+      {selectedTaskId && (
+        <NightRunEvidence
+          detail={detail}
+          loading={detailLoading}
+          error={detailError}
+        />
       )}
 
       {history.warnings.map((warning) => (
@@ -253,6 +322,163 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
         </p>
       ))}
     </section>
+  );
+}
+
+const verdictLabels = {
+  in_progress: "아직 실행 중",
+  ready_to_review: "검토할 결과 있음",
+  needs_attention: "사람 확인 필요",
+  uncertain: "판정 불확실",
+} as const;
+
+const eventLabels: Record<string, string> = {
+  created: "작업 생성",
+  claimed: "실행 권한 획득",
+  spawned: "작업자 시작",
+  heartbeat: "작업자 생존 신호",
+  completed: "실행 완료",
+  blocked: "작업 차단",
+  timed_out: "시간 초과",
+  crashed: "작업자 종료",
+  spawn_failed: "시작 실패",
+  scheduled: "재실행 예약",
+  reclaimed: "실행 권한 회수",
+};
+
+function durationLabel(seconds: number | null) {
+  if (seconds === null) return "진행 중";
+  if (seconds < 60) return `${seconds}초`;
+  const hours = Math.floor(seconds / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  return hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`;
+}
+
+function NightRunEvidence({
+  detail,
+  loading,
+  error,
+}: {
+  detail: NightRunDetail | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="night-evidence-loading" aria-live="polite">
+        <RefreshCw className="is-spinning" size={13} />
+        Hermes 실행 원장을 읽는 중
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="night-evidence-error" role="alert">
+        <AlertTriangle size={13} />
+        {error}
+      </div>
+    );
+  }
+  if (!detail) return null;
+
+  return (
+    <article className="night-evidence-panel">
+      <header>
+        <div>
+          <span className="eyebrow">MORNING REVIEW</span>
+          <h3>{detail.title}</h3>
+          <p>{detail.verdict_reason}</p>
+        </div>
+        <span className={`night-verdict night-verdict--${detail.verdict}`}>
+          {verdictLabels[detail.verdict]}
+        </span>
+      </header>
+
+      <div className="night-evidence-trust">
+        <span>
+          <ShieldCheck size={11} />
+          {detail.provenance_verified
+            ? "God of Sessions 생성 출처 확인"
+            : "생성 출처 불확실"}
+        </span>
+        <span>
+          <Database size={11} />
+          Hermes 원장 · 읽기 전용
+        </span>
+        <small>완료 기록은 결과의 정확성을 대신 증명하지 않습니다.</small>
+      </div>
+
+      <div className="night-evidence-columns">
+        <section>
+          <div className="night-evidence-heading">
+            <span>맡긴 계약</span>
+            <small>
+              goal {detail.goal_mode ? "loop" : "single"} ·{" "}
+              {detail.max_runtime_seconds
+                ? durationLabel(detail.max_runtime_seconds)
+                : "시간 제한 없음"}
+            </small>
+          </div>
+          <pre>{detail.body || "저장된 Night Contract가 없습니다."}</pre>
+        </section>
+
+        <section>
+          <div className="night-evidence-heading">
+            <span>실행 시도</span>
+            <small>{detail.attempts.length}개</small>
+          </div>
+          <div className="night-attempts">
+            {detail.attempts.length === 0 && (
+              <p className="night-evidence-placeholder">
+                아직 실행 시도가 없습니다.
+              </p>
+            )}
+            {detail.attempts.map((attempt) => (
+              <article key={attempt.run_id}>
+                <header>
+                  <strong>run {attempt.run_id}</strong>
+                  <span>{attempt.outcome || attempt.status}</span>
+                  <small>{durationLabel(attempt.duration_seconds)}</small>
+                </header>
+                <p>
+                  {attempt.profile || "프로필 없음"}
+                  {attempt.worker_pid ? ` · pid ${attempt.worker_pid}` : ""}
+                  {attempt.started_at
+                    ? ` · ${relativeTime(attempt.started_at)} 시작`
+                    : ""}
+                </p>
+                {(attempt.summary || attempt.error) && (
+                  <blockquote className={attempt.error ? "is-error" : ""}>
+                    {attempt.summary || attempt.error}
+                  </blockquote>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="night-event-timeline">
+        <div className="night-evidence-heading">
+          <span>원본 수명주기</span>
+          <small>최근 {detail.events.length}개 이벤트</small>
+        </div>
+        <ol>
+          {detail.events.map((event) => (
+            <li key={event.event_id}>
+              <i />
+              <span>
+                <strong>{eventLabels[event.kind] || event.kind}</strong>
+                {event.note && <small>{event.note}</small>}
+              </span>
+              <time>
+                {event.created_at ? relativeTime(event.created_at) : "시각 없음"}
+              </time>
+            </li>
+          ))}
+        </ol>
+      </section>
+    </article>
   );
 }
 
