@@ -61,9 +61,13 @@ pub(super) fn mark_reviewed(
     if item.verdict != MorningBriefVerdict::ReadyToReview
         || !item.inspectable
         || !item.provenance_verified
+        || item
+            .workspace_evidence
+            .as_ref()
+            .is_some_and(|evidence| !evidence.finalized)
     {
         return Err(
-            "공급자 근거를 열어볼 수 있는 완료 결과만 검토 완료로 표시할 수 있습니다.".to_owned(),
+            "공급자 근거와 최종 작업공간 관측을 열어볼 수 있는 완료 결과만 검토 완료로 표시할 수 있습니다.".to_owned(),
         );
     }
     if item.evidence_fingerprint != evidence_fingerprint {
@@ -230,6 +234,14 @@ fn morning_item(
     review: Option<&super::morning_review::ReviewRecord>,
 ) -> MorningBriefItem {
     let draft = &item.approved.dispatch.draft;
+    let workspace_evidence = item.workspace_baseline.as_ref().map(|baseline| {
+        if let Some(final_snapshot) = item.workspace_final.as_ref() {
+            super::workspace_evidence::compare(baseline, final_snapshot, true)
+        } else {
+            let observed = super::workspace_evidence::capture_after(&draft.workspace, baseline);
+            super::workspace_evidence::compare(baseline, &observed, false)
+        }
+    });
     let evidence_fingerprint = evidence_fingerprint(item, &observation);
     let (verdict, verdict_reason, next_action, provenance_verified) = classify(
         item.state,
@@ -279,6 +291,7 @@ fn morning_item(
         evidence_fingerprint,
         review_state,
         reviewed_at,
+        workspace_evidence,
     }
 }
 
@@ -308,6 +321,8 @@ fn evidence_fingerprint(item: &CoordinatorItem, observation: &Observation) -> St
     let value = json!({
         "coordinator_state": item.state,
         "coordinator_error": item.error,
+        "workspace_baseline": item.workspace_baseline,
+        "workspace_final": item.workspace_final,
         "record": observation.record,
         "detail": detail,
         "warning": observation.warning,
@@ -530,6 +545,8 @@ mod tests {
             completed_at: None,
             receipt: None,
             error: None,
+            workspace_baseline: None,
+            workspace_final: None,
         }
     }
 

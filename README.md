@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The evidence-bound morning acknowledgement M21 desktop slice is working.
+The workspace-evidence Morning Review M22 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -38,7 +38,10 @@ exact Hermes, Codex, and Claude contract identities and ranks the Morning
 Inbox. A human can mark only an inspectable, provenance-verified provider
 result as reviewed after opening its evidence. That local acknowledgement is
 bound to the exact evidence fingerprint, is reversible, and automatically
-reopens when an attempt, handoff, or lifecycle fact changes.
+reopens when an attempt, handoff, lifecycle fact, or observed workspace
+snapshot changes. Each scheduled Git task now records a bounded pre-dispatch
+baseline and terminal observation, so the morning review shows changes
+observed during the run without claiming exclusive agent authorship.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -64,6 +67,7 @@ reopens when an attempt, handoff, or lifecycle fact changes.
 - [Evidence-first coordinator recovery M19](docs/overnight-m19.md)
 - [Evidence-ranked Morning Inbox M20](docs/overnight-m20.md)
 - [Evidence-bound morning acknowledgement M21](docs/overnight-m21.md)
+- [Workspace-change evidence M22](docs/overnight-m22.md)
 
 The app currently:
 
@@ -132,6 +136,13 @@ The app currently:
   or provenance changes automatically reopen the result
 - stores acknowledgements in a small atomic app-owned per-plan ledger and lets
   the operator explicitly reopen any reviewed item
+- captures a bounded read-only Git baseline immediately before each dispatch
+  and a terminal snapshot after exact provider evidence
+- separates unchanged pre-existing dirt from files or commits observed during
+  the run, without presenting a shared-workspace time window as agent
+  authorship
+- binds final workspace evidence into Morning Review acknowledgement and keeps
+  in-progress observations ineligible for review completion
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

@@ -154,6 +154,10 @@ fn tick(
 
         {
             let item = &mut plan.lanes[lane_index].items[item_index];
+            item.workspace_baseline = Some(super::workspace_evidence::capture(
+                &item.approved.dispatch.draft.workspace,
+            ));
+            item.workspace_final = None;
             item.state = CoordinatorItemState::Starting;
             item.started_at = Some(now);
             item.error = None;
@@ -182,6 +186,7 @@ fn tick(
                 };
                 if item.state.is_terminal() {
                     item.completed_at = Some(Utc::now());
+                    capture_workspace_final(item);
                 }
                 item.receipt = Some(receipt.clone());
                 outcomes.push(PortfolioDispatchOutcome {
@@ -196,6 +201,7 @@ fn tick(
                 item.state = CoordinatorItemState::Blocked;
                 item.completed_at = Some(Utc::now());
                 item.error = Some(error.clone());
+                capture_workspace_final(item);
                 outcomes.push(PortfolioDispatchOutcome {
                     draft_id,
                     project,
@@ -266,7 +272,23 @@ fn reconcile_running_items(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
             }
             None => {}
         }
+        if item.state.is_terminal() {
+            capture_workspace_final(item);
+        }
     }
+}
+
+fn capture_workspace_final(item: &mut CoordinatorItem) {
+    let Some(baseline) = item.workspace_baseline.as_ref() else {
+        return;
+    };
+    if item.workspace_final.is_some() {
+        return;
+    }
+    item.workspace_final = Some(super::workspace_evidence::capture_after(
+        &item.approved.dispatch.draft.workspace,
+        baseline,
+    ));
 }
 
 fn evidence_grace_elapsed(item: &CoordinatorItem, now: DateTime<Utc>) -> bool {
@@ -449,6 +471,8 @@ mod tests {
             completed_at: None,
             receipt: None,
             error: None,
+            workspace_baseline: None,
+            workspace_final: None,
         }
     }
 

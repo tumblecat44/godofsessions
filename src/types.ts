@@ -490,6 +490,36 @@ export type MorningReviewState =
   | "reviewed"
   | "evidence_changed";
 
+export type WorkspaceEvidenceState =
+  | "changed"
+  | "unchanged"
+  | "in_progress"
+  | "unavailable"
+  | "uncertain";
+
+export interface WorkspaceFileChange {
+  path: string;
+  before_status: string | null;
+  after_status: string | null;
+  change: string;
+}
+
+export interface WorkspaceChangeEvidence {
+  state: WorkspaceEvidenceState;
+  captured_before: string;
+  observed_at: string;
+  finalized: boolean;
+  repository_root: string | null;
+  baseline_head: string | null;
+  observed_head: string | null;
+  head_changed: boolean;
+  preexisting_dirty_count: number;
+  observed_dirty_count: number;
+  changed_files: WorkspaceFileChange[];
+  attribution: string;
+  warning: string | null;
+}
+
 export interface MorningBriefItem {
   draft_id: string;
   project: string;
@@ -511,6 +541,7 @@ export interface MorningBriefItem {
   evidence_fingerprint: string;
   review_state: MorningReviewState;
   reviewed_at: string | null;
+  workspace_evidence: WorkspaceChangeEvidence | null;
 }
 
 export interface MorningBrief {

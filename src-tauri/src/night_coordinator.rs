@@ -24,6 +24,7 @@ mod ledger;
 mod morning;
 mod morning_review;
 mod worker;
+mod workspace_evidence;
 
 const WORKER_FLAG: &str = "--night-coordinator-worker";
 const WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -76,6 +77,10 @@ struct CoordinatorItem {
     completed_at: Option<DateTime<Utc>>,
     receipt: Option<DispatchReceipt>,
     error: Option<String>,
+    #[serde(default)]
+    workspace_baseline: Option<workspace_evidence::WorkspaceSnapshot>,
+    #[serde(default)]
+    workspace_final: Option<workspace_evidence::WorkspaceSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +128,8 @@ impl CoordinatorPlan {
                             completed_at: None,
                             receipt: None,
                             error: None,
+                            workspace_baseline: None,
+                            workspace_final: None,
                         })
                         .collect(),
                 })

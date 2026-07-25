@@ -409,6 +409,7 @@ export const previewMorningBrief: MorningBrief = {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       review_state: "unreviewed",
       reviewed_at: null,
+      workspace_evidence: null,
     },
     {
       draft_id: "draft-preview-codex",
@@ -434,6 +435,41 @@ export const previewMorningBrief: MorningBrief = {
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       review_state: "unreviewed",
       reviewed_at: null,
+      workspace_evidence: {
+        state: "changed",
+        captured_before: new Date(now - 7 * 60 * 60_000).toISOString(),
+        observed_at: new Date(now - 4 * 60 * 60_000).toISOString(),
+        finalized: true,
+        repository_root: "/Users/you/projects/godofsessions",
+        baseline_head: "4503855000000000000000000000000000000000",
+        observed_head: "4febebe000000000000000000000000000000000",
+        head_changed: true,
+        preexisting_dirty_count: 2,
+        observed_dirty_count: 3,
+        changed_files: [
+          {
+            path: "src-tauri/src/night_coordinator/morning.rs",
+            before_status: null,
+            after_status: ".M",
+            change: "modified",
+          },
+          {
+            path: "src/components/OvernightView.tsx",
+            before_status: ".M",
+            after_status: ".M",
+            change: "modified",
+          },
+          {
+            path: "docs/overnight-m20.md",
+            before_status: null,
+            after_status: "??",
+            change: "added",
+          },
+        ],
+        attribution:
+          "실행 직전 기준선 이후 관측된 최종 작업공간 변화입니다. 다른 로컬 프로세스의 동시 변경까지 단독 귀속하지는 않습니다.",
+        warning: "실행 전부터 수정된 파일 2개는 변화 비교에서 분리했습니다.",
+      },
     },
     {
       draft_id: "draft-preview-hermes",
@@ -458,6 +494,29 @@ export const previewMorningBrief: MorningBrief = {
         "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       review_state: "unreviewed",
       reviewed_at: null,
+      workspace_evidence: {
+        state: "in_progress",
+        captured_before: new Date(now - 95 * 60_000).toISOString(),
+        observed_at: new Date(now - 2 * 60_000).toISOString(),
+        finalized: false,
+        repository_root: "/Users/you/projects/agent-research",
+        baseline_head: "0123456789abcdef0123456789abcdef01234567",
+        observed_head: "0123456789abcdef0123456789abcdef01234567",
+        head_changed: false,
+        preexisting_dirty_count: 0,
+        observed_dirty_count: 1,
+        changed_files: [
+          {
+            path: "notes/memory-index-findings.md",
+            before_status: null,
+            after_status: "??",
+            change: "added",
+          },
+        ],
+        attribution:
+          "실행 직전 기준선과 현재 작업공간의 중간 비교입니다. 완료 근거가 아닙니다.",
+        warning: "실행이 끝나기 전의 중간 관측입니다.",
+      },
     },
   ],
 };

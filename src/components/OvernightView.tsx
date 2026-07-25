@@ -47,6 +47,7 @@ import type {
   PortfolioApprovalChallenge,
   PortfolioDispatchResult,
   ResourceBudget,
+  WorkspaceChangeEvidence,
 } from "../types";
 import { ProviderMark } from "./ProviderMark";
 
@@ -269,6 +270,71 @@ const morningVerdictLabels = {
   not_started: "시작 전",
 } as const;
 
+const workspaceStateLabels = {
+  changed: "변화 있음",
+  unchanged: "변화 없음",
+  in_progress: "관측 중",
+  unavailable: "기준선 없음",
+  uncertain: "판정 불확실",
+} as const;
+
+const workspaceChangeLabels: Record<string, string> = {
+  added: "추가",
+  modified: "수정",
+  deleted: "삭제",
+  renamed: "이름 변경",
+  restored: "원복",
+};
+
+function WorkspaceEvidence({
+  evidence,
+  expanded = false,
+}: {
+  evidence: WorkspaceChangeEvidence;
+  expanded?: boolean;
+}) {
+  const visibleFiles = expanded
+    ? evidence.changed_files
+    : evidence.changed_files.slice(0, 3);
+  const hiddenCount = evidence.changed_files.length - visibleFiles.length;
+
+  return (
+    <div
+      className={`workspace-evidence workspace-evidence--${evidence.state} ${expanded ? "is-expanded" : ""}`}
+      title={evidence.attribution}
+    >
+      <header>
+        <span>WORKSPACE</span>
+        <strong>{workspaceStateLabels[evidence.state]}</strong>
+        {evidence.head_changed && <small>새 commit</small>}
+        <small>{evidence.finalized ? "최종 관측" : "중간 관측"}</small>
+      </header>
+      {visibleFiles.length > 0 && (
+        <ul>
+          {visibleFiles.map((file) => (
+            <li key={`${file.path}-${file.change}`}>
+              <span>{workspaceChangeLabels[file.change] || file.change}</span>
+              <code>{file.path}</code>
+            </li>
+          ))}
+          {hiddenCount > 0 && <li className="is-more">외 {hiddenCount}개</li>}
+        </ul>
+      )}
+      {expanded && (
+        <footer>
+          <span>{evidence.attribution}</span>
+          {evidence.preexisting_dirty_count > 0 && (
+            <small>
+              실행 전 변경 {evidence.preexisting_dirty_count}개는 기준선에서 분리
+            </small>
+          )}
+          {evidence.warning && <small>{evidence.warning}</small>}
+        </footer>
+      )}
+    </div>
+  );
+}
+
 function updatePreviewMorningReview(
   brief: MorningBrief,
   draftId: string,
@@ -458,6 +524,9 @@ function MorningBriefSection({
                     ? item.error || item.verdict_reason || item.summary
                     : item.summary || item.error || item.verdict_reason}
                 </p>
+                {item.workspace_evidence && (
+                  <WorkspaceEvidence evidence={item.workspace_evidence} />
+                )}
                 <footer>
                   <span>
                     <ArrowRight size={11} />
@@ -505,16 +574,26 @@ function MorningBriefSection({
       </div>
 
       {selectedDraftId && (
-        <NightRunEvidence
-          detail={detail}
-          loading={detailLoading}
-          error={detailError}
-        />
+        <>
+          <NightRunEvidence
+            detail={detail}
+            loading={detailLoading}
+            error={detailError}
+          />
+          {selectedItem?.workspace_evidence && (
+            <WorkspaceEvidence
+              evidence={selectedItem.workspace_evidence}
+              expanded
+            />
+          )}
+        </>
       )}
       {selectedItem &&
         detail &&
         selectedItem.verdict === "ready_to_review" &&
-        selectedItem.review_state !== "reviewed" && (
+        selectedItem.review_state !== "reviewed" &&
+        (!selectedItem.workspace_evidence ||
+          selectedItem.workspace_evidence.finalized) && (
           <div className="morning-review-action">
             <span>
               <ShieldCheck size={13} />

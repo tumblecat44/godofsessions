@@ -613,6 +613,41 @@ pub enum MorningReviewState {
     EvidenceChanged,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceEvidenceState {
+    Changed,
+    Unchanged,
+    InProgress,
+    Unavailable,
+    Uncertain,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceFileChange {
+    pub path: String,
+    pub before_status: Option<String>,
+    pub after_status: Option<String>,
+    pub change: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceChangeEvidence {
+    pub state: WorkspaceEvidenceState,
+    pub captured_before: String,
+    pub observed_at: String,
+    pub finalized: bool,
+    pub repository_root: Option<String>,
+    pub baseline_head: Option<String>,
+    pub observed_head: Option<String>,
+    pub head_changed: bool,
+    pub preexisting_dirty_count: usize,
+    pub observed_dirty_count: usize,
+    pub changed_files: Vec<WorkspaceFileChange>,
+    pub attribution: String,
+    pub warning: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MorningBriefItem {
     pub draft_id: String,
@@ -635,6 +670,7 @@ pub struct MorningBriefItem {
     pub evidence_fingerprint: String,
     pub review_state: MorningReviewState,
     pub reviewed_at: Option<String>,
+    pub workspace_evidence: Option<WorkspaceChangeEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize)]

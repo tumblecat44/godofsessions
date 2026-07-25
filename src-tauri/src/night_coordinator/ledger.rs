@@ -158,6 +158,10 @@ fn validate(plan: &CoordinatorPlan) -> Result<(), String> {
         let mut previous_offset = -1.0;
         for item in &lane.items {
             let dispatch = &item.approved.dispatch;
+            super::workspace_evidence::validate_pair(
+                item.workspace_baseline.as_ref(),
+                item.workspace_final.as_ref(),
+            )?;
             if dispatch.draft.id != dispatch.preflight.draft_id
                 || dispatch.preflight.idempotency_key.is_empty()
                 || dispatch.preflight.state
