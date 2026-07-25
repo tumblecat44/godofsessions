@@ -138,6 +138,7 @@ mod tests {
             }
             .to_owned(),
             execution_surface: surface,
+            executor_profile: (surface == Provider::Hermes).then(|| "default".to_owned()),
             capacity_pool: CapacityPool::GrokSubscription,
             route_reason: "test".to_owned(),
             native_session_id: resume_existing.then(|| "session-1".to_owned()),

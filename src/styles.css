@@ -3276,6 +3276,19 @@ button:active:not(:disabled) {
   font-size: 8px;
 }
 
+.candidate-provider > .candidate-executor {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+}
+
+.candidate-executor strong {
+  color: var(--ink-secondary);
+  font-weight: 600;
+}
+
 .candidate-provider > small {
   color: var(--ink-muted);
   font-family: "JetBrains Mono Variable", monospace;

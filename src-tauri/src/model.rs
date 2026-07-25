@@ -717,6 +717,7 @@ pub struct OvernightCandidate {
     pub provider: Provider,
     pub execution_route_id: String,
     pub execution_surface: Provider,
+    pub executor_profile: Option<String>,
     pub capacity_pool: CapacityPool,
     pub route_reason: String,
     pub native_session_id: Option<String>,

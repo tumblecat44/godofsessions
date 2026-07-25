@@ -1080,6 +1080,11 @@ function CandidateCard({
               </>
             )}
           </div>
+          {candidate.executor_profile && (
+            <span className="candidate-executor">
+              작업자 <strong>{candidate.executor_profile}</strong>
+            </span>
+          )}
           <span>{candidate.resume_existing ? "기존 세션 재개" : "새 세션 필요"}</span>
           <small>
             {candidate.capacity_ready_after_hours > 0 &&

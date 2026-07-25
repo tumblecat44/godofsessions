@@ -1043,6 +1043,7 @@ export const previewOvernightPlan: OvernightPlan = {
       provider: "codex",
       execution_route_id: "codex:native",
       execution_surface: "codex",
+      executor_profile: null,
       capacity_pool: "codex_subscription",
       route_reason:
         "기존 Codex 세션을 그대로 이어 컨텍스트 전환 비용을 줄입니다.",
@@ -1079,6 +1080,7 @@ export const previewOvernightPlan: OvernightPlan = {
       provider: "grok",
       execution_route_id: "hermes:default",
       execution_surface: "hermes",
+      executor_profile: "default",
       capacity_pool: "grok_subscription",
       route_reason:
         "Hermes의 goal 루프와 전용 작업 보드로 종료 조건까지 추적합니다.",
@@ -1108,6 +1110,7 @@ export const previewOvernightPlan: OvernightPlan = {
       provider: "claude",
       execution_route_id: "claude:native",
       execution_surface: "claude",
+      executor_profile: null,
       capacity_pool: "claude_subscription",
       route_reason:
         "기존 Claude 세션을 보존한 채 strict sandbox 안의 새 fork로 이어갑니다.",

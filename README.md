@@ -32,7 +32,7 @@ Route, Capacity Pool, and Night Portfolio lives in [CONTEXT.md](CONTEXT.md).
 
 ## Current phase
 
-The executor-bound Hermes route M44 desktop slice is working.
+The answer-first executor identity M45 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -181,6 +181,7 @@ worker after approval.
 - [Prewarmed bedtime evidence M42](docs/overnight-m42.md)
 - [Stable recommendation refresh M43](docs/overnight-m43.md)
 - [Executor-bound Hermes routes M44](docs/overnight-m44.md)
+- [Answer-first executor identity M45](docs/overnight-m45.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 - [Orchestration UI revalidation](docs/research/orchestration-ui-revalidation-2026-07-24.md)
 - [Cloud conversation context feasibility](docs/research/cloud-conversation-feasibility-2026-07-24.md)

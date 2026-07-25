@@ -583,6 +583,7 @@ export interface OvernightCandidate {
   provider: Provider;
   execution_route_id: string;
   execution_surface: Provider;
+  executor_profile: string | null;
   capacity_pool: CapacityPool;
   route_reason: string;
   native_session_id: string | null;

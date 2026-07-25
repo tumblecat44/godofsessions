@@ -376,6 +376,7 @@ fn build_overnight_plan_inner(
             provider,
             execution_route_id,
             execution_surface,
+            executor_profile: route.and_then(|route| route.executor_profile.clone()),
             capacity_pool,
             route_reason,
             native_session_id: if resume_existing {
@@ -1173,6 +1174,7 @@ mod tests {
 
         assert_eq!(candidate.execution_route_id, "hermes:default");
         assert_eq!(candidate.execution_surface, Provider::Hermes);
+        assert_eq!(candidate.executor_profile.as_deref(), Some("default"));
         assert!(!candidate.resume_existing);
         assert!(candidate.native_session_id.is_none());
         assert!(candidate.provider_reason.contains("네이티브 재개 대신"));
