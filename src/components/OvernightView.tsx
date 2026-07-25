@@ -34,6 +34,7 @@ import type {
   NightRunHistory,
   NightRunRecord,
   NightPlanHistory,
+  NightPlanResumeChallenge,
   OvernightCandidate,
   OvernightPlan,
   ExecutionRoute,
@@ -897,7 +898,15 @@ const nightPlanItemStateLabels: Record<string, string> = {
   skipped_uncertain: "앞 작업 불확실",
 };
 
-function NightPlanHistorySection({ history }: { history: NightPlanHistory }) {
+function NightPlanHistorySection({
+  history,
+  recoveryLoading,
+  onRequestRecovery,
+}: {
+  history: NightPlanHistory;
+  recoveryLoading: boolean;
+  onRequestRecovery: (planId: string) => void;
+}) {
   const plan = history.plans[0];
   if (!plan && history.warnings.length === 0) return null;
 
@@ -930,8 +939,50 @@ function NightPlanHistorySection({ history }: { history: NightPlanHistory }) {
               <Database size={11} />
               계획 원장 고정
             </span>
-            {plan.worker_pid && <code>coordinator pid {plan.worker_pid}</code>}
+            {plan.worker_pid && (
+              <code>
+                {plan.recovery_state === "active" ? "coordinator" : "last"} pid{" "}
+                {plan.worker_pid}
+              </code>
+            )}
           </div>
+          {plan.recovery_state === "recoverable" && (
+            <div className="night-plan-recovery">
+              <div>
+                <AlertTriangle size={14} />
+                <span>
+                  <strong>계획은 남아 있지만 coordinator가 멈췄습니다</strong>
+                  <small>
+                    공급자 원장을 먼저 대조한 뒤 원래 승인한 미종결 작업만
+                    복구할 수 있습니다.
+                  </small>
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={recoveryLoading}
+                onClick={() => onRequestRecovery(plan.idempotency_key)}
+              >
+                {recoveryLoading ? (
+                  <>
+                    <RefreshCw className="is-spinning" size={12} />
+                    증거 확인 중
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={12} />
+                    안전 복구 검토
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+          {plan.recovery_state === "expired" && (
+            <p className="night-plan-recovery-note">
+              <Clock3 size={12} />
+              승인한 수면 마감이 지나 자동 실행을 복구하지 않습니다.
+            </p>
+          )}
           <div className="night-plan-lanes">
             {plan.lanes.map((lane) => (
               <article
@@ -985,11 +1036,16 @@ export function OvernightView() {
   const [approval, setApproval] = useState<ApprovalChallenge | null>(null);
   const [portfolioApproval, setPortfolioApproval] =
     useState<PortfolioApprovalChallenge | null>(null);
+  const [recoveryApproval, setRecoveryApproval] =
+    useState<NightPlanResumeChallenge | null>(null);
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
+  const [recoveryPhrase, setRecoveryPhrase] = useState("");
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [preparingDraftId, setPreparingDraftId] = useState<string | null>(null);
   const [isPreparingPortfolio, setIsPreparingPortfolio] = useState(false);
+  const [isPreparingRecovery, setIsPreparingRecovery] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [receipts, setReceipts] = useState<Record<string, DispatchReceipt>>({});
   const [portfolioDispatchMessage, setPortfolioDispatchMessage] = useState<
     string | null
@@ -1066,6 +1122,24 @@ export function OvernightView() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [approval, portfolioApproval, isDispatching]);
+
+  useEffect(() => {
+    if (!recoveryApproval || isRecovering) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const challengeId = recoveryApproval.id;
+      setRecoveryApproval(null);
+      setRecoveryPhrase("");
+      setApprovalError(null);
+      if (isTauri()) {
+        void invoke("cancel_night_plan_resume", { challengeId }).catch(
+          () => undefined,
+        );
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [recoveryApproval, isRecovering]);
 
   const generate = async () => {
     setApprovalError(null);
@@ -1235,6 +1309,103 @@ export function OvernightView() {
     }
   };
 
+  const requestNightPlanRecovery = async (planId: string) => {
+    setIsPreparingRecovery(true);
+    setApprovalError(null);
+    try {
+      const challenge = isTauri()
+        ? await invoke<NightPlanResumeChallenge>(
+            "prepare_night_plan_resume",
+            { planId },
+          )
+        : (() => {
+            const previewPlan = nightPlanHistory?.plans.find(
+              (item) => item.idempotency_key === planId,
+            );
+            const items =
+              previewPlan?.lanes
+                .flatMap((lane) => lane.items)
+                .filter((item) =>
+                  ["pending", "starting", "running"].includes(item.state),
+                )
+                .map((item) => ({
+                  draft_id: item.draft_id,
+                  project: item.project,
+                  surface: item.surface,
+                  state: item.state,
+                })) || [];
+            return {
+              id: "preview-night-recovery",
+              plan_id: planId,
+              items,
+              confirmation_phrase: `밤 계획 ${items.length}개 복구 승인`,
+              expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+              warning:
+                "원래 승인한 프로젝트·순서·시간·권한만 복구합니다. 각 공급자 원장에서 정확한 계약 지문을 먼저 대조하며, 시작 여부가 불확실한 작업은 재시도하지 않고 그 lane을 멈춥니다.",
+            };
+          })();
+      setRecoveryApproval(challenge);
+      setRecoveryPhrase("");
+    } catch (error) {
+      setApprovalError(
+        error instanceof Error ? error.message : String(error),
+      );
+      void loadNightPlanHistory();
+    } finally {
+      setIsPreparingRecovery(false);
+    }
+  };
+
+  const cancelRecovery = async () => {
+    const challengeId = recoveryApproval?.id;
+    setRecoveryApproval(null);
+    setRecoveryPhrase("");
+    setApprovalError(null);
+    if (challengeId && isTauri()) {
+      await invoke("cancel_night_plan_resume", { challengeId }).catch(
+        () => undefined,
+      );
+    }
+  };
+
+  const confirmRecovery = async () => {
+    if (
+      !recoveryApproval ||
+      recoveryPhrase !== recoveryApproval.confirmation_phrase
+    ) {
+      setApprovalError("아래 복구 확인 문구를 정확히 입력해 주세요.");
+      return;
+    }
+    if (!isTauri()) {
+      setApprovalError("실제 복구는 데스크톱 앱에서만 사용할 수 있습니다.");
+      return;
+    }
+    setIsRecovering(true);
+    setApprovalError(null);
+    try {
+      const result = await invoke<PortfolioDispatchResult>(
+        "resume_approved_night_plan",
+        {
+          challengeId: recoveryApproval.id,
+          planId: recoveryApproval.plan_id,
+          confirmationPhrase: recoveryPhrase,
+        },
+      );
+      setPortfolioDispatchMessage(result.message);
+      setRecoveryApproval(null);
+      setRecoveryPhrase("");
+      void loadNightHistory();
+      void loadNightPlanHistory();
+    } catch (error) {
+      setApprovalError(
+        error instanceof Error ? error.message : String(error),
+      );
+      void loadNightPlanHistory();
+    } finally {
+      setIsRecovering(false);
+    }
+  };
+
   const confirmAndDispatch = async () => {
     const currentApproval = portfolioApproval || approval;
     if (
@@ -1389,14 +1560,20 @@ export function OvernightView() {
         </button>
       </section>
 
-      {portfolioDispatchMessage && !portfolioApproval && !approval && (
+      {portfolioDispatchMessage &&
+        !portfolioApproval &&
+        !approval &&
+        !recoveryApproval && (
         <section className="portfolio-inline-result" role="status">
           <Check size={14} />
           <p>{portfolioDispatchMessage}</p>
         </section>
       )}
 
-      {approvalError && !approval && !portfolioApproval && (
+      {approvalError &&
+        !approval &&
+        !portfolioApproval &&
+        !recoveryApproval && (
         <section className="approval-inline-error" role="alert">
           <AlertTriangle size={14} />
           <p>{approvalError}</p>
@@ -1404,7 +1581,13 @@ export function OvernightView() {
       )}
 
       {nightPlanHistory && (
-        <NightPlanHistorySection history={nightPlanHistory} />
+        <NightPlanHistorySection
+          history={nightPlanHistory}
+          recoveryLoading={isPreparingRecovery}
+          onRequestRecovery={(planId) =>
+            void requestNightPlanRecovery(planId)
+          }
+        />
       )}
       {nightHistory && <NightRunHistorySection history={nightHistory} />}
 
@@ -1696,6 +1879,116 @@ export function OvernightView() {
             </div>
           </section>
         </>
+      )}
+
+      {recoveryApproval && (
+        <div className="approval-backdrop" role="presentation">
+          <section
+            className="approval-dialog recovery-approval-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recovery-approval-title"
+          >
+            <header>
+              <span className="approval-mark">
+                <ShieldCheck size={17} />
+              </span>
+              <div>
+                <span className="eyebrow">EVIDENCE-FIRST RECOVERY</span>
+                <h2 id="recovery-approval-title">
+                  멈춘 밤 계획을 안전하게 복구할까요?
+                </h2>
+              </div>
+            </header>
+
+            <div className="recovery-approval-list">
+              {recoveryApproval.items.map((item, index) => (
+                <article key={item.draft_id}>
+                  <span>{index + 1}</span>
+                  <ProviderMark provider={item.surface} />
+                  <div>
+                    <strong>{item.project}</strong>
+                    <small>
+                      {nightPlanItemStateLabels[item.state] || item.state}
+                    </small>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="approval-effects">
+              <p>
+                <Check size={12} />
+                처음 승인한 프로젝트·순서·시간·권한 그대로
+              </p>
+              <p>
+                <Database size={12} />
+                Hermes·Codex·Claude의 정확한 계약 지문부터 대조
+              </p>
+              <p>
+                <AlertTriangle size={12} />
+                시작 여부가 불확실하면 재시도 없이 해당 lane 중단
+              </p>
+            </div>
+
+            <label className="approval-phrase">
+              <span>
+                복구하려면{" "}
+                <code>{recoveryApproval.confirmation_phrase}</code> 입력
+              </span>
+              <input
+                autoFocus
+                value={recoveryPhrase}
+                onChange={(event) => {
+                  setRecoveryPhrase(event.target.value);
+                  setApprovalError(null);
+                }}
+                disabled={isRecovering}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+
+            <p className="approval-warning">{recoveryApproval.warning}</p>
+            {approvalError && (
+              <p className="approval-error" role="alert">
+                {approvalError}
+              </p>
+            )}
+
+            <footer>
+              <button
+                className="approval-cancel"
+                type="button"
+                onClick={() => void cancelRecovery()}
+                disabled={isRecovering}
+              >
+                취소
+              </button>
+              <button
+                className="approval-confirm"
+                type="button"
+                onClick={() => void confirmRecovery()}
+                disabled={
+                  isRecovering ||
+                  recoveryPhrase !== recoveryApproval.confirmation_phrase
+                }
+              >
+                {isRecovering ? (
+                  <>
+                    <RefreshCw className="is-spinning" size={13} />
+                    공급자 증거 대조 중
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={13} />
+                    원래 일정만 복구
+                  </>
+                )}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
 
       {portfolioApproval && (

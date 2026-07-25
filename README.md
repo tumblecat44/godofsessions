@@ -29,15 +29,16 @@ It is not:
 
 ## Current phase
 
-The durable night coordinator M18 desktop slice is working. Recommendation and
-preflight remain read-only; a provider process can start only after an exact,
-expiring, one-time approval in the desktop app. That approval now freezes every
-eligible item in the visible overnight lanes, not only the immediate heads. A
-detached coordinator opens approved successors at their not-before offsets
-after exact provider evidence closes the previous item. It never invents
-replacement work or retries an ambiguous start. Hermes, Codex, and Claude
-records still appear in one Morning Review while provider completion remains
-separate from human verification.
+The evidence-first coordinator recovery M19 desktop slice is working.
+Recommendation and preflight remain read-only; a provider process can start
+only after an exact, expiring, one-time approval in the desktop app. The full
+night schedule is durable, and the app can now distinguish a live coordinator
+from a stopped one using an operating-system lease rather than trusting a stale
+PID. A stopped plan can be explicitly recovered before its original wake
+deadline. Recovery freezes the exact plan fingerprint again and queries each
+provider by the exact contract identity; it never replays an ambiguous start.
+Hermes, Codex, and Claude records still appear in one Morning Review while
+provider completion remains separate from human verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -60,6 +61,7 @@ separate from human verification.
 - [One-approval night portfolio M16](docs/overnight-m16.md)
 - [Bounded Claude session forks M17](docs/overnight-m17.md)
 - [Durable full-night coordinator M18](docs/overnight-m18.md)
+- [Evidence-first coordinator recovery M19](docs/overnight-m19.md)
 
 The app currently:
 
@@ -103,6 +105,17 @@ The app currently:
   project
 - exposes the durable coordinator plan and item states in the Overnight screen
   while provider-specific ledgers remain authoritative for actual execution
+- holds one operating-system file lease for the lifetime of each coordinator,
+  so a stale PID can never authorize a second scheduler
+- identifies stopped, unexpired plans as recoverable and requires a new exact,
+  five-minute, one-time recovery confirmation
+- invalidates recovery when any byte of the reviewed durable plan changes
+- reconciles each active item by its exact Hermes idempotency key, Codex
+  thread plus rollout marker, or Claude receipt plus transcript evidence,
+  rather than treating the recent-history display limit as an execution query
+- resumes only the still-unresolved part of the original approved schedule;
+  expired plans, completed plans, active leases, and uncertain starts fail
+  closed
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

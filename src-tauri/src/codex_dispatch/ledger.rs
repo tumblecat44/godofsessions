@@ -417,6 +417,17 @@ pub(crate) fn load_history() -> (Vec<NightRunRecord>, Vec<String>) {
     (runs, warnings)
 }
 
+pub(crate) fn load_record(
+    thread_id: &str,
+    idempotency_key: &str,
+) -> Result<Option<NightRunRecord>, String> {
+    let Some(source) = load_thread_run_source(thread_id)? else {
+        return Ok(None);
+    };
+    let marker = find_marker(&source.rollout_path, idempotency_key)?;
+    Ok(marker.map(|marker| history_record(&source, marker)))
+}
+
 pub(crate) fn load_detail(task_id: &str, thread_id: &str) -> Result<NightRunDetail, String> {
     let source = load_thread_run_source(thread_id)?.ok_or_else(|| {
         "Codex thread index에서 이 야간 실행의 thread를 찾지 못했습니다.".to_owned()

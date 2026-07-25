@@ -11,16 +11,29 @@ use crate::{
 };
 
 use super::{
-    ledger, CoordinatorItem, CoordinatorItemState, CoordinatorPlan, CoordinatorWorkerRequest,
+    ledger, CoordinatorItem, CoordinatorItemState, CoordinatorPlan, CoordinatorWorkerMode,
+    CoordinatorWorkerRequest,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const EVIDENCE_GRACE_SECONDS: i64 = 120;
 
 pub(super) fn run(request: CoordinatorWorkerRequest) -> Result<(), String> {
+    let _lease = ledger::acquire_lease(&request.idempotency_key)?;
     let mut plan = ledger::load(&request.idempotency_key)?;
-    if plan.state != "accepted" {
-        return Err("밤 coordinator 계획이 이미 시작됐거나 끝났습니다.".to_owned());
+    match request.mode {
+        CoordinatorWorkerMode::Initial if plan.state != "accepted" => {
+            return Err("밤 coordinator 계획이 이미 시작됐거나 끝났습니다.".to_owned());
+        }
+        CoordinatorWorkerMode::Resume
+            if !matches!(
+                plan.state.as_str(),
+                "accepted" | "running" | "needs_attention"
+            ) =>
+        {
+            return Err("이 밤 coordinator 계획은 복구할 수 있는 상태가 아닙니다.".to_owned());
+        }
+        _ => {}
     }
     let now = Utc::now();
     if now >= plan.deadline_at {
@@ -28,10 +41,16 @@ pub(super) fn run(request: CoordinatorWorkerRequest) -> Result<(), String> {
     }
     plan.state = "running".to_owned();
     plan.worker_pid = Some(std::process::id());
+    plan.error = None;
     plan.updated_at = now;
     ledger::update(&plan)?;
 
-    let scheduled = plan.item_count();
+    let scheduled = plan
+        .lanes
+        .iter()
+        .flat_map(|lane| &lane.items)
+        .filter(|item| !item.state.is_terminal())
+        .count();
     let first_result = PortfolioDispatchResult {
         started_at: now.to_rfc3339(),
         approval_id: String::new(),
@@ -196,16 +215,6 @@ fn tick(
 }
 
 fn reconcile_running_items(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
-    let needs_evidence = plan.lanes.iter().flat_map(|lane| &lane.items).any(|item| {
-        matches!(
-            item.state,
-            CoordinatorItemState::Starting | CoordinatorItemState::Running
-        )
-    });
-    if !needs_evidence {
-        return;
-    }
-    let history = crate::dispatch::load_night_run_history();
     for item in plan.lanes.iter_mut().flat_map(|lane| &mut lane.items) {
         if !matches!(
             item.state,
@@ -214,11 +223,16 @@ fn reconcile_running_items(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
             continue;
         }
         let idempotency_key = &item.approved.dispatch.preflight.idempotency_key;
-        let evidence = history
-            .runs
-            .iter()
-            .find(|record| record.idempotency_key == *idempotency_key);
-        match evidence.map(|record| record.status.as_str()) {
+        let surface = item.approved.dispatch.preflight.surface;
+        let native_session_id = item.approved.dispatch.draft.native_session_id.as_deref();
+        let evidence =
+            crate::dispatch::load_night_run_record(surface, idempotency_key, native_session_id);
+        let evidence_status = evidence
+            .as_ref()
+            .ok()
+            .and_then(|record| record.as_ref())
+            .map(|record| record.status.as_str());
+        match evidence_status {
             Some("done") => {
                 item.state = CoordinatorItemState::Completed;
                 item.completed_at = Some(now);
@@ -226,7 +240,11 @@ fn reconcile_running_items(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
             Some("blocked") => {
                 item.state = CoordinatorItemState::Blocked;
                 item.completed_at = Some(now);
-                item.error = evidence.and_then(|record| record.error.clone());
+                item.error = evidence
+                    .as_ref()
+                    .ok()
+                    .and_then(|record| record.as_ref())
+                    .and_then(|record| record.error.clone());
             }
             Some("running" | "ready") => item.state = CoordinatorItemState::Running,
             Some(_) => {
@@ -237,8 +255,14 @@ fn reconcile_running_items(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
             None if evidence_grace_elapsed(item, now) => {
                 item.state = CoordinatorItemState::Uncertain;
                 item.completed_at = Some(now);
-                item.error =
-                    Some("공급자 원장에서 시작 증거를 찾지 못해 자동 재시도하지 않음".to_owned());
+                item.error = Some(match evidence.as_ref() {
+                    Ok(None) => "공급자 원장에서 정확한 시작 증거를 찾지 못해 자동 재시도하지 않음"
+                        .to_owned(),
+                    Err(error) => format!(
+                        "공급자 원장의 정확한 실행 증거를 읽지 못해 자동 재시도하지 않음: {error}"
+                    ),
+                    Ok(Some(_)) => unreachable!("known evidence states handled above"),
+                });
             }
             None => {}
         }
@@ -493,5 +517,78 @@ mod tests {
         plan.lanes[0].items[0].state = CoordinatorItemState::Blocked;
 
         assert_eq!(next_startable_item(&plan, 0, now), Some(1));
+    }
+
+    #[test]
+    fn recovery_approval_is_exact_one_time_and_invalidated_by_plan_changes() {
+        let now = plan().approved_at + chrono::Duration::minutes(10);
+        let mut original = plan();
+        original.state = "needs_attention".to_owned();
+        original.worker_pid = Some(7);
+        let mut registry = crate::night_coordinator::RecoveryRegistry::default();
+        let challenge = registry
+            .register_plan(&original, now)
+            .expect("recovery challenge");
+
+        let mut changed = original.clone();
+        changed.worker_pid = Some(8);
+        assert!(registry
+            .consume_plan(
+                &challenge.id,
+                &challenge.plan_id,
+                &challenge.confirmation_phrase,
+                &changed,
+                now,
+            )
+            .expect_err("changed plan")
+            .contains("상태가 바뀌었습니다"));
+
+        let challenge = registry
+            .register_plan(&original, now)
+            .expect("fresh challenge");
+        assert_eq!(
+            registry
+                .consume_plan(
+                    &challenge.id,
+                    &challenge.plan_id,
+                    &challenge.confirmation_phrase,
+                    &original,
+                    now,
+                )
+                .expect("accepted"),
+            original.idempotency_key
+        );
+        assert!(registry
+            .consume_plan(
+                &challenge.id,
+                &challenge.plan_id,
+                &challenge.confirmation_phrase,
+                &original,
+                now,
+            )
+            .expect_err("one time")
+            .contains("찾지 못했습니다"));
+    }
+
+    #[test]
+    fn recovery_approval_expires_without_changing_the_plan() {
+        let now = plan().approved_at + chrono::Duration::minutes(10);
+        let mut original = plan();
+        original.state = "needs_attention".to_owned();
+        let mut registry = crate::night_coordinator::RecoveryRegistry::default();
+        let challenge = registry
+            .register_plan(&original, now)
+            .expect("recovery challenge");
+
+        assert!(registry
+            .consume_plan(
+                &challenge.id,
+                &challenge.plan_id,
+                &challenge.confirmation_phrase,
+                &original,
+                now + chrono::Duration::minutes(6),
+            )
+            .expect_err("expired")
+            .contains("만료"));
     }
 }

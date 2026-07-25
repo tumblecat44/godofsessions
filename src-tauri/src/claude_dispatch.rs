@@ -23,6 +23,7 @@ mod worker;
 
 pub(crate) use ledger::{
     load_detail as load_night_run_detail, load_history as load_night_run_history,
+    load_record as load_night_run_record,
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 

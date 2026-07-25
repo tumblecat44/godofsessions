@@ -1277,6 +1277,83 @@ button:active:not(:disabled) {
   color: var(--ink-tertiary);
 }
 
+.night-plan-recovery {
+  margin-top: 8px;
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.055);
+  border: 1px solid rgba(228, 169, 74, 0.17);
+  border-radius: var(--radius-control);
+}
+
+.night-plan-recovery > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.night-plan-recovery > div > svg {
+  flex: 0 0 auto;
+}
+
+.night-plan-recovery span,
+.night-plan-recovery strong,
+.night-plan-recovery small {
+  display: block;
+}
+
+.night-plan-recovery strong {
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.night-plan-recovery small {
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-size: 7px;
+  line-height: 1.4;
+}
+
+.night-plan-recovery button {
+  min-height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: #17150f;
+  background: var(--signal-amber);
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.night-plan-recovery button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.night-plan-recovery-note {
+  margin: 8px 0 0;
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-muted);
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+  font-size: 7px;
+}
+
 .night-plan-lanes {
   margin-top: 8px;
   display: grid;
@@ -3322,6 +3399,67 @@ button:active:not(:disabled) {
   width: min(600px, 100%);
 }
 
+.recovery-approval-dialog {
+  width: min(560px, 100%);
+  border-color: rgba(79, 190, 166, 0.3);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.48),
+    inset 0 2px 0 rgba(79, 190, 166, 0.5);
+}
+
+.recovery-approval-dialog .approval-mark {
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.08);
+  border-color: rgba(79, 190, 166, 0.18);
+}
+
+.recovery-approval-list {
+  max-height: min(250px, 32vh);
+  margin: 16px 20px 0;
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.recovery-approval-list article {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 18px 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.recovery-approval-list article > span {
+  color: var(--signal-teal);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.recovery-approval-list article > div {
+  min-width: 0;
+}
+
+.recovery-approval-list strong,
+.recovery-approval-list small {
+  display: block;
+}
+
+.recovery-approval-list strong {
+  color: var(--ink-primary);
+  font-size: 9px;
+  font-weight: 590;
+}
+
+.recovery-approval-list small {
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-size: 7px;
+}
+
 .portfolio-approval-list {
   max-height: min(300px, 38vh);
   margin: 16px 20px 0;
@@ -4434,6 +4572,15 @@ button:active:not(:disabled) {
 
   .night-plan-meta code {
     margin-left: 0;
+  }
+
+  .night-plan-recovery {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .night-plan-recovery button {
+    justify-content: center;
   }
 
   .night-history-grid {

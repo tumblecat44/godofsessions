@@ -17,13 +17,14 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, DispatchReceipt, NightPlanHistory, NightRunDetail, NightRunHistory,
-    OvernightPlan, PortfolioApprovalChallenge, PortfolioDispatchResult, Provider, Session,
-    Snapshot, StatusConfidence, WorkspaceOverview,
+    ApprovalChallenge, DispatchReceipt, NightPlanHistory, NightPlanResumeChallenge, NightRunDetail,
+    NightRunHistory, OvernightPlan, PortfolioApprovalChallenge, PortfolioDispatchResult, Provider,
+    Session, Snapshot, StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
 type ApprovalState = Mutex<approval::ApprovalRegistry>;
+type RecoveryState = Mutex<night_coordinator::RecoveryRegistry>;
 
 pub fn run_codex_night_worker() {
     codex_dispatch::run_night_worker_from_stdin();
@@ -258,6 +259,47 @@ async fn load_night_plan_history() -> Result<NightPlanHistory, String> {
 }
 
 #[tauri::command]
+fn prepare_night_plan_resume(
+    plan_id: String,
+    recoveries: State<'_, RecoveryState>,
+) -> Result<NightPlanResumeChallenge, String> {
+    recoveries
+        .lock()
+        .map_err(|_| "밤 계획 복구 승인 상태를 잠글 수 없습니다.".to_owned())?
+        .begin(&plan_id, Utc::now())
+}
+
+#[tauri::command]
+fn cancel_night_plan_resume(
+    challenge_id: String,
+    recoveries: State<'_, RecoveryState>,
+) -> Result<(), String> {
+    recoveries
+        .lock()
+        .map_err(|_| "밤 계획 복구 승인 상태를 잠글 수 없습니다.".to_owned())?
+        .cancel(&challenge_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn resume_approved_night_plan(
+    challenge_id: String,
+    plan_id: String,
+    confirmation_phrase: String,
+    recoveries: State<'_, RecoveryState>,
+) -> Result<PortfolioDispatchResult, String> {
+    let accepted_plan_id = recoveries
+        .lock()
+        .map_err(|_| "밤 계획 복구 승인 상태를 잠글 수 없습니다.".to_owned())?
+        .consume(&challenge_id, &plan_id, &confirmation_phrase, Utc::now())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        night_coordinator::resume(accepted_plan_id, challenge_id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn load_night_run_detail(
     task_id: String,
     surface: Provider,
@@ -368,11 +410,15 @@ fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
 pub fn run() {
     tauri::Builder::default()
         .manage(ApprovalState::default())
+        .manage(RecoveryState::default())
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             load_workspace_overview,
             load_night_run_history,
             load_night_plan_history,
+            prepare_night_plan_resume,
+            cancel_night_plan_resume,
+            resume_approved_night_plan,
             load_night_run_detail,
             generate_overnight_plan,
             prepare_dispatch_approval,

@@ -233,6 +233,16 @@ pub(crate) fn load_history() -> (Vec<NightRunRecord>, Vec<String>) {
     (runs, Vec::new())
 }
 
+pub(crate) fn load_record(idempotency_key: &str) -> Result<Option<NightRunRecord>, String> {
+    let Some(receipt) = read_receipt_at(&receipt_root(), idempotency_key)? else {
+        return Ok(None);
+    };
+    let projects_root = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude/projects");
+    Ok(Some(history_record(&receipt, &projects_root)))
+}
+
 pub(crate) fn load_detail(task_id: &str) -> Result<NightRunDetail, String> {
     let receipt = read_receipt_at(&receipt_root(), task_id)?
         .ok_or_else(|| "Claude 야간 실행 영수증을 찾지 못했습니다.".to_owned())?;

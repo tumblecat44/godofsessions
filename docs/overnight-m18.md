@@ -76,7 +76,7 @@ Closing the GUI does not stop the coordinator. If the coordinator process
 itself or the Mac dies, the saved plan remains visible, but M18 does not
 automatically restart it. A plan left in `starting` is intentionally ambiguous
 and must not be replayed. Crash recovery and an explicit, evidence-first resume
-control are a separate milestone.
+control are implemented in [M19](overnight-m19.md).
 
 ## Verification
 

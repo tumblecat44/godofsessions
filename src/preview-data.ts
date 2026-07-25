@@ -581,10 +581,11 @@ export const previewNightPlanHistory: NightPlanHistory = {
   plans: [
     {
       idempotency_key: "gos-portfolio-preview-m18",
-      state: "running",
+      state: "needs_attention",
       approved_at: new Date(now - 15 * 60_000).toISOString(),
       deadline_at: new Date(now + 6.75 * 3_600_000).toISOString(),
       worker_pid: 73142,
+      recovery_state: "recoverable",
       error: null,
       lanes: [
         {

@@ -472,6 +472,7 @@ pub struct NightPlanSummary {
     pub approved_at: String,
     pub deadline_at: String,
     pub worker_pid: Option<u32>,
+    pub recovery_state: String,
     pub lanes: Vec<NightPlanLaneSummary>,
     pub error: Option<String>,
 }
@@ -483,6 +484,24 @@ pub struct NightPlanHistory {
     pub warnings: Vec<String>,
     pub read_only: bool,
     pub methodology: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightPlanResumeItem {
+    pub draft_id: String,
+    pub project: String,
+    pub surface: Provider,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightPlanResumeChallenge {
+    pub id: String,
+    pub plan_id: String,
+    pub items: Vec<NightPlanResumeItem>,
+    pub confirmation_phrase: String,
+    pub expires_at: String,
+    pub warning: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

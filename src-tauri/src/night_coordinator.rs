@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Child, Command, Stdio},
@@ -8,12 +9,14 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     approval::{ApprovedPortfolio, ApprovedPortfolioItem},
     model::{
         CapacityPool, DispatchReceipt, NightPlanHistory, NightPlanItemSummary,
-        NightPlanLaneSummary, NightPlanSummary, PortfolioDispatchResult,
+        NightPlanLaneSummary, NightPlanResumeChallenge, NightPlanResumeItem, NightPlanSummary,
+        PortfolioDispatchResult,
     },
 };
 
@@ -22,6 +25,7 @@ mod worker;
 
 const WORKER_FLAG: &str = "--night-coordinator-worker";
 const WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
+const RECOVERY_CHALLENGE_MINUTES: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +137,14 @@ impl CoordinatorPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoordinatorWorkerRequest {
     idempotency_key: String,
+    mode: CoordinatorWorkerMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CoordinatorWorkerMode {
+    Initial,
+    Resume,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,17 +154,130 @@ struct CoordinatorWorkerReply {
     error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct PendingRecovery {
+    plan_id: String,
+    fingerprint: String,
+    confirmation_phrase: String,
+    expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct RecoveryRegistry {
+    sequence: u64,
+    pending: HashMap<String, PendingRecovery>,
+}
+
+impl RecoveryRegistry {
+    pub(crate) fn begin(
+        &mut self,
+        plan_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<NightPlanResumeChallenge, String> {
+        self.expire(now);
+        let plan = ledger::load(plan_id)?;
+        ensure_recoverable(&plan, now)?;
+        self.register_plan(&plan, now)
+    }
+
+    fn register_plan(
+        &mut self,
+        plan: &CoordinatorPlan,
+        now: DateTime<Utc>,
+    ) -> Result<NightPlanResumeChallenge, String> {
+        let fingerprint = plan_fingerprint(plan)?;
+        let items = unresolved_items(plan);
+        self.sequence = self.sequence.saturating_add(1);
+        let id = format!("night-recovery-{}-{}", self.sequence, &fingerprint[..12]);
+        let confirmation_phrase = format!("밤 계획 {}개 복구 승인", items.len());
+        let expires_at = now + chrono::Duration::minutes(RECOVERY_CHALLENGE_MINUTES);
+        self.pending.insert(
+            id.clone(),
+            PendingRecovery {
+                plan_id: plan.idempotency_key.clone(),
+                fingerprint,
+                confirmation_phrase: confirmation_phrase.clone(),
+                expires_at,
+            },
+        );
+        Ok(NightPlanResumeChallenge {
+            id,
+            plan_id: plan.idempotency_key.clone(),
+            items,
+            confirmation_phrase,
+            expires_at: expires_at.to_rfc3339(),
+            warning: concat!(
+                "원래 승인한 프로젝트·순서·시간·권한만 복구합니다. ",
+                "각 공급자 원장에서 정확한 계약 지문을 먼저 대조하며, ",
+                "시작 여부가 불확실한 작업은 재시도하지 않고 그 lane을 멈춥니다."
+            )
+            .to_owned(),
+        })
+    }
+
+    pub(crate) fn consume(
+        &mut self,
+        challenge_id: &str,
+        plan_id: &str,
+        confirmation_phrase: &str,
+        now: DateTime<Utc>,
+    ) -> Result<String, String> {
+        let plan = ledger::load(plan_id)?;
+        ensure_recoverable(&plan, now)?;
+        self.consume_plan(challenge_id, plan_id, confirmation_phrase, &plan, now)
+    }
+
+    fn consume_plan(
+        &mut self,
+        challenge_id: &str,
+        plan_id: &str,
+        confirmation_phrase: &str,
+        plan: &CoordinatorPlan,
+        now: DateTime<Utc>,
+    ) -> Result<String, String> {
+        let pending = self
+            .pending
+            .get(challenge_id)
+            .cloned()
+            .ok_or_else(|| "밤 계획 복구 승인을 찾지 못했습니다.".to_owned())?;
+        if pending.expires_at <= now {
+            self.pending.remove(challenge_id);
+            return Err("밤 계획 복구 승인 시간이 만료되었습니다.".to_owned());
+        }
+        if pending.plan_id != plan_id || pending.confirmation_phrase != confirmation_phrase {
+            return Err("밤 계획 복구 확인 문구나 계획 식별자가 다릅니다.".to_owned());
+        }
+        if plan_fingerprint(plan)? != pending.fingerprint {
+            self.pending.remove(challenge_id);
+            return Err(
+                "검토 뒤 밤 계획 상태가 바뀌었습니다. 복구 점검을 다시 열어 주세요.".to_owned(),
+            );
+        }
+        self.pending.remove(challenge_id);
+        Ok(plan.idempotency_key.clone())
+    }
+
+    pub(crate) fn cancel(&mut self, challenge_id: &str) {
+        self.pending.remove(challenge_id);
+    }
+
+    fn expire(&mut self, now: DateTime<Utc>) {
+        self.pending.retain(|_, item| item.expires_at > now);
+    }
+}
+
 pub(crate) fn execute(
     portfolio: ApprovedPortfolio,
     approval_id: String,
 ) -> Result<PortfolioDispatchResult, String> {
     let mut plan = CoordinatorPlan::accepted(portfolio);
     ledger::claim(&plan)?;
-    let request = CoordinatorWorkerRequest {
-        idempotency_key: plan.idempotency_key.clone(),
-    };
-    let mut worker = match spawn_detached_worker(&request) {
-        Ok(worker) => worker,
+    match launch_worker(
+        &plan.idempotency_key,
+        approval_id,
+        CoordinatorWorkerMode::Initial,
+    ) {
+        Ok(result) => Ok(result),
         Err(error) => {
             plan.state = "needs_attention".to_owned();
             plan.error = Some(format!(
@@ -160,9 +285,28 @@ pub(crate) fn execute(
             ));
             plan.updated_at = Utc::now();
             let _ = ledger::update(&plan);
-            return Err(error);
+            Err(error)
         }
+    }
+}
+
+pub(crate) fn resume(
+    plan_id: String,
+    approval_id: String,
+) -> Result<PortfolioDispatchResult, String> {
+    launch_worker(&plan_id, approval_id, CoordinatorWorkerMode::Resume)
+}
+
+fn launch_worker(
+    plan_id: &str,
+    approval_id: String,
+    mode: CoordinatorWorkerMode,
+) -> Result<PortfolioDispatchResult, String> {
+    let request = CoordinatorWorkerRequest {
+        idempotency_key: plan_id.to_owned(),
+        mode,
     };
+    let mut worker = spawn_detached_worker(&request)?;
     let worker_pid = worker.id();
     let Some(stdout) = worker.stdout.take() else {
         std::thread::spawn(move || {
@@ -207,10 +351,49 @@ pub(crate) fn execute(
             approval_id,
             outcomes: Vec::new(),
             message: format!(
-                "밤 계획은 원자적으로 저장했고 coordinator(pid {worker_pid})를 시작했지만 첫 공급자 영수증은 아직 확인하지 못했습니다. 중복 실행은 하지 않습니다."
+                "밤 계획은 원자적으로 저장했고 coordinator(pid {worker_pid})를 시작했지만 coordinator 인수 영수증은 아직 확인하지 못했습니다. 중복 실행은 하지 않습니다."
             ),
         }),
     }
+}
+
+fn ensure_recoverable(plan: &CoordinatorPlan, now: DateTime<Utc>) -> Result<(), String> {
+    if now >= plan.deadline_at {
+        return Err("승인한 수면 마감이 지나 이 밤 계획을 복구하지 않습니다.".to_owned());
+    }
+    if !matches!(
+        plan.state.as_str(),
+        "accepted" | "running" | "needs_attention"
+    ) || unresolved_items(plan).is_empty()
+    {
+        return Err("이 밤 계획에는 복구할 미종결 작업이 없습니다.".to_owned());
+    }
+    if !ledger::lease_available(&plan.idempotency_key)? {
+        return Err("현재 coordinator가 이 밤 계획을 이미 관제하고 있습니다.".to_owned());
+    }
+    Ok(())
+}
+
+fn unresolved_items(plan: &CoordinatorPlan) -> Vec<NightPlanResumeItem> {
+    plan.lanes
+        .iter()
+        .flat_map(|lane| &lane.items)
+        .filter(|item| !item.state.is_terminal())
+        .map(|item| NightPlanResumeItem {
+            draft_id: item.approved.dispatch.draft.id.clone(),
+            project: item.approved.dispatch.draft.project.clone(),
+            surface: item.approved.dispatch.preflight.surface,
+            state: item.state.as_str().to_owned(),
+        })
+        .collect()
+}
+
+fn plan_fingerprint(plan: &CoordinatorPlan) -> Result<String, String> {
+    let encoded = serde_json::to_vec(plan)
+        .map_err(|_| "밤 coordinator 계획 지문을 만들지 못했습니다.".to_owned())?;
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 pub(crate) fn load_history() -> NightPlanHistory {
@@ -229,12 +412,29 @@ pub(crate) fn load_history() -> NightPlanHistory {
 }
 
 fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
+    let recovery_state = recovery_state(&plan);
+    let has_attention = plan.lanes.iter().flat_map(|lane| &lane.items).any(|item| {
+        matches!(
+            item.state,
+            CoordinatorItemState::Blocked
+                | CoordinatorItemState::Uncertain
+                | CoordinatorItemState::SkippedDeadline
+                | CoordinatorItemState::SkippedUncertain
+        )
+    });
+    let state = match recovery_state.as_str() {
+        "closed" if has_attention => "needs_attention".to_owned(),
+        "closed" => "completed".to_owned(),
+        "recoverable" | "expired" | "unknown" => "needs_attention".to_owned(),
+        _ => plan.state.clone(),
+    };
     NightPlanSummary {
         idempotency_key: plan.idempotency_key,
-        state: plan.state,
+        state,
         approved_at: plan.approved_at.to_rfc3339(),
         deadline_at: plan.deadline_at.to_rfc3339(),
         worker_pid: plan.worker_pid,
+        recovery_state,
         lanes: plan
             .lanes
             .into_iter()
@@ -260,6 +460,25 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
             })
             .collect(),
         error: plan.error,
+    }
+}
+
+fn recovery_state(plan: &CoordinatorPlan) -> String {
+    if plan
+        .lanes
+        .iter()
+        .flat_map(|lane| &lane.items)
+        .all(|item| item.state.is_terminal())
+    {
+        return "closed".to_owned();
+    }
+    if Utc::now() >= plan.deadline_at {
+        return "expired".to_owned();
+    }
+    match ledger::lease_available(&plan.idempotency_key) {
+        Ok(true) => "recoverable".to_owned(),
+        Ok(false) => "active".to_owned(),
+        Err(_) => "unknown".to_owned(),
     }
 }
 

@@ -366,6 +366,7 @@ export interface NightPlanSummary {
   approved_at: string;
   deadline_at: string;
   worker_pid: number | null;
+  recovery_state: "active" | "recoverable" | "expired" | "closed" | "unknown";
   lanes: NightPlanLaneSummary[];
   error: string | null;
 }
@@ -376,6 +377,22 @@ export interface NightPlanHistory {
   warnings: string[];
   read_only: boolean;
   methodology: string;
+}
+
+export interface NightPlanResumeItem {
+  draft_id: string;
+  project: string;
+  surface: Provider;
+  state: NightPlanItemSummary["state"];
+}
+
+export interface NightPlanResumeChallenge {
+  id: string;
+  plan_id: string;
+  items: NightPlanResumeItem[];
+  confirmation_phrase: string;
+  expires_at: string;
+  warning: string;
 }
 
 export interface NightRunRecord {

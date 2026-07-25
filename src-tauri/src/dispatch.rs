@@ -6,6 +6,7 @@ use std::{
 };
 
 use chrono::Utc;
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use wait_timeout::ChildExt;
@@ -391,6 +392,32 @@ pub fn load_night_run_history() -> NightRunHistory {
     }
 }
 
+pub(crate) fn load_night_run_record(
+    surface: Provider,
+    idempotency_key: &str,
+    native_session_id: Option<&str>,
+) -> Result<Option<NightRunRecord>, String> {
+    match surface {
+        Provider::Hermes => {
+            let path = hermes_board_db();
+            if !path.is_file() {
+                return Ok(None);
+            }
+            load_night_run_record_from_path(&path, idempotency_key)
+        }
+        Provider::Codex => {
+            let thread_id = native_session_id
+                .ok_or_else(|| "Codex 실행 증거를 찾을 원본 thread id가 없습니다.".to_owned())?;
+            crate::codex_dispatch::load_night_run_record(thread_id, idempotency_key)
+        }
+        Provider::Claude => crate::claude_dispatch::load_night_run_record(idempotency_key),
+        _ => Err(format!(
+            "{} 공급자의 정확한 야간 실행 증거 조회는 지원하지 않습니다.",
+            surface.as_str()
+        )),
+    }
+}
+
 fn load_night_runs_from_path(path: &Path) -> Result<Vec<NightRunRecord>, String> {
     let connection =
         crate::connectors::open_read_only_sqlite(path).map_err(|error| error.to_string())?;
@@ -419,46 +446,84 @@ fn load_night_runs_from_path(path: &Path) -> Result<Vec<NightRunRecord>, String>
         )
         .map_err(|error| error.to_string())?;
     let runs = statement
-        .query_map([], |row| {
-            let workspace = row.get::<_, Option<String>>(2)?;
-            let project = workspace
-                .as_deref()
-                .and_then(|value| Path::new(value).file_name())
-                .and_then(|value| value.to_str())
-                .unwrap_or("이름 없는 프로젝트")
-                .to_owned();
-            Ok(NightRunRecord {
-                surface: Provider::Hermes,
-                task_id: row.get(0)?,
-                title: row.get(1)?,
-                project,
-                workspace,
-                status: row.get(3)?,
-                created_at: row
-                    .get::<_, Option<i64>>(4)?
-                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
-                started_at: row
-                    .get::<_, Option<i64>>(5)?
-                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
-                completed_at: row
-                    .get::<_, Option<i64>>(6)?
-                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
-                run_id: row.get(7)?,
-                run_status: row.get(8)?,
-                worker_pid: row.get(9)?,
-                session_id: row.get(10)?,
-                thread_id: None,
-                turn_id: None,
-                outcome: bounded_receipt_text(row.get(11)?),
-                summary: bounded_receipt_text(row.get(12)?),
-                error: bounded_receipt_text(row.get(13)?),
-                idempotency_key: row.get(14)?,
-            })
-        })
+        .query_map([], hermes_night_run_row)
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     Ok(runs)
+}
+
+fn load_night_run_record_from_path(
+    path: &Path,
+    idempotency_key: &str,
+) -> Result<Option<NightRunRecord>, String> {
+    if !idempotency_key.starts_with("gos-night-") || idempotency_key.len() > 128 {
+        return Err("Hermes 실행 증거 식별자가 올바르지 않습니다.".to_owned());
+    }
+    let connection =
+        crate::connectors::open_read_only_sqlite(path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "
+            SELECT t.id, t.title, t.workspace_path, t.status,
+                   t.created_at, t.started_at, t.completed_at,
+                   r.id, r.status, COALESCE(r.worker_pid, t.worker_pid),
+                   t.session_id, r.outcome, COALESCE(r.summary, t.result),
+                   r.error, t.idempotency_key
+            FROM tasks t
+            LEFT JOIN task_runs r ON r.id = (
+                SELECT r2.id
+                FROM task_runs r2
+                WHERE r2.task_id = t.id
+                ORDER BY r2.id DESC
+                LIMIT 1
+            )
+            WHERE t.created_by = 'god-of-sessions'
+              AND t.idempotency_key = ?
+            LIMIT 1
+            ",
+            [idempotency_key],
+            hermes_night_run_row,
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+fn hermes_night_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<NightRunRecord> {
+    let workspace = row.get::<_, Option<String>>(2)?;
+    let project = workspace
+        .as_deref()
+        .and_then(|value| Path::new(value).file_name())
+        .and_then(|value| value.to_str())
+        .unwrap_or("이름 없는 프로젝트")
+        .to_owned();
+    Ok(NightRunRecord {
+        surface: Provider::Hermes,
+        task_id: row.get(0)?,
+        title: row.get(1)?,
+        project,
+        workspace,
+        status: row.get(3)?,
+        created_at: row
+            .get::<_, Option<i64>>(4)?
+            .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+        started_at: row
+            .get::<_, Option<i64>>(5)?
+            .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+        completed_at: row
+            .get::<_, Option<i64>>(6)?
+            .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+        run_id: row.get(7)?,
+        run_status: row.get(8)?,
+        worker_pid: row.get(9)?,
+        session_id: row.get(10)?,
+        thread_id: None,
+        turn_id: None,
+        outcome: bounded_receipt_text(row.get(11)?),
+        summary: bounded_receipt_text(row.get(12)?),
+        error: bounded_receipt_text(row.get(13)?),
+        idempotency_key: row.get(14)?,
+    })
 }
 
 fn bounded_receipt_text(value: Option<String>) -> Option<String> {
@@ -1495,6 +1560,16 @@ mod tests {
         assert_eq!(runs[0].run_id, Some(2));
         assert_eq!(runs[0].summary.as_deref(), Some("최신 검증 요약"));
         assert_eq!(runs[0].session_id.as_deref(), Some("session-1"));
+
+        let exact = load_night_run_record_from_path(&path, "gos-night-exact")
+            .expect("exact record")
+            .expect("matching record");
+        assert_eq!(exact.task_id, "task-1");
+        assert_eq!(exact.run_id, Some(2));
+        assert_eq!(exact.summary.as_deref(), Some("최신 검증 요약"));
+        assert!(load_night_run_record_from_path(&path, "gos-night-missing")
+            .expect("missing lookup")
+            .is_none());
     }
 
     #[test]
