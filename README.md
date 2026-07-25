@@ -173,6 +173,7 @@ context instead of clearing the screen.
 - [Prewarmed bedtime evidence M42](docs/overnight-m42.md)
 - [Stable recommendation refresh M43](docs/overnight-m43.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
+- [Orchestration UI revalidation](docs/research/orchestration-ui-revalidation-2026-07-24.md)
 
 The app currently:
 
