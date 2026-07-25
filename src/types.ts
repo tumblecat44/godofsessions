@@ -479,6 +479,49 @@ export interface NightRunDetail {
   methodology: string;
 }
 
+export type MorningBriefVerdict =
+  | "needs_attention"
+  | "ready_to_review"
+  | "in_progress"
+  | "not_started";
+
+export interface MorningBriefItem {
+  draft_id: string;
+  project: string;
+  title: string;
+  surface: Provider;
+  capacity_pool: CapacityPool;
+  coordinator_state: string;
+  task_id: string | null;
+  thread_id: string | null;
+  verdict: MorningBriefVerdict;
+  verdict_reason: string;
+  summary: string | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  next_action: string;
+  provenance_verified: boolean;
+  inspectable: boolean;
+}
+
+export interface MorningBrief {
+  generated_at: string;
+  plan_id: string | null;
+  approved_at: string | null;
+  deadline_at: string | null;
+  plan_state: string | null;
+  headline: string;
+  attention_count: number;
+  review_count: number;
+  in_progress_count: number;
+  not_started_count: number;
+  items: MorningBriefItem[];
+  warnings: string[];
+  read_only: boolean;
+  methodology: string;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;

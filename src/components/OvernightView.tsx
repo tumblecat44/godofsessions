@@ -7,10 +7,12 @@ import {
   ChevronRight,
   Clock3,
   Database,
+  Eye,
   MoonStar,
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Sunrise,
 } from "lucide-react";
 import {
   compactPath,
@@ -24,12 +26,15 @@ import {
   previewNightRunDetail,
   previewNightRunHistory,
   previewNightPlanHistory,
+  previewMorningBrief,
   previewOvernightPlan,
 } from "../preview-data";
 import type {
   ApprovalChallenge,
   DispatchPreflight,
   DispatchReceipt,
+  MorningBrief,
+  MorningBriefItem,
   NightRunDetail,
   NightRunHistory,
   NightRunRecord,
@@ -243,6 +248,167 @@ function nightRunStatus(run: NightRunRecord) {
   }
 }
 
+async function fetchNightRunDetail(run: {
+  surface: NightRunRecord["surface"];
+  task_id: string;
+  thread_id: string | null;
+}) {
+  return isTauri()
+    ? invoke<NightRunDetail>("load_night_run_detail", {
+        taskId: run.task_id,
+        surface: run.surface,
+        threadId: run.thread_id,
+      })
+    : previewNightRunDetail(run.task_id);
+}
+
+const morningVerdictLabels = {
+  needs_attention: "먼저 판단",
+  ready_to_review: "결과 검토",
+  in_progress: "진행 중",
+  not_started: "시작 전",
+} as const;
+
+function MorningBriefSection({ brief }: { brief: MorningBrief }) {
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<NightRunDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequest = useRef(0);
+
+  if (!brief.plan_id || brief.items.length === 0) return null;
+
+  const inspectItem = async (item: MorningBriefItem) => {
+    if (!item.inspectable || !item.task_id) return;
+    const request = detailRequest.current + 1;
+    detailRequest.current = request;
+    if (selectedDraftId === item.draft_id) {
+      setSelectedDraftId(null);
+      setDetail(null);
+      setDetailError(null);
+      return;
+    }
+    setSelectedDraftId(item.draft_id);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const next = await fetchNightRunDetail({
+        surface: item.surface,
+        task_id: item.task_id,
+        thread_id: item.thread_id,
+      });
+      if (detailRequest.current === request) setDetail(next);
+    } catch (error) {
+      if (detailRequest.current === request) {
+        setDetailError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (detailRequest.current === request) setDetailLoading(false);
+    }
+  };
+
+  return (
+    <section className="morning-brief-section">
+      <header>
+        <div>
+          <span className="eyebrow">MORNING INBOX</span>
+          <h2>밤의 결과, 지금 볼 순서</h2>
+          <p>{brief.headline}</p>
+        </div>
+        <div className="morning-brief-counts" aria-label="아침 판단 요약">
+          <span className={brief.attention_count > 0 ? "is-attention" : ""}>
+            <strong>{brief.attention_count}</strong>
+            먼저 판단
+          </span>
+          <span>
+            <strong>{brief.review_count}</strong>
+            결과 검토
+          </span>
+          <span>
+            <strong>{brief.in_progress_count}</strong>
+            진행 중
+          </span>
+        </div>
+      </header>
+
+      <div className="morning-brief-list">
+        {brief.items.map((item, index) => {
+          const timestamp = item.completed_at || item.started_at;
+          const selected = selectedDraftId === item.draft_id;
+          return (
+            <article
+              className={`morning-brief-item morning-brief-item--${item.verdict} ${
+                selected ? "is-selected" : ""
+              }`}
+              key={item.draft_id}
+            >
+              <div className="morning-brief-rank">{index + 1}</div>
+              <div className="morning-brief-copy">
+                <header>
+                  <ProviderMark provider={item.surface} />
+                  <span>{morningVerdictLabels[item.verdict]}</span>
+                  <small>{timestamp ? relativeTime(timestamp) : "시각 없음"}</small>
+                </header>
+                <strong>{item.project}</strong>
+                <h3>{item.title}</h3>
+                <p className={item.error ? "is-error" : ""}>
+                  {item.verdict === "needs_attention"
+                    ? item.error || item.verdict_reason || item.summary
+                    : item.summary || item.error || item.verdict_reason}
+                </p>
+                <footer>
+                  <span>
+                    <ArrowRight size={11} />
+                    {item.next_action}
+                  </span>
+                  <small>
+                    {item.provenance_verified
+                      ? "계약 출처 확인"
+                      : "자동 성공 판정 안 함"}
+                  </small>
+                </footer>
+              </div>
+              {item.inspectable && (
+                <button
+                  type="button"
+                  onClick={() => void inspectItem(item)}
+                  aria-expanded={selected}
+                >
+                  <Eye size={12} />
+                  {selected ? "근거 접기" : "원본 근거"}
+                </button>
+              )}
+            </article>
+          );
+        })}
+      </div>
+
+      {selectedDraftId && (
+        <NightRunEvidence
+          detail={detail}
+          loading={detailLoading}
+          error={detailError}
+        />
+      )}
+
+      <div className="morning-brief-trust">
+        <Sunrise size={13} />
+        <span>
+          최신 승인 계획만 공급자 원장에 정확히 대조했습니다. 완료 표시는 결과의
+          정확성을 대신 증명하지 않습니다.
+        </span>
+      </div>
+      {brief.warnings.map((warning) => (
+        <p className="night-history-warning" key={warning}>
+          <AlertTriangle size={12} />
+          {warning}
+        </p>
+      ))}
+    </section>
+  );
+}
+
 function NightRunHistorySection({ history }: { history: NightRunHistory }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [detail, setDetail] = useState<NightRunDetail | null>(null);
@@ -270,13 +436,7 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
     setDetailError(null);
     setDetailLoading(true);
     try {
-      const next = isTauri()
-        ? await invoke<NightRunDetail>("load_night_run_detail", {
-            taskId: run.task_id,
-            surface: run.surface,
-            threadId: run.thread_id,
-          })
-        : previewNightRunDetail(run.task_id);
+      const next = await fetchNightRunDetail(run);
       if (detailRequest.current !== request) return;
       setDetail(next);
     } catch (error) {
@@ -1053,6 +1213,7 @@ export function OvernightView() {
   const [nightHistory, setNightHistory] = useState<NightRunHistory | null>(null);
   const [nightPlanHistory, setNightPlanHistory] =
     useState<NightPlanHistory | null>(null);
+  const [morningBrief, setMorningBrief] = useState<MorningBrief | null>(null);
 
   const loadNightHistory = useCallback(async () => {
     try {
@@ -1092,16 +1253,44 @@ export function OvernightView() {
     }
   }, []);
 
+  const loadMorningBrief = useCallback(async () => {
+    try {
+      const brief = isTauri()
+        ? await invoke<MorningBrief>("load_morning_brief")
+        : previewMorningBrief;
+      setMorningBrief(brief);
+    } catch (error) {
+      setMorningBrief({
+        generated_at: new Date().toISOString(),
+        plan_id: null,
+        approved_at: null,
+        deadline_at: null,
+        plan_state: null,
+        headline: "아침 판단 인박스를 만들지 못했습니다.",
+        attention_count: 0,
+        review_count: 0,
+        in_progress_count: 0,
+        not_started_count: 0,
+        items: [],
+        warnings: [error instanceof Error ? error.message : String(error)],
+        read_only: true,
+        methodology: "최신 밤 계획의 공급자 근거를 불러오지 못했습니다.",
+      });
+    }
+  }, []);
+
   useEffect(() => {
     void loadNightHistory();
     void loadNightPlanHistory();
+    void loadMorningBrief();
     if (!isTauri()) return;
     const interval = window.setInterval(() => {
       void loadNightHistory();
       void loadNightPlanHistory();
+      void loadMorningBrief();
     }, 15_000);
     return () => window.clearInterval(interval);
-  }, [loadNightHistory, loadNightPlanHistory]);
+  }, [loadMorningBrief, loadNightHistory, loadNightPlanHistory]);
 
   useEffect(() => {
     const activeApproval = portfolioApproval || approval;
@@ -1580,6 +1769,7 @@ export function OvernightView() {
         </section>
       )}
 
+      {morningBrief && <MorningBriefSection brief={morningBrief} />}
       {nightPlanHistory && (
         <NightPlanHistorySection
           history={nightPlanHistory}

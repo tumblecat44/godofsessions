@@ -29,16 +29,15 @@ It is not:
 
 ## Current phase
 
-The evidence-first coordinator recovery M19 desktop slice is working.
-Recommendation and preflight remain read-only; a provider process can start
-only after an exact, expiring, one-time approval in the desktop app. The full
-night schedule is durable, and the app can now distinguish a live coordinator
-from a stopped one using an operating-system lease rather than trusting a stale
-PID. A stopped plan can be explicitly recovered before its original wake
-deadline. Recovery freezes the exact plan fingerprint again and queries each
-provider by the exact contract identity; it never replays an ambiguous start.
-Hermes, Codex, and Claude records still appear in one Morning Review while
-provider completion remains separate from human verification.
+The evidence-ranked Morning Inbox M20 desktop slice is working. Recommendation
+and preflight remain read-only; a provider process can start only after an
+exact, expiring, one-time approval in the desktop app. The full night schedule
+is durable and safely recoverable under a plan-specific operating-system
+lease. On return, the app now joins the latest approved plan to exact Hermes,
+Codex, and Claude contract identities and sorts work into **needs a decision**,
+**ready to review**, **still running**, and **not started**. A coordinator
+completion without provider evidence can never become a successful morning
+result. Provider completion remains separate from human verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -62,6 +61,7 @@ provider completion remains separate from human verification.
 - [Bounded Claude session forks M17](docs/overnight-m17.md)
 - [Durable full-night coordinator M18](docs/overnight-m18.md)
 - [Evidence-first coordinator recovery M19](docs/overnight-m19.md)
+- [Evidence-ranked Morning Inbox M20](docs/overnight-m20.md)
 
 The app currently:
 
@@ -116,6 +116,13 @@ The app currently:
 - resumes only the still-unresolved part of the original approved schedule;
   expired plans, completed plans, active leases, and uncertain starts fail
   closed
+- builds a Morning Inbox from the latest approved schedule rather than from a
+  loose recent-run list
+- queries every scheduled contract by exact provider identity, refuses to
+  inherit a success verdict from coordinator state alone, and ranks the result
+  as needs a decision, ready to review, still running, or not started
+- opens the same bounded provider-owned contract, attempt, and lifecycle
+  evidence directly from each inspectable Morning Inbox item
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

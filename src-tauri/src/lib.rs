@@ -17,9 +17,9 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, DispatchReceipt, NightPlanHistory, NightPlanResumeChallenge, NightRunDetail,
-    NightRunHistory, OvernightPlan, PortfolioApprovalChallenge, PortfolioDispatchResult, Provider,
-    Session, Snapshot, StatusConfidence, WorkspaceOverview,
+    ApprovalChallenge, DispatchReceipt, MorningBrief, NightPlanHistory, NightPlanResumeChallenge,
+    NightRunDetail, NightRunHistory, OvernightPlan, PortfolioApprovalChallenge,
+    PortfolioDispatchResult, Provider, Session, Snapshot, StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
@@ -259,6 +259,13 @@ async fn load_night_plan_history() -> Result<NightPlanHistory, String> {
 }
 
 #[tauri::command]
+async fn load_morning_brief() -> Result<MorningBrief, String> {
+    tauri::async_runtime::spawn_blocking(night_coordinator::load_morning_brief)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn prepare_night_plan_resume(
     plan_id: String,
     recoveries: State<'_, RecoveryState>,
@@ -416,6 +423,7 @@ pub fn run() {
             load_workspace_overview,
             load_night_run_history,
             load_night_plan_history,
+            load_morning_brief,
             prepare_night_plan_resume,
             cancel_night_plan_resume,
             resume_approved_night_plan,

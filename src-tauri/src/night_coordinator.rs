@@ -21,6 +21,7 @@ use crate::{
 };
 
 mod ledger;
+mod morning;
 mod worker;
 
 const WORKER_FLAG: &str = "--night-coordinator-worker";
@@ -409,6 +410,10 @@ pub(crate) fn load_history() -> NightPlanHistory {
         methodology: "승인 시 원자적으로 고정된 로컬 coordinator 계획 원장을 읽습니다. 각 실제 실행의 완료 근거는 계속 Hermes, Codex, Claude 공급자 원장에서 확인합니다."
             .to_owned(),
     }
+}
+
+pub(crate) fn load_morning_brief() -> Result<crate::model::MorningBrief, String> {
+    morning::load()
 }
 
 fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {

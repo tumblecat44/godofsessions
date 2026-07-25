@@ -596,6 +596,54 @@ pub struct NightRunDetail {
     pub methodology: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MorningBriefVerdict {
+    NeedsAttention,
+    ReadyToReview,
+    InProgress,
+    NotStarted,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MorningBriefItem {
+    pub draft_id: String,
+    pub project: String,
+    pub title: String,
+    pub surface: Provider,
+    pub capacity_pool: CapacityPool,
+    pub coordinator_state: String,
+    pub task_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub verdict: MorningBriefVerdict,
+    pub verdict_reason: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub next_action: String,
+    pub provenance_verified: bool,
+    pub inspectable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MorningBrief {
+    pub generated_at: String,
+    pub plan_id: Option<String>,
+    pub approved_at: Option<String>,
+    pub deadline_at: Option<String>,
+    pub plan_state: Option<String>,
+    pub headline: String,
+    pub attention_count: usize,
+    pub review_count: usize,
+    pub in_progress_count: usize,
+    pub not_started_count: usize,
+    pub items: Vec<MorningBriefItem>,
+    pub warnings: Vec<String>,
+    pub read_only: bool,
+    pub methodology: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
