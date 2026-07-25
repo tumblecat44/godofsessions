@@ -297,6 +297,7 @@ export interface DispatchReceipt {
 }
 
 export interface NightRunRecord {
+  surface: Provider;
   task_id: string;
   title: string;
   project: string;
@@ -309,6 +310,8 @@ export interface NightRunRecord {
   run_status: string | null;
   worker_pid: number | null;
   session_id: string | null;
+  thread_id: string | null;
+  turn_id: string | null;
   outcome: string | null;
   summary: string | null;
   error: string | null;
@@ -352,7 +355,10 @@ export type NightRunVerdict =
 
 export interface NightRunDetail {
   generated_at: string;
+  surface: Provider;
   task_id: string;
+  thread_id: string | null;
+  turn_id: string | null;
   title: string;
   project: string;
   workspace: string | null;

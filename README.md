@@ -29,12 +29,12 @@ It is not:
 
 ## Current phase
 
-The Codex-dispatch M13 desktop slice is working. Recommendation and preflight
+The unified-history M14 desktop slice is working. Recommendation and preflight
 remain read-only; a provider process can start only after an exact, expiring,
 one-time approval in the desktop app. Hermes state is recovered after an app
 restart, while Codex uses the provider rollout as its idempotency and recovery
-ledger. Morning Review keeps provider completion separate from human
-verification.
+ledger. Their records appear in one Morning Review while provider completion
+remains separate from human verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -52,6 +52,7 @@ verification.
 - [Evidence-backed Morning Review M11](docs/overnight-m11.md)
 - [Codex app-server safety preflight M12](docs/overnight-m12.md)
 - [Approval-gated Codex night turns M13](docs/overnight-m13.md)
+- [Unified provider-owned night history M14](docs/overnight-m14.md)
 
 The app currently:
 
@@ -110,6 +111,8 @@ The app currently:
   budget with turn interrupt, and never retries an ambiguous start
 - recovers the accepted Codex contract from its provider rollout using the
   stable client message identity
+- combines Hermes task runs and Codex turns into one recent night history while
+  retaining each provider's native ids and evidence source
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 

@@ -1,9 +1,13 @@
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::mpsc::{self, Receiver},
-    time::{Duration, Instant},
+    sync::{
+        mpsc::{self, Receiver},
+        Mutex, OnceLock,
+    },
+    time::{Duration, Instant, SystemTime},
 };
 
 use rusqlite::OptionalExtension;
@@ -48,13 +52,32 @@ struct CodexThreadIdentity {
 
 #[derive(Debug, Clone, Default)]
 struct CodexRunMarker {
+    idempotency_key: String,
     turn_id: Option<String>,
     status: String,
     started_at: Option<String>,
     completed_at: Option<String>,
+    prompt: Option<String>,
     final_text: Option<String>,
     error: Option<String>,
+    events: Vec<CodexMarkerEvent>,
 }
+
+#[derive(Debug, Clone)]
+struct CodexMarkerEvent {
+    kind: String,
+    created_at: Option<String>,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedCodexMarkers {
+    file_size: u64,
+    modified_at: Option<SystemTime>,
+    markers: Vec<CodexRunMarker>,
+}
+
+static CODEX_HISTORY_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedCodexMarkers>>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 struct CodexDispatchEnvironment {
@@ -905,8 +928,7 @@ fn preview(
 }
 
 fn worker_command_preview() -> DispatchCommandPreview {
-    let executable = std::env::current_exe()
-        .unwrap_or_else(|_| PathBuf::from("God of Sessions"));
+    let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("God of Sessions"));
     if Path::new("/usr/bin/caffeinate").is_file() {
         DispatchCommandPreview {
             step: "start_night_worker".to_owned(),
@@ -1155,6 +1177,51 @@ fn scan_rollout_marker_with_root(
     sessions_root: &Path,
     idempotency_key: &str,
 ) -> Result<Option<CodexRunMarker>, String> {
+    Ok(scan_rollout_markers_with_root(path, sessions_root)?
+        .into_iter()
+        .find(|marker| marker.idempotency_key == idempotency_key))
+}
+
+fn scan_rollout_markers(path: &Path) -> Result<Vec<CodexRunMarker>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "홈 폴더를 찾지 못했습니다.".to_owned())?;
+    scan_rollout_markers_with_root(path, &home.join(".codex/sessions"))
+}
+
+fn scan_rollout_markers_cached(path: &Path) -> Result<Vec<CodexRunMarker>, String> {
+    let metadata = path
+        .metadata()
+        .map_err(|_| "rollout 메타데이터를 읽지 못했습니다.".to_owned())?;
+    let file_size = metadata.len();
+    let modified_at = metadata.modified().ok();
+    let cache = CODEX_HISTORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(cache) = cache.lock() {
+        if let Some(cached) = cache.get(path) {
+            if cached.file_size == file_size && cached.modified_at == modified_at {
+                return Ok(cached.markers.clone());
+            }
+        }
+    }
+    let markers = scan_rollout_markers(path)?;
+    if let Ok(mut cache) = cache.lock() {
+        if cache.len() >= 100 {
+            cache.clear();
+        }
+        cache.insert(
+            path.to_path_buf(),
+            CachedCodexMarkers {
+                file_size,
+                modified_at,
+                markers: markers.clone(),
+            },
+        );
+    }
+    Ok(markers)
+}
+
+fn scan_rollout_markers_with_root(
+    path: &Path,
+    sessions_root: &Path,
+) -> Result<Vec<CodexRunMarker>, String> {
     let canonical = path
         .canonicalize()
         .map_err(|_| "rollout 경로를 열 수 없습니다.".to_owned())?;
@@ -1164,13 +1231,15 @@ fn scan_rollout_marker_with_root(
     if !canonical.starts_with(&canonical_root) || !canonical.is_file() {
         return Err("provider sessions 경계 밖의 rollout은 읽지 않습니다.".to_owned());
     }
-    if canonical
+    let file_size = canonical
         .metadata()
         .map_err(|_| "rollout 크기를 확인할 수 없습니다.".to_owned())?
-        .len()
-        > 256 * 1024 * 1024
-    {
+        .len();
+    if file_size > 256 * 1024 * 1024 {
         return Err("rollout이 256MB를 넘어 읽지 않았습니다.".to_owned());
+    }
+    if !file_contains_marker_prefix(&canonical)? {
+        return Ok(Vec::new());
     }
 
     let file = std::fs::File::open(&canonical)
@@ -1178,7 +1247,8 @@ fn scan_rollout_marker_with_root(
     let mut reader = BufReader::new(file);
     let mut line = String::new();
     let mut current_turn = None;
-    let mut marker = None::<CodexRunMarker>;
+    let mut markers = Vec::<CodexRunMarker>::new();
+    let mut marker_by_turn = HashMap::<String, usize>::new();
     loop {
         line.clear();
         let mut limited = (&mut reader).take(2 * 1024 * 1024 + 1);
@@ -1189,7 +1259,8 @@ fn scan_rollout_marker_with_root(
             break;
         }
         if read > 2 * 1024 * 1024 {
-            return Err("rollout 단일 행이 2MB를 넘어 읽지 않았습니다.".to_owned());
+            discard_until_newline(&mut reader)?;
+            continue;
         }
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -1210,64 +1281,469 @@ fn scan_rollout_marker_with_root(
                 .pointer("/payload/turn_id")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            if let Some(turn_id) = current_turn.as_deref() {
+                if let Some((index, marker)) = markers
+                    .iter_mut()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, marker)| marker.turn_id.is_none())
+                {
+                    marker.turn_id = Some(turn_id.to_owned());
+                    marker_by_turn.insert(turn_id.to_owned(), index);
+                }
+            }
         }
-        if payload_type == Some("user_message")
-            && value.pointer("/payload/client_id").and_then(Value::as_str) == Some(idempotency_key)
+        if let Some(idempotency_key) = (payload_type == Some("user_message"))
+            .then(|| value.pointer("/payload/client_id").and_then(Value::as_str))
+            .flatten()
+            .filter(|client_id| client_id.starts_with("gos-codex-"))
         {
-            marker = Some(CodexRunMarker {
+            let prompt = value
+                .pointer("/payload/message")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .and_then(|value| bounded_verbatim(value, 12_000));
+            let marker = CodexRunMarker {
+                idempotency_key: idempotency_key.to_owned(),
                 turn_id: current_turn.clone(),
                 status: "inProgress".to_owned(),
-                started_at: timestamp,
+                started_at: timestamp.clone(),
+                prompt,
+                events: vec![CodexMarkerEvent {
+                    kind: "submitted".to_owned(),
+                    created_at: timestamp,
+                    note: Some("Night Contract가 provider turn에 기록됨".to_owned()),
+                }],
                 ..CodexRunMarker::default()
-            });
+            };
+            let index = markers.len();
+            if let Some(turn_id) = marker.turn_id.as_deref() {
+                marker_by_turn.insert(turn_id.to_owned(), index);
+            }
+            markers.push(marker);
             continue;
         }
-        let Some(found) = marker.as_mut() else {
-            continue;
-        };
         let event_turn = value
             .pointer("/payload/turn_id")
             .and_then(Value::as_str)
             .or(current_turn.as_deref());
-        let belongs_to_marker =
-            found.turn_id.as_deref().is_none() || event_turn == found.turn_id.as_deref();
-        if !belongs_to_marker {
+        let Some(index) = event_turn
+            .and_then(|turn_id| marker_by_turn.get(turn_id))
+            .copied()
+        else {
             continue;
-        }
+        };
+        let found = &mut markers[index];
         match payload_type {
             Some("agent_message") => {
-                found.final_text = bounded_text(
+                let message = bounded_text(
                     value
                         .pointer("/payload/message")
                         .and_then(Value::as_str)
                         .map(str::to_owned),
                     1_200,
                 );
+                found.final_text.clone_from(&message);
+                found.events.push(CodexMarkerEvent {
+                    kind: "agent_message".to_owned(),
+                    created_at: timestamp,
+                    note: message.map(|text| text.chars().take(400).collect()),
+                });
             }
             Some("task_complete") => {
                 found.status = "completed".to_owned();
-                found.completed_at = timestamp;
+                found.completed_at.clone_from(&timestamp);
+                found.events.push(CodexMarkerEvent {
+                    kind: "completed".to_owned(),
+                    created_at: timestamp,
+                    note: None,
+                });
             }
             Some("turn_aborted" | "task_failed") => {
                 found.status = "failed".to_owned();
-                found.completed_at = timestamp;
-                found.error = bounded_text(
+                found.completed_at.clone_from(&timestamp);
+                let message = bounded_text(
                     value
                         .pointer("/payload/message")
                         .and_then(Value::as_str)
                         .map(str::to_owned),
                     1_200,
                 );
+                found.error.clone_from(&message);
+                found.events.push(CodexMarkerEvent {
+                    kind: payload_type.unwrap_or("failed").to_owned(),
+                    created_at: timestamp,
+                    note: message.map(|text| text.chars().take(400).collect()),
+                });
             }
             _ => {}
         }
     }
-    Ok(marker)
+    Ok(markers)
+}
+
+fn file_contains_marker_prefix(path: &Path) -> Result<bool, String> {
+    const PREFIX: &[u8] = b"gos-codex-";
+    let mut file = std::fs::File::open(path)
+        .map_err(|_| "rollout을 읽기 전용으로 열지 못했습니다.".to_owned())?;
+    let mut chunk = [0_u8; 64 * 1024];
+    let mut matched = 0;
+    loop {
+        let read = file
+            .read(&mut chunk)
+            .map_err(|_| "rollout 식별자를 검색하지 못했습니다.".to_owned())?;
+        if read == 0 {
+            return Ok(false);
+        }
+        for byte in &chunk[..read] {
+            if *byte == PREFIX[matched] {
+                matched += 1;
+                if matched == PREFIX.len() {
+                    return Ok(true);
+                }
+            } else {
+                matched = usize::from(*byte == PREFIX[0]);
+            }
+        }
+    }
+}
+
+fn discard_until_newline(reader: &mut impl BufRead) -> Result<(), String> {
+    loop {
+        let buffer = reader
+            .fill_buf()
+            .map_err(|_| "큰 rollout 행을 건너뛰지 못했습니다.".to_owned())?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(buffer.len(), |index| index + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(());
+        }
+    }
 }
 
 fn bounded_text(value: Option<String>, max_chars: usize) -> Option<String> {
     let compact = value?.split_whitespace().collect::<Vec<_>>().join(" ");
     (!compact.is_empty()).then(|| compact.chars().take(max_chars).collect())
+}
+
+fn bounded_verbatim(value: String, max_chars: usize) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.chars().take(max_chars).collect())
+}
+
+#[derive(Debug)]
+struct CodexThreadRunSource {
+    thread_id: String,
+    rollout_path: PathBuf,
+    workspace: PathBuf,
+    title: String,
+}
+
+pub fn load_night_run_history() -> (Vec<crate::model::NightRunRecord>, Vec<String>) {
+    let sources = match load_thread_run_sources(25, 30) {
+        Ok(sources) => sources,
+        Err(error) => return (Vec::new(), vec![error]),
+    };
+    let mut runs = Vec::new();
+    let mut warnings = Vec::new();
+    for source in sources {
+        match scan_rollout_markers_cached(&source.rollout_path) {
+            Ok(markers) => {
+                runs.extend(
+                    markers
+                        .into_iter()
+                        .map(|marker| codex_history_record(&source, marker)),
+                );
+            }
+            Err(error) if warnings.len() < 5 => warnings.push(format!(
+                "Codex thread {}의 야간 기록을 읽지 못했습니다: {error}",
+                source.thread_id
+            )),
+            Err(_) => {}
+        }
+    }
+    runs.sort_by(|left, right| {
+        let left_time = left
+            .completed_at
+            .as_deref()
+            .or(left.started_at.as_deref())
+            .unwrap_or("");
+        let right_time = right
+            .completed_at
+            .as_deref()
+            .or(right.started_at.as_deref())
+            .unwrap_or("");
+        right_time.cmp(left_time)
+    });
+    runs.truncate(20);
+    (runs, warnings)
+}
+
+pub fn load_night_run_detail(
+    task_id: &str,
+    thread_id: &str,
+) -> Result<crate::model::NightRunDetail, String> {
+    let source = load_thread_run_source(thread_id)?.ok_or_else(|| {
+        "Codex thread index에서 이 야간 실행의 thread를 찾지 못했습니다.".to_owned()
+    })?;
+    let marker = scan_rollout_markers(&source.rollout_path)?
+        .into_iter()
+        .find(|marker| marker_task_id(marker) == task_id)
+        .ok_or_else(|| {
+            "Codex provider rollout에서 이 God of Sessions 야간 turn을 찾지 못했습니다.".to_owned()
+        })?;
+    Ok(codex_history_detail(&source, marker))
+}
+
+fn load_thread_run_source(thread_id: &str) -> Result<Option<CodexThreadRunSource>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "홈 폴더를 찾지 못했습니다.".to_owned())?;
+    let state_path = home.join(".codex/state_5.sqlite");
+    if !state_path.is_file() {
+        return Ok(None);
+    }
+    let connection = open_read_only_sqlite(&state_path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "SELECT id, rollout_path, cwd, title FROM threads WHERE id = ? LIMIT 1",
+            [thread_id],
+            |row| {
+                Ok(CodexThreadRunSource {
+                    thread_id: row.get(0)?,
+                    rollout_path: PathBuf::from(row.get::<_, String>(1)?),
+                    workspace: PathBuf::from(row.get::<_, String>(2)?),
+                    title: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+fn load_thread_run_sources(
+    limit: usize,
+    max_age_days: i64,
+) -> Result<Vec<CodexThreadRunSource>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "홈 폴더를 찾지 못했습니다.".to_owned())?;
+    let state_path = home.join(".codex/state_5.sqlite");
+    if !state_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let connection = open_read_only_sqlite(&state_path).map_err(|error| error.to_string())?;
+    let cutoff = chrono::Utc::now().timestamp() - max_age_days * 86_400;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, rollout_path, cwd, title
+            FROM threads
+            WHERE updated_at >= ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let sources = statement
+        .query_map(rusqlite::params![cutoff, limit as i64], |row| {
+            Ok(CodexThreadRunSource {
+                thread_id: row.get(0)?,
+                rollout_path: PathBuf::from(row.get::<_, String>(1)?),
+                workspace: PathBuf::from(row.get::<_, String>(2)?),
+                title: row.get(3)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(sources)
+}
+
+fn codex_history_record(
+    source: &CodexThreadRunSource,
+    marker: CodexRunMarker,
+) -> crate::model::NightRunRecord {
+    let title = marker
+        .prompt
+        .as_deref()
+        .and_then(night_goal_title)
+        .unwrap_or_else(|| source.title.clone());
+    let project = source
+        .workspace
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("이름 없는 프로젝트")
+        .to_owned();
+    let status = match marker.status.as_str() {
+        "completed" => "done",
+        "failed" => "blocked",
+        _ => "running",
+    }
+    .to_owned();
+    crate::model::NightRunRecord {
+        surface: Provider::Codex,
+        task_id: marker_task_id(&marker).to_owned(),
+        title,
+        project,
+        workspace: Some(source.workspace.display().to_string()),
+        status,
+        created_at: marker.started_at.clone(),
+        started_at: marker.started_at,
+        completed_at: marker.completed_at,
+        run_id: None,
+        run_status: Some(marker.status.clone()),
+        worker_pid: None,
+        session_id: Some(source.thread_id.clone()),
+        thread_id: Some(source.thread_id.clone()),
+        turn_id: marker.turn_id,
+        outcome: match marker.status.as_str() {
+            "completed" => Some("completed".to_owned()),
+            "failed" => Some("blocked".to_owned()),
+            _ => None,
+        },
+        summary: marker.final_text,
+        error: marker.error,
+        idempotency_key: marker.idempotency_key,
+    }
+}
+
+fn codex_history_detail(
+    source: &CodexThreadRunSource,
+    marker: CodexRunMarker,
+) -> crate::model::NightRunDetail {
+    let title = marker
+        .prompt
+        .as_deref()
+        .and_then(night_goal_title)
+        .unwrap_or_else(|| source.title.clone());
+    let project = source
+        .workspace
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("이름 없는 프로젝트")
+        .to_owned();
+    let duration_seconds = marker
+        .started_at
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .zip(
+            marker
+                .completed_at
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()),
+        )
+        .map(|(start, end)| (end - start).num_seconds().max(0));
+    let outcome = match marker.status.as_str() {
+        "completed" => Some("completed".to_owned()),
+        "failed" => Some("blocked".to_owned()),
+        _ => None,
+    };
+    let attempts = vec![crate::model::NightRunAttempt {
+        run_id: 1,
+        profile: Some("Codex app-server".to_owned()),
+        status: marker.status.clone(),
+        outcome,
+        started_at: marker.started_at.clone(),
+        ended_at: marker.completed_at.clone(),
+        duration_seconds,
+        worker_pid: None,
+        summary: marker.final_text.clone(),
+        error: marker.error.clone(),
+    }];
+    let events = marker
+        .events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| crate::model::NightRunEvent {
+            event_id: index as i64 + 1,
+            run_id: Some(1),
+            kind: event.kind.clone(),
+            created_at: event.created_at.clone(),
+            note: event.note.clone(),
+        })
+        .collect();
+    let (verdict, verdict_reason) = codex_verdict(&marker);
+    let warnings = marker
+        .prompt
+        .is_none()
+        .then(|| "provider rollout에서 원본 Night Contract 본문을 복구하지 못했습니다.".to_owned())
+        .into_iter()
+        .collect();
+    crate::model::NightRunDetail {
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        surface: Provider::Codex,
+        task_id: marker_task_id(&marker).to_owned(),
+        thread_id: Some(source.thread_id.clone()),
+        turn_id: marker.turn_id,
+        title,
+        project,
+        workspace: Some(source.workspace.display().to_string()),
+        task_status: marker.status,
+        body: marker.prompt,
+        assignee: None,
+        max_runtime_seconds: None,
+        goal_mode: false,
+        goal_max_turns: None,
+        max_retries: None,
+        idempotency_key: marker.idempotency_key,
+        provenance_verified: true,
+        verdict,
+        verdict_reason,
+        attempts,
+        events,
+        warnings,
+        read_only: true,
+        methodology: "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. clientUserMessageId가 God of Sessions 계약 출처를 증명하며 완료 이벤트는 결과의 정확성까지 자동 증명하지 않습니다."
+            .to_owned(),
+    }
+}
+
+fn marker_task_id(marker: &CodexRunMarker) -> &str {
+    marker.turn_id.as_deref().unwrap_or(&marker.idempotency_key)
+}
+
+fn night_goal_title(prompt: &str) -> Option<String> {
+    let mut lines = prompt
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let first = lines.next()?;
+    let title = if first.eq_ignore_ascii_case("Overnight goal") {
+        lines.next()?
+    } else {
+        first
+    };
+    Some(title.chars().take(240).collect())
+}
+
+fn codex_verdict(marker: &CodexRunMarker) -> (crate::model::NightRunVerdict, String) {
+    match marker.status.as_str() {
+        "inProgress" => (
+            crate::model::NightRunVerdict::InProgress,
+            "Codex provider rollout에 아직 완료되지 않은 turn으로 기록되어 있습니다."
+                .to_owned(),
+        ),
+        "completed" if marker.final_text.is_some() => (
+            crate::model::NightRunVerdict::ReadyToReview,
+            "Codex 완료 수명주기와 최종 응답이 모두 있습니다. 실제 변경과 검증은 사람이 확인해야 합니다."
+                .to_owned(),
+        ),
+        "completed" => (
+            crate::model::NightRunVerdict::NeedsAttention,
+            "Codex turn은 완료됐지만 최종 인계 응답을 복구하지 못했습니다.".to_owned(),
+        ),
+        "failed" => (
+            crate::model::NightRunVerdict::NeedsAttention,
+            "Codex turn이 중단 또는 실패로 끝나 원본 오류와 작업공간 확인이 필요합니다."
+                .to_owned(),
+        ),
+        _ => (
+            crate::model::NightRunVerdict::Uncertain,
+            "알려진 Codex turn 상태와 일치하지 않아 provider rollout 확인이 필요합니다."
+                .to_owned(),
+        ),
+    }
 }
 
 fn probe_protocol(binary: &Path) -> CodexProtocolProbe {
@@ -1549,11 +2025,20 @@ mod tests {
             .expect("marker");
 
         assert_eq!(marker.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(marker.idempotency_key, "gos-codex-exact");
         assert_eq!(marker.status, "completed");
         assert_eq!(marker.started_at.as_deref(), Some("2026-07-24T01:00:01Z"));
         assert_eq!(marker.completed_at.as_deref(), Some("2026-07-24T01:03:00Z"));
         assert_eq!(marker.final_text.as_deref(), Some("tests passed"));
         assert!(marker.error.is_none());
+        assert_eq!(
+            marker
+                .events
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["submitted", "agent_message", "completed"]
+        );
         assert!(
             scan_rollout_marker_with_root(&rollout, &sessions, "gos-codex-other")
                 .expect("scan")
@@ -1573,6 +2058,42 @@ mod tests {
             .expect_err("outside path");
 
         assert!(error.contains("경계 밖"));
+    }
+
+    #[test]
+    fn marker_prefilter_handles_chunk_boundaries() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let rollout = directory.path().join("rollout.jsonl");
+        let mut bytes = vec![b'x'; 64 * 1024 - 3];
+        bytes.extend_from_slice(b"gos-codex-exact");
+        std::fs::write(&rollout, bytes).expect("rollout");
+
+        assert!(file_contains_marker_prefix(&rollout).expect("prefix"));
+    }
+
+    #[test]
+    fn oversized_unrelated_records_do_not_hide_a_bounded_night_contract() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let sessions = directory.path().join("sessions");
+        std::fs::create_dir_all(&sessions).expect("sessions");
+        let rollout = sessions.join("rollout.jsonl");
+        let mut bytes = vec![b'x'; 2 * 1024 * 1024 + 32];
+        bytes.extend_from_slice(
+            concat!(
+                "\n{\"timestamp\":\"2026-07-24T01:00:00Z\",\"type\":\"turn_context\",",
+                "\"payload\":{\"turn_id\":\"turn-1\"}}\n",
+                "{\"timestamp\":\"2026-07-24T01:00:01Z\",\"type\":\"event_msg\",",
+                "\"payload\":{\"type\":\"user_message\",\"client_id\":\"gos-codex-exact\"}}\n",
+            )
+            .as_bytes(),
+        );
+        std::fs::write(&rollout, bytes).expect("rollout");
+
+        let marker = scan_rollout_marker_with_root(&rollout, &sessions, "gos-codex-exact")
+            .expect("scan")
+            .expect("marker");
+
+        assert_eq!(marker.turn_id.as_deref(), Some("turn-1"));
     }
 
     #[test]
@@ -1628,6 +2149,48 @@ mod tests {
     }
 
     #[test]
+    fn codex_marker_becomes_provider_neutral_history_and_morning_review() {
+        let source = CodexThreadRunSource {
+            thread_id: "thread-1".to_owned(),
+            rollout_path: PathBuf::from("/provider/rollout.jsonl"),
+            workspace: PathBuf::from("/work/godofsessions"),
+            title: "fallback title".to_owned(),
+        };
+        let marker = CodexRunMarker {
+            idempotency_key: "gos-codex-exact".to_owned(),
+            turn_id: Some("turn-1".to_owned()),
+            status: "completed".to_owned(),
+            started_at: Some("2026-07-24T01:00:00Z".to_owned()),
+            completed_at: Some("2026-07-24T02:00:00Z".to_owned()),
+            prompt: Some(
+                "Overnight goal\n통합 아침 리뷰 완성\n\nOutcome\n검증 가능한 화면".to_owned(),
+            ),
+            final_text: Some("all tests passed".to_owned()),
+            error: None,
+            events: vec![CodexMarkerEvent {
+                kind: "completed".to_owned(),
+                created_at: Some("2026-07-24T02:00:00Z".to_owned()),
+                note: None,
+            }],
+        };
+
+        let record = codex_history_record(&source, marker.clone());
+        let detail = codex_history_detail(&source, marker);
+
+        assert_eq!(record.surface, Provider::Codex);
+        assert_eq!(record.task_id, "turn-1");
+        assert_eq!(record.title, "통합 아침 리뷰 완성");
+        assert_eq!(record.status, "done");
+        assert_eq!(record.thread_id.as_deref(), Some("thread-1"));
+        assert_eq!(record.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(detail.surface, Provider::Codex);
+        assert_eq!(detail.verdict, crate::model::NightRunVerdict::ReadyToReview);
+        assert_eq!(detail.attempts[0].duration_seconds, Some(3_600));
+        assert_eq!(detail.events.len(), 1);
+        assert!(detail.provenance_verified);
+    }
+
+    #[test]
     fn active_or_cross_workspace_thread_fails_closed() {
         let directory = tempfile::tempdir().expect("tempdir");
         let workspace = directory.path().join("repo");
@@ -1673,5 +2236,33 @@ mod tests {
             .user_agent
             .as_deref()
             .is_some_and(|value| value.to_ascii_lowercase().contains("codex")));
+    }
+
+    #[test]
+    #[ignore = "reads recent installed Codex rollout metadata"]
+    fn local_codex_night_history_is_bounded_and_read_only() {
+        let started = Instant::now();
+        let (runs, warnings) = load_night_run_history();
+        let first_elapsed = started.elapsed();
+        let cached_started = Instant::now();
+        let (cached_runs, cached_warnings) = load_night_run_history();
+        let cached_elapsed = cached_started.elapsed();
+
+        eprintln!(
+            "runs={} warnings={warnings:?} first_ms={} cached_ms={}",
+            runs.len(),
+            first_elapsed.as_millis(),
+            cached_elapsed.as_millis()
+        );
+        assert!(first_elapsed < Duration::from_secs(10));
+        assert!(cached_elapsed < Duration::from_secs(1));
+        assert_eq!(cached_runs.len(), runs.len());
+        assert_eq!(cached_warnings.len(), warnings.len());
+        assert!(runs.len() <= 20);
+        assert!(runs.iter().all(|run| {
+            run.surface == Provider::Codex
+                && run.idempotency_key.starts_with("gos-codex-")
+                && run.thread_id.is_some()
+        }));
     }
 }

@@ -204,23 +204,28 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
 
   if (history.runs.length === 0 && history.warnings.length === 0) return null;
 
-  const inspectRun = async (taskId: string) => {
+  const inspectRun = async (run: NightRunRecord) => {
+    const runKey = `${run.surface}:${run.task_id}`;
     const request = detailRequest.current + 1;
     detailRequest.current = request;
-    if (selectedTaskId === taskId) {
+    if (selectedTaskId === runKey) {
       setSelectedTaskId(null);
       setDetail(null);
       setDetailError(null);
       return;
     }
-    setSelectedTaskId(taskId);
+    setSelectedTaskId(runKey);
     setDetail(null);
     setDetailError(null);
     setDetailLoading(true);
     try {
       const next = isTauri()
-        ? await invoke<NightRunDetail>("load_night_run_detail", { taskId })
-        : previewNightRunDetail(taskId);
+        ? await invoke<NightRunDetail>("load_night_run_detail", {
+            taskId: run.task_id,
+            surface: run.surface,
+            threadId: run.thread_id,
+          })
+        : previewNightRunDetail(run.task_id);
       if (detailRequest.current !== request) return;
       setDetail(next);
     } catch (error) {
@@ -236,10 +241,10 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
       <header>
         <div>
           <span className="eyebrow">DURABLE NIGHT RUNS</span>
-          <h2>Hermes에서 다시 읽은 야간 실행</h2>
+          <h2>공급자 원장에서 다시 읽은 야간 실행</h2>
           <p>
-            앱을 껐다 켜도 전용 보드와 task_runs가 시작·완료 상태의
-            원본입니다.
+            앱을 껐다 켜도 Hermes 보드와 Codex rollout이 시작·완료
+            상태의 원본입니다.
           </p>
         </div>
         <span className="night-history-count">
@@ -254,19 +259,21 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
             const state = nightRunStatus(run);
             const timestamp =
               run.completed_at || run.started_at || run.created_at;
+            const runKey = `${run.surface}:${run.task_id}`;
             return (
               <article
                 className={`night-run-card ${
-                  selectedTaskId === run.task_id ? "is-selected" : ""
+                  selectedTaskId === runKey ? "is-selected" : ""
                 }`}
-                key={run.task_id}
+                key={runKey}
               >
                 <button
                   type="button"
-                  onClick={() => void inspectRun(run.task_id)}
-                  aria-expanded={selectedTaskId === run.task_id}
+                  onClick={() => void inspectRun(run)}
+                  aria-expanded={selectedTaskId === runKey}
                 >
                   <header>
+                    <ProviderMark provider={run.surface} />
                     <span
                       className={`night-run-state night-run-state--${state.tone}`}
                     >
@@ -295,7 +302,11 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
                   <footer>
                     <code>{run.task_id}</code>
                     <span>
-                      {run.run_id ? `run ${run.run_id}` : "run 대기"}
+                      {run.run_id
+                        ? `run ${run.run_id}`
+                        : run.turn_id
+                          ? "turn 연결"
+                          : "run 대기"}
                       {run.session_id ? " · session 연결" : ""}
                       <ChevronRight size={10} />
                     </span>
@@ -333,6 +344,11 @@ const verdictLabels = {
 } as const;
 
 const eventLabels: Record<string, string> = {
+  submitted: "계약 전달",
+  agent_message: "Codex 인계 응답",
+  task_complete: "Codex turn 완료",
+  turn_aborted: "Codex turn 중단",
+  task_failed: "Codex turn 실패",
   created: "작업 생성",
   claimed: "실행 권한 획득",
   spawned: "작업자 시작",
@@ -367,7 +383,7 @@ function NightRunEvidence({
     return (
       <div className="night-evidence-loading" aria-live="polite">
         <RefreshCw className="is-spinning" size={13} />
-        Hermes 실행 원장을 읽는 중
+        공급자 실행 원장을 읽는 중
       </div>
     );
   }
@@ -403,7 +419,7 @@ function NightRunEvidence({
         </span>
         <span>
           <Database size={11} />
-          Hermes 원장 · 읽기 전용
+          {providerNames[detail.surface]} 원장 · 읽기 전용
         </span>
         <small>완료 기록은 결과의 정확성을 대신 증명하지 않습니다.</small>
       </div>
@@ -413,10 +429,13 @@ function NightRunEvidence({
           <div className="night-evidence-heading">
             <span>맡긴 계약</span>
             <small>
-              goal {detail.goal_mode ? "loop" : "single"} ·{" "}
+              {detail.surface === "hermes"
+                ? `goal ${detail.goal_mode ? "loop" : "single"}`
+                : "structured turn"}{" "}
+              ·{" "}
               {detail.max_runtime_seconds
                 ? durationLabel(detail.max_runtime_seconds)
-                : "시간 제한 없음"}
+                : "provider에 시간 예산 미기록"}
             </small>
           </div>
           <pre>{detail.body || "저장된 Night Contract가 없습니다."}</pre>

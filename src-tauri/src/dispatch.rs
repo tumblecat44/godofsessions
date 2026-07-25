@@ -347,7 +347,7 @@ fn hermes_board_db() -> PathBuf {
 
 pub fn load_night_run_history() -> NightRunHistory {
     let path = hermes_board_db();
-    let (runs, warnings) = if path.is_file() {
+    let (mut runs, mut warnings) = if path.is_file() {
         match load_night_runs_from_path(&path) {
             Ok(runs) => (runs, Vec::new()),
             Err(error) => (
@@ -358,14 +358,32 @@ pub fn load_night_run_history() -> NightRunHistory {
     } else {
         (Vec::new(), Vec::new())
     };
+    let (mut codex_runs, codex_warnings) = crate::codex_dispatch::load_night_run_history();
+    runs.append(&mut codex_runs);
+    warnings.extend(codex_warnings);
+    runs.sort_by(|left, right| {
+        let left_time = left
+            .completed_at
+            .as_deref()
+            .or(left.started_at.as_deref())
+            .or(left.created_at.as_deref())
+            .unwrap_or("");
+        let right_time = right
+            .completed_at
+            .as_deref()
+            .or(right.started_at.as_deref())
+            .or(right.created_at.as_deref())
+            .unwrap_or("");
+        right_time.cmp(left_time)
+    });
+    runs.truncate(20);
     NightRunHistory {
         generated_at: Utc::now().to_rfc3339(),
         runs,
         warnings,
         read_only: true,
-        methodology:
-            "God of Sessions 전용 Hermes 보드에서 앱이 만든 task와 최신 task_run을 읽기 전용으로 다시 구성했습니다."
-                .to_owned(),
+        methodology: "Hermes 전용 보드의 task/task_run과 Codex provider rollout의 clientUserMessageId turn을 읽기 전용으로 결합했습니다."
+            .to_owned(),
     }
 }
 
@@ -406,6 +424,7 @@ fn load_night_runs_from_path(path: &Path) -> Result<Vec<NightRunRecord>, String>
                 .unwrap_or("이름 없는 프로젝트")
                 .to_owned();
             Ok(NightRunRecord {
+                surface: Provider::Hermes,
                 task_id: row.get(0)?,
                 title: row.get(1)?,
                 project,
@@ -424,6 +443,8 @@ fn load_night_runs_from_path(path: &Path) -> Result<Vec<NightRunRecord>, String>
                 run_status: row.get(8)?,
                 worker_pid: row.get(9)?,
                 session_id: row.get(10)?,
+                thread_id: None,
+                turn_id: None,
                 outcome: bounded_receipt_text(row.get(11)?),
                 summary: bounded_receipt_text(row.get(12)?),
                 error: bounded_receipt_text(row.get(13)?),
@@ -567,7 +588,10 @@ fn load_night_run_detail_from_path(path: &Path, task_id: &str) -> Result<NightRu
         .to_owned();
     Ok(NightRunDetail {
         generated_at: Utc::now().to_rfc3339(),
+        surface: Provider::Hermes,
         task_id: task.0,
+        thread_id: None,
+        turn_id: None,
         title: task.1,
         project,
         workspace: task.2,

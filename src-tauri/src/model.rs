@@ -405,6 +405,7 @@ pub struct DispatchReceipt {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NightRunRecord {
+    pub surface: Provider,
     pub task_id: String,
     pub title: String,
     pub project: String,
@@ -417,6 +418,8 @@ pub struct NightRunRecord {
     pub run_status: Option<String>,
     pub worker_pid: Option<i64>,
     pub session_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
     pub outcome: Option<String>,
     pub summary: Option<String>,
     pub error: Option<String>,
@@ -467,7 +470,10 @@ pub enum NightRunVerdict {
 #[derive(Debug, Clone, Serialize)]
 pub struct NightRunDetail {
     pub generated_at: String,
+    pub surface: Provider,
     pub task_id: String,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
     pub title: String,
     pub project: String,
     pub workspace: Option<String>,
