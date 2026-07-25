@@ -74,7 +74,7 @@ pub fn build_preflights(
     drafts: &[NightRunDraft],
     inventory: &ExecutionRouteInventory,
 ) -> Vec<DispatchPreflight> {
-    drafts
+    let mut preflights = drafts
         .iter()
         .filter_map(|draft| {
             let route = inventory
@@ -86,7 +86,15 @@ pub fn build_preflights(
                 preview_hermes(draft, route, &environment)
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    preflights.extend(crate::codex_dispatch::build_preflights(drafts, inventory));
+    preflights.sort_by_key(|preflight| {
+        drafts
+            .iter()
+            .position(|draft| draft.id == preflight.draft_id)
+            .unwrap_or(usize::MAX)
+    });
+    preflights
 }
 
 pub fn preview_hermes(
@@ -200,12 +208,17 @@ pub fn preview_hermes(
         } else {
             DispatchPreflightState::ReadyForApproval
         },
+        surface: Provider::Hermes,
         adapter: "Hermes Kanban goal worker".to_owned(),
-        board: BOARD.to_owned(),
-        assignee: ASSIGNEE.to_owned(),
+        scope_label: "격리 보드".to_owned(),
+        scope_value: BOARD.to_owned(),
+        executor_label: "작업자".to_owned(),
+        executor_value: ASSIGNEE.to_owned(),
+        transport: "직접 argv".to_owned(),
         idempotency_key,
         checks,
         commands,
+        protocol_requests: Vec::new(),
         expected_receipt:
             "create JSON의 task id + dispatch spawned task id + task_events/task_runs의 pid/session"
                 .to_owned(),
@@ -314,8 +327,12 @@ fn validate_approved_preflight(
     }
     if approved.draft_id != current.draft_id
         || approved.idempotency_key != current.idempotency_key
-        || approved.board != current.board
-        || approved.assignee != current.assignee
+        || approved.surface != current.surface
+        || approved.scope_label != current.scope_label
+        || approved.scope_value != current.scope_value
+        || approved.executor_label != current.executor_label
+        || approved.executor_value != current.executor_value
+        || approved.transport != current.transport
     {
         return Err("승인한 계약과 실행 직전 계약이 달라졌습니다.".to_owned());
     }
@@ -779,7 +796,7 @@ fn receipt(
         draft_id: approved.draft.id.clone(),
         project: approved.draft.project.clone(),
         adapter: approved.preflight.adapter.clone(),
-        board: approved.preflight.board.clone(),
+        board: approved.preflight.scope_value.clone(),
         task_id: task.id.clone(),
         state,
         task_status: task.status.clone(),
@@ -1151,7 +1168,8 @@ mod tests {
         );
 
         assert_eq!(preview.state, DispatchPreflightState::ReadyForApproval);
-        assert_eq!(preview.board, "god-of-sessions-night");
+        assert_eq!(preview.scope_value, "god-of-sessions-night");
+        assert_eq!(preview.surface, Provider::Hermes);
         assert!(!preview.execution_enabled);
         assert!(preview.read_only);
         assert_eq!(preview.commands.len(), 3);

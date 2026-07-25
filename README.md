@@ -29,11 +29,13 @@ It is not:
 
 ## Current phase
 
-The evidence-backed Hermes M11 desktop slice is working. Recommendation and
+The Codex-preflight M12 desktop slice is working. Recommendation and
 preflight remain read-only; a provider process can start only after an exact,
 expiring, one-time approval in the desktop app, and its state is recovered
 from Hermes after an app restart. Morning Review keeps provider completion
-separate from human verification.
+separate from human verification. Codex now has a live, version-matched
+protocol preflight but remains execution-blocked until turn monitoring and
+recovery are wired.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -49,6 +51,7 @@ separate from human verification.
 - [Hermes one-pass dispatch and receipt M9](docs/overnight-m9.md)
 - [Durable Night Run recovery M10](docs/overnight-m10.md)
 - [Evidence-backed Morning Review M11](docs/overnight-m11.md)
+- [Codex app-server safety preflight M12](docs/overnight-m12.md)
 
 The app currently:
 
@@ -94,6 +97,15 @@ The app currently:
 - labels provider-completed work as ready to review, never as automatically
   verified; missing handoffs, failures, blocks, and ambiguous ledgers remain
   visible
+- probes the installed ChatGPT app's Codex app-server with the stable
+  initialize and model-list flow, without opening a thread
+- checks a proposed Codex resume against the provider-owned thread id, cwd,
+  archive flag, and recent activity before showing its exact JSON-RPC
+  transaction
+- fixes Codex turns to one workspace-write root, network off, no approval
+  escalation, no external environment, and a stable client message identity
+- keeps Codex execution blocked until the app can consume one exact approval,
+  follow item/turn events, and recover an ambiguous start
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 

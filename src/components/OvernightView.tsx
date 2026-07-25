@@ -648,7 +648,7 @@ function CandidateCard({
         <details className="dispatch-preflight">
           <summary>
             <span>
-              <strong>Hermes 전달 사전점검</strong>
+              <strong>{providerNames[preflight.surface]} 전달 사전점검</strong>
               <small>{preflight.adapter}</small>
             </span>
             <em
@@ -671,7 +671,8 @@ function CandidateCard({
             </span>
             <strong>실행 꺼짐</strong>
             <small>
-              기본 Hermes 보드 대신 <code>{preflight.board}</code>만 사용
+              {preflight.scope_label}{" "}
+              <code>{preflight.scope_value}</code>
             </small>
           </div>
 
@@ -698,7 +699,8 @@ function CandidateCard({
 
           <div className="preflight-identity">
             <span>
-              작업자 <code>{preflight.assignee}</code>
+              {preflight.executor_label}{" "}
+              <code>{preflight.executor_value}</code>
             </span>
             <span>
               중복 방지 <code>{preflight.idempotency_key}</code>
@@ -708,7 +710,7 @@ function CandidateCard({
           <div className="preflight-commands">
             <header>
               <span>승인 후 실행될 단계</span>
-              <small>셸을 거치지 않고 인자를 그대로 전달</small>
+              <small>{preflight.transport}</small>
             </header>
             {preflight.commands.map((command, index) => (
               <details key={command.step}>
@@ -723,6 +725,22 @@ function CandidateCard({
                       /\s/.test(argument) ? JSON.stringify(argument) : argument,
                     )
                     .join(" ")}
+                </pre>
+              </details>
+            ))}
+            {preflight.protocol_requests.map((request, index) => (
+              <details key={request.step}>
+                <summary>
+                  <span>{preflight.commands.length + index + 1}</span>
+                  <strong>{request.summary}</strong>
+                  <small>JSON-RPC</small>
+                </summary>
+                <pre>
+                  {JSON.stringify(
+                    { method: request.method, params: request.params },
+                    null,
+                    2,
+                  )}
                 </pre>
               </details>
             ))}

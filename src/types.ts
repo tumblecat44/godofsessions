@@ -231,15 +231,28 @@ export interface DispatchCommandPreview {
   summary: string;
 }
 
+export interface DispatchProtocolPreview {
+  step: string;
+  method: string;
+  params: unknown;
+  mutates_local_state: boolean;
+  summary: string;
+}
+
 export interface DispatchPreflight {
   draft_id: string;
   state: DispatchPreflightState;
+  surface: Provider;
   adapter: string;
-  board: string;
-  assignee: string;
+  scope_label: string;
+  scope_value: string;
+  executor_label: string;
+  executor_value: string;
+  transport: string;
   idempotency_key: string;
   checks: PreflightCheck[];
   commands: DispatchCommandPreview[];
+  protocol_requests: DispatchProtocolPreview[];
   expected_receipt: string;
   read_only: boolean;
   execution_enabled: boolean;

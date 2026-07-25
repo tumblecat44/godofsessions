@@ -332,15 +332,29 @@ pub struct DispatchCommandPreview {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DispatchProtocolPreview {
+    pub step: String,
+    pub method: String,
+    pub params: serde_json::Value,
+    pub mutates_local_state: bool,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DispatchPreflight {
     pub draft_id: String,
     pub state: DispatchPreflightState,
+    pub surface: Provider,
     pub adapter: String,
-    pub board: String,
-    pub assignee: String,
+    pub scope_label: String,
+    pub scope_value: String,
+    pub executor_label: String,
+    pub executor_value: String,
+    pub transport: String,
     pub idempotency_key: String,
     pub checks: Vec<PreflightCheck>,
     pub commands: Vec<DispatchCommandPreview>,
+    pub protocol_requests: Vec<DispatchProtocolPreview>,
     pub expected_receipt: String,
     pub read_only: bool,
     pub execution_enabled: bool,

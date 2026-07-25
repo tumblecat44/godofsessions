@@ -1,4 +1,5 @@
 mod approval;
+mod codex_dispatch;
 mod connectors;
 mod context_brief;
 mod control_board;
@@ -348,10 +349,19 @@ mod live_tests {
                 .sum::<usize>(),
             plan.candidates.len()
         );
+        assert!(plan
+            .dispatch_preflights
+            .iter()
+            .all(|preflight| { preflight.read_only && !preflight.execution_enabled }));
         assert!(plan.dispatch_preflights.iter().all(|preflight| {
-            preflight.read_only
-                && !preflight.execution_enabled
-                && preflight.board == "god-of-sessions-night"
+            match preflight.surface {
+                Provider::Hermes => preflight.scope_value == "god-of-sessions-night",
+                Provider::Codex => preflight
+                    .protocol_requests
+                    .iter()
+                    .any(|request| request.method == "turn/start"),
+                _ => false,
+            }
         }));
         assert!(plan
             .candidates

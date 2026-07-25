@@ -85,6 +85,12 @@ conditions, idempotency identity, and expected receipt for a proposed
 Dispatch. Passing preflight means ready for approval, not approved.
 _Avoid_: Dispatch, dry run, approval
 
+**Protocol Transaction**:
+The ordered provider-native requests that implement a Dispatch, shown with
+their exact method names and bounded parameters before approval. For Codex this
+is app-server JSON-RPC; for Hermes the equivalent is a direct argument vector.
+_Avoid_: Shell command, prompt, implementation detail
+
 **Approval Challenge**:
 A short-lived, single-use request for the operator to authorize one exact Run
 Draft and Execution Route. It is invalidated by plan changes and consumed

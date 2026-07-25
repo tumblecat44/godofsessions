@@ -806,11 +806,154 @@ export const previewOvernightPlan: OvernightPlan = {
   },
   dispatch_preflights: [
     {
+      draft_id: "night:1:godofsessions:codex:native",
+      state: "blocked",
+      surface: "codex",
+      adapter: "Codex app-server v2",
+      scope_label: "writable root",
+      scope_value: "/Users/you/projects/godofsessions",
+      executor_label: "기존 thread",
+      executor_value: "co1",
+      transport: "stdio JSONL · shell 없음 · networkAccess false",
+      idempotency_key: "gos-codex-89ca72cc88a44f313b17b294",
+      checks: [
+        {
+          key: "route",
+          level: "pass",
+          label: "Codex 실행 경로",
+          message:
+            "Codex 구독, 로컬 로그인, app-server 경로가 준비되어 있습니다.",
+        },
+        {
+          key: "binary",
+          level: "pass",
+          label: "앱 번들 실행기",
+          message: "ChatGPT 앱 안의 실제 Codex 실행기를 사용합니다.",
+        },
+        {
+          key: "auth",
+          level: "pass",
+          label: "Codex 로그인",
+          message:
+            "로컬 Codex 로그인 상태를 찾았습니다. 자격 증명 값은 읽지 않습니다.",
+        },
+        {
+          key: "protocol",
+          level: "pass",
+          label: "app-server 호환성",
+          message: "codex_cli_rs/0.145 · 사용 가능한 모델 8개",
+        },
+        {
+          key: "workspace",
+          level: "pass",
+          label: "작업공간 경계",
+          message:
+            "정규화된 Git 작업공간 한 곳만 writable root로 사용합니다.",
+        },
+        {
+          key: "thread",
+          level: "pass",
+          label: "Codex thread",
+          message:
+            "기존 thread가 같은 작업공간에 있고 현재 실행 중이 아니며 보관되지 않았습니다.",
+        },
+        {
+          key: "adapter_wiring",
+          level: "block",
+          label: "실행 연결",
+          message:
+            "프로토콜 계약은 검증됐지만 승인 소비·turn 감시·실패 영수증 연결 전이므로 아직 실행하지 않습니다.",
+        },
+      ],
+      commands: [
+        {
+          step: "start_app_server",
+          program: "/Applications/ChatGPT.app/Contents/Resources/codex",
+          arguments: ["app-server", "--listen", "stdio://"],
+          mutates_local_state: false,
+          summary: "로컬 Codex app-server 전용 프로세스 시작",
+        },
+      ],
+      protocol_requests: [
+        {
+          step: "initialize",
+          method: "initialize",
+          params: {
+            clientInfo: {
+              name: "god-of-sessions",
+              title: "God of Sessions",
+              version: "0.1.0",
+            },
+            capabilities: {},
+          },
+          mutates_local_state: false,
+          summary: "안정 API로 클라이언트 초기화",
+        },
+        {
+          step: "initialized",
+          method: "initialized",
+          params: {},
+          mutates_local_state: false,
+          summary: "초기화 완료 알림",
+        },
+        {
+          step: "open_thread",
+          method: "thread/resume",
+          params: {
+            threadId: "co1",
+            cwd: "/Users/you/projects/godofsessions",
+            approvalPolicy: "never",
+            sandbox: "workspace-write",
+            runtimeWorkspaceRoots: ["/Users/you/projects/godofsessions"],
+          },
+          mutates_local_state: true,
+          summary: "승인한 기존 thread를 같은 cwd로 재개",
+        },
+        {
+          step: "start_turn",
+          method: "turn/start",
+          params: {
+            threadId: "co1",
+            clientUserMessageId: "gos-codex-89ca72cc88a44f313b17b294",
+            input: [
+              {
+                type: "text",
+                text: "Overnight goal\nOvernight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행",
+              },
+            ],
+            cwd: "/Users/you/projects/godofsessions",
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+            sandboxPolicy: {
+              type: "workspaceWrite",
+              writableRoots: ["/Users/you/projects/godofsessions"],
+              networkAccess: false,
+              excludeSlashTmp: true,
+              excludeTmpdirEnvVar: true,
+            },
+            runtimeWorkspaceRoots: ["/Users/you/projects/godofsessions"],
+            environments: [],
+          },
+          mutates_local_state: true,
+          summary:
+            "외부 승인·네트워크 없이 정확한 Night Contract turn 시작",
+        },
+      ],
+      expected_receipt:
+        "thread/resume의 threadId + turn/start의 turnId + item 이벤트 + turn/completed 최종 상태",
+      read_only: true,
+      execution_enabled: false,
+    },
+    {
       draft_id: "night:2:agent-research:hermes:default",
       state: "ready_for_approval",
+      surface: "hermes",
       adapter: "Hermes Kanban goal worker",
-      board: "god-of-sessions-night",
-      assignee: "default",
+      scope_label: "격리 보드",
+      scope_value: "god-of-sessions-night",
+      executor_label: "작업자",
+      executor_value: "default",
+      transport: "셸을 거치지 않는 직접 argv",
       idempotency_key: "gos-night-1ec42a9d4fb8e3371b40",
       checks: [
         {
@@ -920,6 +1063,7 @@ export const previewOvernightPlan: OvernightPlan = {
           summary: "전용 보드에서 정확히 한 작업자만 시작",
         },
       ],
+      protocol_requests: [],
       expected_receipt:
         "create JSON의 task id + dispatch spawned task id + task_events/task_runs의 pid/session",
       read_only: true,

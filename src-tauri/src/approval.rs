@@ -259,9 +259,13 @@ mod tests {
         DispatchPreflight {
             draft_id: draft().id,
             state: DispatchPreflightState::ReadyForApproval,
+            surface: crate::model::Provider::Hermes,
             adapter: "Hermes".to_owned(),
-            board: "god-of-sessions-night".to_owned(),
-            assignee: "default".to_owned(),
+            scope_label: "격리 보드".to_owned(),
+            scope_value: "god-of-sessions-night".to_owned(),
+            executor_label: "작업자".to_owned(),
+            executor_value: "default".to_owned(),
+            transport: "직접 argv".to_owned(),
             idempotency_key: "gos-night-exact".to_owned(),
             checks: vec![PreflightCheck {
                 key: "contract".to_owned(),
@@ -270,6 +274,7 @@ mod tests {
                 message: "pass".to_owned(),
             }],
             commands: Vec::new(),
+            protocol_requests: Vec::new(),
             expected_receipt: "task run".to_owned(),
             read_only: true,
             execution_enabled: false,

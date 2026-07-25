@@ -29,6 +29,7 @@ pub(super) fn load() -> ResourceBudget {
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
         "{\"clientInfo\":{\"name\":\"god-of-sessions\",\"title\":\"God of Sessions\",",
         "\"version\":\"0.1.0\"},\"capabilities\":{}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{}}\n"
     );
     run_streaming_protocol(
