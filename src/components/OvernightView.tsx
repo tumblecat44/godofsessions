@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
@@ -19,11 +19,13 @@ import {
   relativeTime,
   timeUntil,
 } from "../lib/format";
-import { previewOvernightPlan } from "../preview-data";
+import { previewNightRunHistory, previewOvernightPlan } from "../preview-data";
 import type {
   ApprovalChallenge,
   DispatchPreflight,
   DispatchReceipt,
+  NightRunHistory,
+  NightRunRecord,
   OvernightCandidate,
   OvernightPlan,
   ExecutionRoute,
@@ -165,6 +167,92 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
         </details>
       )}
     </article>
+  );
+}
+
+function nightRunStatus(run: NightRunRecord) {
+  switch (run.status) {
+    case "running":
+      return { label: "실행 중", tone: "running" };
+    case "done":
+      return { label: "완료", tone: "done" };
+    case "ready":
+      return { label: "대기 중", tone: "ready" };
+    case "blocked":
+    case "review":
+      return { label: "사람 확인", tone: "blocked" };
+    default:
+      return { label: run.status, tone: "unknown" };
+  }
+}
+
+function NightRunHistorySection({ history }: { history: NightRunHistory }) {
+  if (history.runs.length === 0 && history.warnings.length === 0) return null;
+  const active = history.runs.filter((run) =>
+    ["running", "ready"].includes(run.status),
+  ).length;
+
+  return (
+    <section className="night-history-section">
+      <header>
+        <div>
+          <span className="eyebrow">DURABLE NIGHT RUNS</span>
+          <h2>Hermes에서 다시 읽은 야간 실행</h2>
+          <p>
+            앱을 껐다 켜도 전용 보드와 task_runs가 시작·완료 상태의
+            원본입니다.
+          </p>
+        </div>
+        <span className="night-history-count">
+          <i className={active > 0 ? "is-live" : ""} />
+          {active > 0 ? `${active}개 진행 중` : "진행 중 없음"}
+        </span>
+      </header>
+
+      {history.runs.length > 0 && (
+        <div className="night-history-grid">
+          {history.runs.slice(0, 4).map((run) => {
+            const state = nightRunStatus(run);
+            const timestamp =
+              run.completed_at || run.started_at || run.created_at;
+            return (
+              <article className="night-run-card" key={run.task_id}>
+                <header>
+                  <span className={`night-run-state night-run-state--${state.tone}`}>
+                    {state.label}
+                  </span>
+                  <small>{timestamp ? relativeTime(timestamp) : "시각 없음"}</small>
+                </header>
+                <strong>{run.title}</strong>
+                <p title={run.workspace || undefined}>
+                  {run.project}
+                  {run.workspace ? ` · ${compactPath(run.workspace)}` : ""}
+                </p>
+                {(run.summary || run.error) && (
+                  <div className={run.error ? "night-run-result is-error" : "night-run-result"}>
+                    {run.summary || run.error}
+                  </div>
+                )}
+                <footer>
+                  <code>{run.task_id}</code>
+                  <span>
+                    {run.run_id ? `run ${run.run_id}` : "run 대기"}
+                    {run.session_id ? " · session 연결" : ""}
+                  </span>
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {history.warnings.map((warning) => (
+        <p className="night-history-warning" key={warning}>
+          <AlertTriangle size={12} />
+          {warning}
+        </p>
+      ))}
+    </section>
   );
 }
 
@@ -485,6 +573,35 @@ export function OvernightView() {
   const [preparingDraftId, setPreparingDraftId] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
   const [receipts, setReceipts] = useState<Record<string, DispatchReceipt>>({});
+  const [nightHistory, setNightHistory] = useState<NightRunHistory | null>(null);
+
+  const loadNightHistory = useCallback(async () => {
+    try {
+      const history = isTauri()
+        ? await invoke<NightRunHistory>("load_night_run_history")
+        : previewNightRunHistory;
+      setNightHistory(history);
+    } catch (error) {
+      setNightHistory({
+        generated_at: new Date().toISOString(),
+        runs: [],
+        warnings: [
+          error instanceof Error ? error.message : String(error),
+        ],
+        read_only: true,
+        methodology: "Hermes 야간 실행 기록을 불러오지 못했습니다.",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNightHistory();
+    if (!isTauri()) return;
+    const interval = window.setInterval(() => {
+      void loadNightHistory();
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [loadNightHistory]);
 
   useEffect(() => {
     if (!approval || isDispatching) return;
@@ -614,6 +731,7 @@ export function OvernightView() {
         ...current,
         [receipt.draft_id]: receipt,
       }));
+      void loadNightHistory();
       setApproval(null);
       setConfirmationPhrase("");
     } catch (error) {
@@ -712,6 +830,8 @@ export function OvernightView() {
           <p>{approvalError}</p>
         </section>
       )}
+
+      {nightHistory && <NightRunHistorySection history={nightHistory} />}
 
       {state.kind === "idle" && (
         <section className="overnight-empty">

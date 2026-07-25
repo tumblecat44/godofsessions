@@ -281,6 +281,33 @@ export interface DispatchReceipt {
   message: string;
 }
 
+export interface NightRunRecord {
+  task_id: string;
+  title: string;
+  project: string;
+  workspace: string | null;
+  status: string;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  run_id: number | null;
+  run_status: string | null;
+  worker_pid: number | null;
+  session_id: string | null;
+  outcome: string | null;
+  summary: string | null;
+  error: string | null;
+  idempotency_key: string;
+}
+
+export interface NightRunHistory {
+  generated_at: string;
+  runs: NightRunRecord[];
+  warnings: string[];
+  read_only: boolean;
+  methodology: string;
+}
+
 export interface OvernightCandidate {
   rank: number;
   project: string;

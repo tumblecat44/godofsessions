@@ -97,6 +97,12 @@ such as a thread/turn ID, ACP completion, Kanban run, or durable task record.
 An exited launcher process is not by itself a Run Receipt.
 _Avoid_: Log line, UI toast
 
+**Night Run History**:
+A read-only reconstruction of accepted overnight Runs from provider-owned
+receipts. It survives control-app restarts without becoming a second source of
+truth.
+_Avoid_: App run database, activity log, approval history
+
 **Control Board**:
 A cross-provider projection of Work Items and Runs for supervision. It is not
 the source of truth for provider-owned state.

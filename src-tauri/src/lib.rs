@@ -14,8 +14,8 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, DispatchReceipt, OvernightPlan, Session, Snapshot, StatusConfidence,
-    WorkspaceOverview,
+    ApprovalChallenge, DispatchReceipt, NightRunHistory, OvernightPlan, Session, Snapshot,
+    StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
@@ -126,6 +126,13 @@ async fn load_workspace_overview() -> Result<WorkspaceOverview, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn load_night_run_history() -> Result<NightRunHistory, String> {
+    tauri::async_runtime::spawn_blocking(dispatch::load_night_run_history)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn build_workspace_overview() -> WorkspaceOverview {
     let now = Utc::now();
     let mut snapshot = build_snapshot();
@@ -219,6 +226,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             load_workspace_overview,
+            load_night_run_history,
             generate_overnight_plan,
             prepare_dispatch_approval,
             cancel_dispatch_approval,

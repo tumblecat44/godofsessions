@@ -14,7 +14,8 @@ use crate::approval::ApprovedDispatch;
 use crate::model::{
     AdapterReadiness, DispatchCommandPreview, DispatchPreflight, DispatchPreflightState,
     DispatchReceipt, DispatchReceiptState, ExecutionRoute, ExecutionRouteInventory, NightRunDraft,
-    PreflightCheck, PreflightLevel, Provider, ResourceState, RunDraftFormat, RunMode,
+    NightRunHistory, NightRunRecord, PreflightCheck, PreflightLevel, Provider, ResourceState,
+    RunDraftFormat, RunMode,
 };
 
 const BOARD: &str = "god-of-sessions-night";
@@ -324,6 +325,105 @@ fn hermes_board_db() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
         .join(format!(".hermes/kanban/boards/{BOARD}/kanban.db"))
+}
+
+pub fn load_night_run_history() -> NightRunHistory {
+    let path = hermes_board_db();
+    let (runs, warnings) = if path.is_file() {
+        match load_night_runs_from_path(&path) {
+            Ok(runs) => (runs, Vec::new()),
+            Err(error) => (
+                Vec::new(),
+                vec![format!("Hermes 야간 실행 기록을 읽지 못했습니다: {error}")],
+            ),
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    NightRunHistory {
+        generated_at: Utc::now().to_rfc3339(),
+        runs,
+        warnings,
+        read_only: true,
+        methodology:
+            "God of Sessions 전용 Hermes 보드에서 앱이 만든 task와 최신 task_run을 읽기 전용으로 다시 구성했습니다."
+                .to_owned(),
+    }
+}
+
+fn load_night_runs_from_path(path: &Path) -> Result<Vec<NightRunRecord>, String> {
+    let connection =
+        crate::connectors::open_read_only_sqlite(path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT t.id, t.title, t.workspace_path, t.status,
+                   t.created_at, t.started_at, t.completed_at,
+                   r.id, r.status, COALESCE(r.worker_pid, t.worker_pid),
+                   t.session_id, r.outcome, COALESCE(r.summary, t.result),
+                   r.error, t.idempotency_key
+            FROM tasks t
+            LEFT JOIN task_runs r ON r.id = (
+                SELECT r2.id
+                FROM task_runs r2
+                WHERE r2.task_id = t.id
+                ORDER BY r2.id DESC
+                LIMIT 1
+            )
+            WHERE t.created_by = 'god-of-sessions'
+              AND t.idempotency_key LIKE 'gos-night-%'
+            ORDER BY COALESCE(t.completed_at, t.started_at, t.created_at) DESC,
+                     t.id DESC
+            LIMIT 20
+            ",
+        )
+        .map_err(|error| error.to_string())?;
+    let runs = statement
+        .query_map([], |row| {
+            let workspace = row.get::<_, Option<String>>(2)?;
+            let project = workspace
+                .as_deref()
+                .and_then(|value| Path::new(value).file_name())
+                .and_then(|value| value.to_str())
+                .unwrap_or("이름 없는 프로젝트")
+                .to_owned();
+            Ok(NightRunRecord {
+                task_id: row.get(0)?,
+                title: row.get(1)?,
+                project,
+                workspace,
+                status: row.get(3)?,
+                created_at: row
+                    .get::<_, Option<i64>>(4)?
+                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+                started_at: row
+                    .get::<_, Option<i64>>(5)?
+                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+                completed_at: row
+                    .get::<_, Option<i64>>(6)?
+                    .and_then(crate::time_utils::unix_seconds_to_rfc3339),
+                run_id: row.get(7)?,
+                run_status: row.get(8)?,
+                worker_pid: row.get(9)?,
+                session_id: row.get(10)?,
+                outcome: bounded_receipt_text(row.get(11)?),
+                summary: bounded_receipt_text(row.get(12)?),
+                error: bounded_receipt_text(row.get(13)?),
+                idempotency_key: row.get(14)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(runs)
+}
+
+fn bounded_receipt_text(value: Option<String>) -> Option<String> {
+    let compact = value?.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    Some(compact.chars().take(1_200).collect())
 }
 
 #[derive(Debug)]
@@ -1049,6 +1149,68 @@ mod tests {
         };
 
         assert_eq!(receipt_state(&task).0, DispatchReceiptState::Completed);
+    }
+
+    #[test]
+    fn night_history_is_rebuilt_from_provider_owned_task_and_latest_run() {
+        let directory = tempdir().expect("tempdir");
+        let path = directory.path().join("kanban.db");
+        let connection = rusqlite::Connection::open(&path).expect("sqlite");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    workspace_path TEXT,
+                    status TEXT NOT NULL,
+                    created_at INTEGER,
+                    started_at INTEGER,
+                    completed_at INTEGER,
+                    worker_pid INTEGER,
+                    session_id TEXT,
+                    result TEXT,
+                    idempotency_key TEXT,
+                    created_by TEXT
+                );
+                CREATE TABLE task_runs (
+                    id INTEGER PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    status TEXT,
+                    worker_pid INTEGER,
+                    outcome TEXT,
+                    summary TEXT,
+                    error TEXT
+                );
+                INSERT INTO tasks VALUES (
+                    'task-1', '검증 가능한 결과', '/work/alpha', 'done',
+                    100, 110, 130, 42, 'session-1', NULL,
+                    'gos-night-exact', 'god-of-sessions'
+                );
+                INSERT INTO task_runs VALUES (
+                    1, 'task-1', 'done', 42, 'completed', '오래된 요약', NULL
+                );
+                INSERT INTO task_runs VALUES (
+                    2, 'task-1', 'done', 42, 'completed', '최신 검증 요약', NULL
+                );
+                INSERT INTO tasks VALUES (
+                    'task-other', '다른 앱 작업', '/work/other', 'done',
+                    100, 110, 130, 9, 'session-2', '숨겨야 함',
+                    'other-key', 'someone-else'
+                );
+                ",
+            )
+            .expect("schema");
+        drop(connection);
+
+        let runs = load_night_runs_from_path(&path).expect("history");
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].task_id, "task-1");
+        assert_eq!(runs[0].project, "alpha");
+        assert_eq!(runs[0].run_id, Some(2));
+        assert_eq!(runs[0].summary.as_deref(), Some("최신 검증 요약"));
+        assert_eq!(runs[0].session_id.as_deref(), Some("session-1"));
     }
 
     #[test]

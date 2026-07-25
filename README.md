@@ -29,9 +29,10 @@ It is not:
 
 ## Current phase
 
-The approval-gated Hermes M9 desktop slice is working. Recommendation and
+The recoverable Hermes M10 desktop slice is working. Recommendation and
 preflight remain read-only; a provider process can start only after an exact,
-expiring, one-time approval in the desktop app.
+expiring, one-time approval in the desktop app, and its state is recovered
+from Hermes after an app restart.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -45,6 +46,7 @@ expiring, one-time approval in the desktop app.
 - [Hermes approval preflight M7](docs/overnight-m7.md)
 - [Exact one-time approval M8](docs/overnight-m8.md)
 - [Hermes one-pass dispatch and receipt M9](docs/overnight-m9.md)
+- [Durable Night Run recovery M10](docs/overnight-m10.md)
 
 The app currently:
 
@@ -81,6 +83,9 @@ The app currently:
 - re-runs the complete preflight immediately before dispatch, creates at most
   one Hermes goal task, starts at most one worker, and returns the
   provider-owned task/run receipt
+- rebuilds recent God of Sessions night runs from the dedicated Hermes
+  `tasks` and `task_runs` rows every 15 seconds, including completion summaries
+  and uncertain outcomes after an app restart
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 

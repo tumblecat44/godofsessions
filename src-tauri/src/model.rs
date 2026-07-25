@@ -388,6 +388,35 @@ pub struct DispatchReceipt {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct NightRunRecord {
+    pub task_id: String,
+    pub title: String,
+    pub project: String,
+    pub workspace: Option<String>,
+    pub status: String,
+    pub created_at: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub run_id: Option<i64>,
+    pub run_status: Option<String>,
+    pub worker_pid: Option<i64>,
+    pub session_id: Option<String>,
+    pub outcome: Option<String>,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NightRunHistory {
+    pub generated_at: String,
+    pub runs: Vec<NightRunRecord>,
+    pub warnings: Vec<String>,
+    pub read_only: bool,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
     pub project: String,

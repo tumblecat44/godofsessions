@@ -1,5 +1,6 @@
 import type {
   ControlBoard,
+  NightRunHistory,
   OvernightPlan,
   Provider,
   ProviderSummary,
@@ -288,6 +289,53 @@ export const previewWorkspaceOverview: WorkspaceOverview = {
     methodology:
       "오늘의 사용자·응답 텍스트만 메모리에서 제한적으로 읽으며 별도 데이터베이스에 저장하지 않습니다.",
   },
+};
+
+export const previewNightRunHistory: NightRunHistory = {
+  generated_at: new Date().toISOString(),
+  read_only: true,
+  warnings: [],
+  methodology:
+    "God of Sessions 전용 Hermes 보드에서 앱이 만든 task와 최신 task_run을 읽기 전용으로 다시 구성했습니다.",
+  runs: [
+    {
+      task_id: "task-night-running",
+      title: "에이전트 메모리 인덱스 검증",
+      project: "overnight-eval",
+      workspace: "/Users/you/projects/overnight-eval",
+      status: "running",
+      created_at: new Date(now - 95 * 60_000).toISOString(),
+      started_at: new Date(now - 94 * 60_000).toISOString(),
+      completed_at: null,
+      run_id: 14,
+      run_status: "running",
+      worker_pid: 48102,
+      session_id: "hermes-night-14",
+      outcome: null,
+      summary: null,
+      error: null,
+      idempotency_key: "gos-night-preview-running",
+    },
+    {
+      task_id: "task-night-done",
+      title: "세션 커넥터 경계와 회귀 테스트 정리",
+      project: "control-plane-notes",
+      workspace: "/Users/you/projects/control-plane-notes",
+      status: "done",
+      created_at: new Date(now - 11 * 60 * 60_000).toISOString(),
+      started_at: new Date(now - 11 * 60 * 60_000 + 60_000).toISOString(),
+      completed_at: new Date(now - 8 * 60 * 60_000).toISOString(),
+      run_id: 9,
+      run_status: "done",
+      worker_pid: 47381,
+      session_id: "hermes-night-9",
+      outcome: "completed",
+      summary:
+        "커넥터별 읽기 경계를 문서화하고 관련 테스트를 추가했습니다. 검증 명령은 모두 통과했습니다.",
+      error: null,
+      idempotency_key: "gos-night-preview-done",
+    },
+  ],
 };
 
 export const previewOvernightPlan: OvernightPlan = {

@@ -1188,6 +1188,173 @@ button:active:not(:disabled) {
   opacity: 0.72;
 }
 
+.night-history-section {
+  max-width: 1500px;
+  margin: 20px auto 0;
+}
+
+.night-history-section > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.night-history-section > header h2 {
+  margin: 5px 0 0;
+  color: var(--ink-primary);
+  font-size: 16px;
+  font-weight: 570;
+  letter-spacing: -0.025em;
+}
+
+.night-history-section > header p {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 8px;
+}
+
+.night-history-count {
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-muted);
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 999px;
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-history-count i {
+  width: 5px;
+  height: 5px;
+  background: var(--ink-muted);
+  border-radius: 50%;
+}
+
+.night-history-count i.is-live {
+  background: var(--signal-teal);
+  box-shadow: 0 0 0 3px rgba(79, 190, 166, 0.08);
+}
+
+.night-history-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.night-run-card {
+  min-width: 0;
+  padding: 12px;
+  background: var(--console);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.night-run-card > header,
+.night-run-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.night-run-state {
+  padding: 3px 6px;
+  color: var(--ink-muted);
+  background: var(--deck);
+  border-radius: 4px;
+  font-size: 7px;
+  font-weight: 650;
+}
+
+.night-run-state--running {
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.08);
+}
+
+.night-run-state--done {
+  color: var(--ink-secondary);
+}
+
+.night-run-state--ready,
+.night-run-state--blocked {
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.08);
+}
+
+.night-run-card > header small {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-run-card > strong {
+  margin-top: 10px;
+  display: block;
+  color: var(--ink-primary);
+  font-size: 10px;
+  font-weight: 590;
+}
+
+.night-run-card > p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-run-result {
+  margin-top: 10px;
+  padding: 8px 9px;
+  color: var(--ink-tertiary);
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.night-run-result.is-error {
+  color: var(--signal-amber);
+  border-color: rgba(228, 169, 74, 0.18);
+}
+
+.night-run-card > footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  color: var(--ink-muted);
+  border-top: 1px solid var(--etched-edge-soft);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.night-run-card > footer code {
+  overflow: hidden;
+  color: var(--ink-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-history-warning {
+  margin: 8px 0 0;
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.06);
+  border: 1px solid rgba(228, 169, 74, 0.16);
+  border-radius: var(--radius-control);
+  font-size: 8px;
+}
+
 .overnight-empty {
   max-width: 1500px;
   min-height: 330px;
@@ -3593,6 +3760,16 @@ button:active:not(:disabled) {
 
   .generate-plan-button {
     width: 100%;
+  }
+
+  .night-history-section > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .night-history-grid {
+    grid-template-columns: 1fr;
   }
 
   .candidate-title {
