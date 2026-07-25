@@ -2510,6 +2510,10 @@ button:active:not(:disabled) {
   font-size: 8px;
 }
 
+.plan-results {
+  scroll-margin-top: 48px;
+}
+
 .plan-index-line span {
   display: flex;
   align-items: center;

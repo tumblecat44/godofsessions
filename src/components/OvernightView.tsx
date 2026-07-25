@@ -1541,6 +1541,8 @@ export function OvernightView() {
   const [nightPlanHistory, setNightPlanHistory] =
     useState<NightPlanHistory | null>(null);
   const [morningBrief, setMorningBrief] = useState<MorningBrief | null>(null);
+  const planResultsRef = useRef<HTMLDivElement>(null);
+  const revealNextPlanRef = useRef(false);
 
   const loadNightHistory = useCallback(async () => {
     try {
@@ -1695,8 +1697,23 @@ export function OvernightView() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [recoveryApproval, isRecovering]);
 
+  useEffect(() => {
+    if (state.kind !== "ready" || !revealNextPlanRef.current) return;
+    revealNextPlanRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      planResultsRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "start",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [state]);
+
   const generate = async () => {
     setApprovalError(null);
+    revealNextPlanRef.current = true;
     setState({ kind: "loading" });
     try {
       const plan = isTauri()
@@ -2204,7 +2221,7 @@ export function OvernightView() {
       )}
 
       {plan && (
-        <>
+        <div className="plan-results" ref={planResultsRef}>
           <div className="plan-index-line">
             <span>
               <i className="index-pulse" />
@@ -2217,36 +2234,86 @@ export function OvernightView() {
             </span>
           </div>
 
-          <HostReadinessPanel readiness={plan.host_readiness} />
-
-          <section className="budget-section">
-            <header>
-              <span className="eyebrow">AVAILABLE CAPACITY</span>
-              <h2>지금 쓸 수 있는 구독</h2>
-              <p>창이 없거나 조회에 실패한 값은 여유 100%로 가정하지 않습니다.</p>
-            </header>
-            <div className="budget-grid">
-              {plan.budgets.map((budget) => (
-                <BudgetCard budget={budget} key={budget.provider} />
-              ))}
-            </div>
-          </section>
-
-          <section className="route-section">
-            <header>
-              <span className="eyebrow">EXECUTION ROUTES</span>
-              <h2>오늘 밤 실제 실행 경로</h2>
+          {plan.candidates.length > 0 ? (
+            <section className="candidate-stack">
+              <CandidateCard
+                candidate={plan.candidates[0]}
+                draft={plan.run_drafts.find((draft) => draft.candidate_rank === 1)}
+                preflight={plan.dispatch_preflights.find(
+                  (preflight) =>
+                    preflight.draft_id ===
+                    plan.run_drafts.find((draft) => draft.candidate_rank === 1)
+                      ?.id,
+                )}
+                receipt={
+                  receipts[
+                    plan.run_drafts.find((draft) => draft.candidate_rank === 1)
+                      ?.id || ""
+                  ]
+                }
+                approvalLoading={
+                  preparingDraftId ===
+                  plan.run_drafts.find((draft) => draft.candidate_rank === 1)
+                    ?.id
+                }
+                onRequestApproval={(preflight) =>
+                  void requestApproval(preflight)
+                }
+                primary
+              />
+              {plan.candidates.length > 1 && (
+                <div
+                  className={`alternative-grid ${
+                    plan.candidates.length === 2
+                      ? "alternative-grid--single"
+                      : ""
+                  }`}
+                >
+                  {plan.candidates.slice(1).map((candidate) => (
+                    <CandidateCard
+                      candidate={candidate}
+                      draft={plan.run_drafts.find(
+                        (draft) => draft.candidate_rank === candidate.rank,
+                      )}
+                      preflight={plan.dispatch_preflights.find(
+                        (preflight) =>
+                          preflight.draft_id ===
+                          plan.run_drafts.find(
+                            (draft) => draft.candidate_rank === candidate.rank,
+                          )?.id,
+                      )}
+                      receipt={
+                        receipts[
+                          plan.run_drafts.find(
+                            (draft) => draft.candidate_rank === candidate.rank,
+                          )?.id || ""
+                        ]
+                      }
+                      approvalLoading={
+                        preparingDraftId ===
+                        plan.run_drafts.find(
+                          (draft) => draft.candidate_rank === candidate.rank,
+                        )?.id
+                      }
+                      onRequestApproval={(preflight) =>
+                        void requestApproval(preflight)
+                      }
+                      key={candidate.project}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : (
+            <section className="no-candidates">
+              <MoonStar size={20} />
+              <h2>안전하게 추천할 일이 없습니다</h2>
               <p>
-                앱과 모델, 차감되는 구독을 따로 봅니다. 같은 구독을 공유하는
-                경로는 남은 용량을 중복 계산하지 않습니다.
+                최근 프로젝트가 이미 실행 중이거나 사람의 판단을 기다리고
+                있습니다. 오늘 밤 아무것도 돌리지 않는 것도 유효한 결론입니다.
               </p>
-            </header>
-            <div className="route-grid">
-              {plan.route_inventory.routes.map((route) => (
-                <RouteCard route={route} key={route.id} />
-              ))}
-            </div>
-          </section>
+            </section>
+          )}
 
           {plan.schedule.lanes.length > 0 && (
             <section className="schedule-section">
@@ -2338,86 +2405,36 @@ export function OvernightView() {
             </section>
           )}
 
-          {plan.candidates.length > 0 ? (
-            <section className="candidate-stack">
-              <CandidateCard
-                candidate={plan.candidates[0]}
-                draft={plan.run_drafts.find((draft) => draft.candidate_rank === 1)}
-                preflight={plan.dispatch_preflights.find(
-                  (preflight) =>
-                    preflight.draft_id ===
-                    plan.run_drafts.find((draft) => draft.candidate_rank === 1)
-                      ?.id,
-                )}
-                receipt={
-                  receipts[
-                    plan.run_drafts.find((draft) => draft.candidate_rank === 1)
-                      ?.id || ""
-                  ]
-                }
-                approvalLoading={
-                  preparingDraftId ===
-                  plan.run_drafts.find((draft) => draft.candidate_rank === 1)
-                    ?.id
-                }
-                onRequestApproval={(preflight) =>
-                  void requestApproval(preflight)
-                }
-                primary
-              />
-              {plan.candidates.length > 1 && (
-                <div
-                  className={`alternative-grid ${
-                    plan.candidates.length === 2
-                      ? "alternative-grid--single"
-                      : ""
-                  }`}
-                >
-                  {plan.candidates.slice(1).map((candidate) => (
-                    <CandidateCard
-                      candidate={candidate}
-                      draft={plan.run_drafts.find(
-                        (draft) => draft.candidate_rank === candidate.rank,
-                      )}
-                      preflight={plan.dispatch_preflights.find(
-                        (preflight) =>
-                          preflight.draft_id ===
-                          plan.run_drafts.find(
-                            (draft) => draft.candidate_rank === candidate.rank,
-                          )?.id,
-                      )}
-                      receipt={
-                        receipts[
-                          plan.run_drafts.find(
-                            (draft) => draft.candidate_rank === candidate.rank,
-                          )?.id || ""
-                        ]
-                      }
-                      approvalLoading={
-                        preparingDraftId ===
-                        plan.run_drafts.find(
-                          (draft) => draft.candidate_rank === candidate.rank,
-                        )?.id
-                      }
-                      onRequestApproval={(preflight) =>
-                        void requestApproval(preflight)
-                      }
-                      key={candidate.project}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          ) : (
-            <section className="no-candidates">
-              <MoonStar size={20} />
-              <h2>안전하게 추천할 일이 없습니다</h2>
+          <HostReadinessPanel readiness={plan.host_readiness} />
+
+          <section className="budget-section">
+            <header>
+              <span className="eyebrow">AVAILABLE CAPACITY</span>
+              <h2>지금 쓸 수 있는 구독</h2>
+              <p>창이 없거나 조회에 실패한 값은 여유 100%로 가정하지 않습니다.</p>
+            </header>
+            <div className="budget-grid">
+              {plan.budgets.map((budget) => (
+                <BudgetCard budget={budget} key={budget.provider} />
+              ))}
+            </div>
+          </section>
+
+          <section className="route-section">
+            <header>
+              <span className="eyebrow">EXECUTION ROUTES</span>
+              <h2>오늘 밤 실제 실행 경로</h2>
               <p>
-                최근 프로젝트가 이미 실행 중이거나 사람의 판단을 기다리고
-                있습니다. 오늘 밤 아무것도 돌리지 않는 것도 유효한 결론입니다.
+                앱과 모델, 차감되는 구독을 따로 봅니다. 같은 구독을 공유하는
+                경로는 남은 용량을 중복 계산하지 않습니다.
               </p>
-            </section>
-          )}
+            </header>
+            <div className="route-grid">
+              {plan.route_inventory.routes.map((route) => (
+                <RouteCard route={route} key={route.id} />
+              ))}
+            </div>
+          </section>
 
           <section className="plan-footnotes">
             <details open={plan.exclusions.length <= 3}>
@@ -2441,7 +2458,7 @@ export function OvernightView() {
               <p>{plan.methodology}</p>
             </div>
           </section>
-        </>
+        </div>
       )}
 
       {recoveryApproval && (

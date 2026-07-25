@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The isolated parallel session-discovery M30 desktop slice is working.
+The answer-first bedtime briefing M31 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -72,6 +72,10 @@ work from stale evidence.
 The six independent local session connectors now run concurrently and join in
 stable provider order. An unexpected connector-worker failure degrades only
 that source, preserving the same provider-neutral snapshot boundary.
+After an explicit recommendation request, the screen now reveals the ranked
+answer first, then the frozen full-night schedule and approval, followed by
+host, quota, route, and methodology evidence. Initial entry still leaves
+unfinished Morning Review work first.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -106,6 +110,7 @@ that source, preserving the same provider-neutral snapshot boundary.
 - [Activity-time Grok context M28](docs/overnight-m28.md)
 - [Bounded exact capacity observation M29](docs/overnight-m29.md)
 - [Isolated parallel session discovery M30](docs/overnight-m30.md)
+- [Answer-first bedtime briefing M31](docs/overnight-m31.md)
 
 The app currently:
 
@@ -132,6 +137,8 @@ The app currently:
   extension, and Claude usage through the local OpenClaw adapter
 - returns up to three ranked overnight candidates with evidence, exclusions,
   provider rationale, risks, and a verification contract
+- reveals a newly requested best bet immediately while preserving prior
+  Morning Review as the initial-entry priority
 - distinguishes the execution surface from the model provider and shared
   subscription Capacity Pool
 - detects the current Hermes route without exposing credential values
