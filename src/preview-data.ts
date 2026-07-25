@@ -1,9 +1,11 @@
 import type {
+  ControlBoard,
   OvernightPlan,
   Provider,
   ProviderSummary,
   Session,
   Snapshot,
+  WorkspaceOverview,
 } from "./types";
 
 const now = Date.now();
@@ -115,6 +117,110 @@ export const previewSnapshot: Snapshot = {
   warnings: [],
   privacy_note:
     "대화 본문은 읽지 않습니다. 공급자 소유 파일과 데이터베이스는 읽기 전용입니다.",
+};
+
+export const previewControlBoard: ControlBoard = {
+  generated_at: new Date().toISOString(),
+  read_only: true,
+  warnings: [],
+  methodology:
+    "최근 24시간의 세션을 프로젝트별로 묶고, 명시적인 Hermes Kanban 작업은 별도 작업으로 유지했습니다. 사람 판단과 외부 부작용 가능성은 실행 가능 상태보다 먼저 표시합니다.",
+  items: [
+    {
+      id: "hermes-kanban:default:t_send",
+      origin: "hermes_kanban",
+      source_id: "t_send",
+      project: "default",
+      title: "설문 폼을 멘토에게 보내기",
+      state: "needs_me",
+      source_state: "ready",
+      provider: "hermes",
+      workspace: null,
+      updated_at: new Date(now - 45 * 60_000).toISOString(),
+      priority: 1,
+      assignee: "worker",
+      model_override: null,
+      session_ids: [],
+      human_gate: "external_action",
+      human_gate_reason:
+        "외부 전송·배포·삭제·결제 가능성이 있어 unattended 실행 전에 확인해야 합니다.",
+      evidence: ["Hermes Kanban · default 보드", "담당 프로필: worker", "우선순위: 1"],
+    },
+    {
+      id: "project:/Users/you/projects/godofsessions",
+      origin: "inferred_session",
+      source_id: "/Users/you/projects/godofsessions",
+      project: "godofsessions",
+      title: "밤샘 목표 계약 다듬기",
+      state: "ready",
+      source_state: "idle",
+      provider: "hermes",
+      workspace: "/Users/you/projects/godofsessions",
+      updated_at: new Date(now - 210 * 60_000).toISOString(),
+      priority: null,
+      assignee: null,
+      model_override: null,
+      session_ids: ["codex:co2", "hermes:h1"],
+      human_gate: null,
+      human_gate_reason: null,
+      evidence: [
+        "최근 24시간 세션 2개",
+        "2개 제공자에서 같은 프로젝트가 관측됨",
+        "가장 최근 상태: Hermes · 유휴",
+      ],
+    },
+    {
+      id: "project:/Users/you/projects/agent-research",
+      origin: "inferred_session",
+      source_id: "/Users/you/projects/agent-research",
+      project: "agent-research",
+      title: "로컬 에이전트 시장 조사",
+      state: "running",
+      source_state: "running",
+      provider: "grok",
+      workspace: "/Users/you/projects/agent-research",
+      updated_at: new Date(now - 60_000).toISOString(),
+      priority: null,
+      assignee: null,
+      model_override: "grok-code-fast",
+      session_ids: ["grok:g1", "grok:g2", "openclaw:o1"],
+      human_gate: null,
+      human_gate_reason: null,
+      evidence: [
+        "최근 24시간 세션 3개",
+        "2개 제공자에서 같은 프로젝트가 관측됨",
+        "가장 최근 상태: Grok · 작업 중",
+      ],
+    },
+    {
+      id: "project:/Users/you/projects/fable-project",
+      origin: "inferred_session",
+      source_id: "/Users/you/projects/fable-project",
+      project: "fable-project",
+      title: "온보딩 문구 수정",
+      state: "review",
+      source_state: "completed",
+      provider: "cursor",
+      workspace: "/Users/you/projects/fable-project",
+      updated_at: new Date(now - 118 * 60_000).toISOString(),
+      priority: null,
+      assignee: null,
+      model_override: null,
+      session_ids: ["cursor:c3"],
+      human_gate: null,
+      human_gate_reason: null,
+      evidence: [
+        "최근 24시간 세션 1개",
+        "1개 제공자에서 같은 프로젝트가 관측됨",
+        "가장 최근 상태: Cursor · 완료",
+      ],
+    },
+  ],
+};
+
+export const previewWorkspaceOverview: WorkspaceOverview = {
+  snapshot: previewSnapshot,
+  control_board: previewControlBoard,
 };
 
 export const previewOvernightPlan: OvernightPlan = {

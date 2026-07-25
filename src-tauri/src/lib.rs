@@ -1,4 +1,5 @@
 mod connectors;
+mod control_board;
 mod model;
 mod recommendation;
 mod time_utils;
@@ -7,7 +8,7 @@ mod usage;
 use std::collections::HashMap;
 
 use chrono::Utc;
-use model::{OvernightPlan, Session, Snapshot, StatusConfidence};
+use model::{OvernightPlan, Session, Snapshot, StatusConfidence, WorkspaceOverview};
 
 #[tauri::command]
 async fn load_snapshot() -> Result<Snapshot, String> {
@@ -34,6 +35,31 @@ async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, Stri
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn load_workspace_overview() -> Result<WorkspaceOverview, String> {
+    tauri::async_runtime::spawn_blocking(build_workspace_overview)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn build_workspace_overview() -> WorkspaceOverview {
+    let snapshot = build_snapshot();
+    let (tasks, warning) = match control_board::load_hermes_tasks() {
+        Ok(tasks) => (tasks, None),
+        Err(error) => (
+            Vec::new(),
+            Some(format!("Hermes Kanban을 읽지 못했습니다: {error}")),
+        ),
+    };
+    let mut control_board = control_board::build_control_board(&snapshot, tasks, Utc::now());
+    control_board.warnings.extend(snapshot.warnings.clone());
+    control_board.warnings.extend(warning);
+    WorkspaceOverview {
+        snapshot,
+        control_board,
+    }
 }
 
 fn build_snapshot() -> Snapshot {
@@ -109,6 +135,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
+            load_workspace_overview,
             generate_overnight_plan
         ])
         .run(tauri::generate_context!())
@@ -120,7 +147,7 @@ mod live_tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::model::Provider;
+    use crate::model::{HumanGateKind, Provider, WorkItemOrigin, WorkItemState};
 
     #[test]
     #[ignore = "reads the current user's installed provider metadata"]
@@ -189,6 +216,39 @@ mod live_tests {
             .all(|candidate| !candidate.evidence.is_empty()
                 && !candidate.verification.is_empty()
                 && !candidate.risks.is_empty()));
+    }
+
+    #[test]
+    #[ignore = "reads the current user's Hermes Kanban and local session metadata"]
+    fn local_control_board_preserves_hermes_tasks_and_external_action_gate() {
+        let overview = build_workspace_overview();
+        let hermes_items = overview
+            .control_board
+            .items
+            .iter()
+            .filter(|item| item.origin == WorkItemOrigin::HermesKanban)
+            .collect::<Vec<_>>();
+
+        eprintln!(
+            "items={} hermes_items={:?} warnings={:?}",
+            overview.control_board.items.len(),
+            hermes_items
+                .iter()
+                .map(|item| (
+                    item.source_id.as_str(),
+                    item.title.as_str(),
+                    item.state,
+                    item.human_gate,
+                ))
+                .collect::<Vec<_>>(),
+            overview.control_board.warnings,
+        );
+        assert!(overview.control_board.read_only);
+        assert!(!hermes_items.is_empty());
+        assert!(hermes_items.iter().any(|item| {
+            item.state == WorkItemState::NeedsMe
+                && item.human_gate == Some(HumanGateKind::ExternalAction)
+        }));
     }
 }
 

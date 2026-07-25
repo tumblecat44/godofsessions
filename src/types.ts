@@ -6,7 +6,7 @@ export type Provider =
   | "hermes"
   | "openclaw";
 
-export type WorkspaceView = "overnight" | "inbox";
+export type WorkspaceView = "board" | "overnight" | "inbox";
 
 export type NativeKind =
   | "interactive"
@@ -150,4 +150,45 @@ export interface OvernightPlan {
   exclusions: ExcludedProject[];
   read_only: boolean;
   methodology: string;
+}
+
+export type WorkItemOrigin = "inferred_session" | "hermes_kanban";
+export type WorkItemState = "needs_me" | "ready" | "running" | "review";
+export type HumanGateKind =
+  | "decision"
+  | "external_action"
+  | "capability"
+  | "conflict";
+
+export interface WorkItem {
+  id: string;
+  origin: WorkItemOrigin;
+  source_id: string;
+  project: string;
+  title: string;
+  state: WorkItemState;
+  source_state: string;
+  provider: Provider | null;
+  workspace: string | null;
+  updated_at: string | null;
+  priority: number | null;
+  assignee: string | null;
+  model_override: string | null;
+  session_ids: string[];
+  human_gate: HumanGateKind | null;
+  human_gate_reason: string | null;
+  evidence: string[];
+}
+
+export interface ControlBoard {
+  generated_at: string;
+  items: WorkItem[];
+  warnings: string[];
+  read_only: boolean;
+  methodology: string;
+}
+
+export interface WorkspaceOverview {
+  snapshot: Snapshot;
+  control_board: ControlBoard;
 }

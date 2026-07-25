@@ -1,4 +1,4 @@
-import { Inbox, LockKeyhole, MoonStar, Orbit } from "lucide-react";
+import { Inbox, KanbanSquare, LockKeyhole, MoonStar, Orbit } from "lucide-react";
 import { compactNumber, providerNames } from "../lib/format";
 import type { Provider, ProviderSummary, WorkspaceView } from "../types";
 import { ProviderMark } from "./ProviderMark";
@@ -35,6 +35,15 @@ export function Sidebar({
       </div>
 
       <nav className="workspace-nav" aria-label="작업 화면">
+        <button
+          className={activeView === "board" ? "is-selected" : ""}
+          type="button"
+          onClick={() => onSelectView("board")}
+        >
+          <KanbanSquare size={16} />
+          <span>작업 관제판</span>
+          <i className="nav-new">LIVE</i>
+        </button>
         <button
           className={activeView === "overnight" ? "is-selected" : ""}
           type="button"

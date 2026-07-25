@@ -209,6 +209,67 @@ pub struct OvernightPlan {
     pub methodology: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkItemOrigin {
+    InferredSession,
+    HermesKanban,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkItemState {
+    NeedsMe,
+    Ready,
+    Running,
+    Review,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HumanGateKind {
+    Decision,
+    ExternalAction,
+    Capability,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkItem {
+    pub id: String,
+    pub origin: WorkItemOrigin,
+    pub source_id: String,
+    pub project: String,
+    pub title: String,
+    pub state: WorkItemState,
+    pub source_state: String,
+    pub provider: Option<Provider>,
+    pub workspace: Option<String>,
+    pub updated_at: Option<String>,
+    pub priority: Option<i64>,
+    pub assignee: Option<String>,
+    pub model_override: Option<String>,
+    pub session_ids: Vec<String>,
+    pub human_gate: Option<HumanGateKind>,
+    pub human_gate_reason: Option<String>,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ControlBoard {
+    pub generated_at: String,
+    pub items: Vec<WorkItem>,
+    pub warnings: Vec<String>,
+    pub read_only: bool,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceOverview {
+    pub snapshot: Snapshot,
+    pub control_board: ControlBoard,
+}
+
 #[derive(Debug)]
 pub struct ConnectorOutput {
     pub provider: Provider,
