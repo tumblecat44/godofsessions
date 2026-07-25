@@ -385,13 +385,19 @@ fn load_exact_route_inventory(route_id: &str) -> ExecutionRouteInventory {
 }
 
 pub(crate) fn build_snapshot() -> Snapshot {
+    let codex = std::thread::spawn(connectors::load_codex);
+    let grok = std::thread::spawn(connectors::load_grok);
+    let claude = std::thread::spawn(connectors::load_claude);
+    let cursor = std::thread::spawn(connectors::load_cursor);
+    let hermes = std::thread::spawn(connectors::load_hermes);
+    let openclaw = std::thread::spawn(connectors::load_openclaw);
     let outputs = [
-        connectors::load_codex(),
-        connectors::load_grok(),
-        connectors::load_claude(),
-        connectors::load_cursor(),
-        connectors::load_hermes(),
-        connectors::load_openclaw(),
+        join_connector(codex, Provider::Codex),
+        join_connector(grok, Provider::Grok),
+        join_connector(claude, Provider::Claude),
+        join_connector(cursor, Provider::Cursor),
+        join_connector(hermes, Provider::Hermes),
+        join_connector(openclaw, Provider::Openclaw),
     ];
 
     let providers = outputs.iter().map(|output| output.summary()).collect();
@@ -433,6 +439,19 @@ pub(crate) fn build_snapshot() -> Snapshot {
             "대화 본문은 읽지 않습니다. 공급자 소유 파일과 데이터베이스는 읽기 전용입니다."
                 .to_owned(),
     }
+}
+
+fn join_connector(
+    handle: std::thread::JoinHandle<model::ConnectorOutput>,
+    provider: Provider,
+) -> model::ConnectorOutput {
+    handle.join().unwrap_or_else(|_| {
+        connectors::unavailable(
+            provider,
+            "connector-worker",
+            "커넥터 읽기 작업이 예기치 않게 중단되었습니다.",
+        )
+    })
 }
 
 fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
@@ -738,5 +757,21 @@ mod snapshot_tests {
             sessions[0].updated_at.as_deref(),
             Some("2026-07-24T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn a_panicked_connector_degrades_without_losing_the_snapshot() {
+        let handle = std::thread::spawn(|| -> model::ConnectorOutput {
+            panic!("simulated connector failure")
+        });
+        let output = join_connector(handle, Provider::Grok);
+
+        assert_eq!(output.provider, Provider::Grok);
+        assert!(!output.installed);
+        assert!(output.sessions.is_empty());
+        assert!(output
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("예기치 않게 중단")));
     }
 }

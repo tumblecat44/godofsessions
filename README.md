@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The bounded exact-capacity observation M29 desktop slice is working.
+The isolated parallel session-discovery M30 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -69,6 +69,9 @@ now reloads only its exact Capacity Pool after ruling out a busy worktree.
 Known capacity waits persist a visible five-minute retry time, avoiding an
 expensive provider query on every coordinator heartbeat without authorizing
 work from stale evidence.
+The six independent local session connectors now run concurrently and join in
+stable provider order. An unexpected connector-worker failure degrades only
+that source, preserving the same provider-neutral snapshot boundary.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -102,6 +105,7 @@ work from stale evidence.
 - [Transcript-time Claude recency M27](docs/overnight-m27.md)
 - [Activity-time Grok context M28](docs/overnight-m28.md)
 - [Bounded exact capacity observation M29](docs/overnight-m29.md)
+- [Isolated parallel session discovery M30](docs/overnight-m30.md)
 
 The app currently:
 
@@ -121,6 +125,8 @@ The app currently:
 - filters by provider and searches title, project, path, branch, and model
 - detects installed provider versions
 - degrades one connector at a time when a provider format changes
+- reads independent provider stores concurrently, then joins them in stable
+  order and contains an unexpected worker failure to that one source
 - groups the previous 24 hours of activity into projects
 - reads Codex usage through its app-server, Grok usage through its ACP billing
   extension, and Claude usage through the local OpenClaw adapter
