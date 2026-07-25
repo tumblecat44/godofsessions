@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The answer-first bedtime briefing M31 desktop slice is working.
+The dispatchable route-continuity M32 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -76,6 +76,10 @@ After an explicit recommendation request, the screen now reveals the ranked
 answer first, then the frozen full-night schedule and approval, followed by
 host, quota, route, and methodology evidence. Initial entry still leaves
 unfinished Morning Review work first.
+For equally healthy routes, recommendation now prefers a dispatch adapter this
+build can actually approve over a feasibility-only native contract. When a
+Grok project is handed to Hermes, the draft is an honest new goal with an
+explicit bounded-context risk, never a falsely labeled Grok-session resume.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -111,6 +115,7 @@ unfinished Morning Review work first.
 - [Bounded exact capacity observation M29](docs/overnight-m29.md)
 - [Isolated parallel session discovery M30](docs/overnight-m30.md)
 - [Answer-first bedtime briefing M31](docs/overnight-m31.md)
+- [Dispatchable route continuity M32](docs/overnight-m32.md)
 
 The app currently:
 
@@ -141,6 +146,8 @@ The app currently:
   Morning Review as the initial-entry priority
 - distinguishes the execution surface from the model provider and shared
   subscription Capacity Pool
+- prefers an actually writable route after health, and carries a native
+  session id only when that selected surface truly resumes it
 - detects the current Hermes route without exposing credential values
 - compiles each candidate into an inert, operator-reviewable Night Contract
 - shows the proven dispatch interface, durable receipt, and missing guardrails

@@ -228,8 +228,10 @@ fn build_overnight_plan_inner(
             .map(|session| session.provider.as_str())
             .collect::<std::collections::HashSet<_>>()
             .len();
-        let resume_existing = provider_session.is_some();
-        let route = select_execution_route(provider, resume_existing, route_inventory);
+        let resume_available = provider_session.is_some();
+        let route = select_execution_route(provider, resume_available, route_inventory);
+        let resume_existing =
+            resume_available && route.is_none_or(|route| route.surface == provider);
         let (execution_route_id, execution_surface, capacity_pool, route_reason) =
             route_selection(provider, resume_existing, route);
         let project_score = (30.0 - latest_age_hours.min(24.0) * 1.25)
@@ -268,7 +270,12 @@ fn build_overnight_plan_inner(
             risks.push("마지막 활동이 오래되어 현재 목표가 달라졌을 수 있습니다.".to_owned());
         }
         if !resume_existing {
-            risks.push("선택된 제공자에 이어갈 세션이 없어 새 컨텍스트가 필요합니다.".to_owned());
+            risks.push(if provider_session.is_some() {
+                "근거가 된 제공자 세션을 직접 재개하지 않고, 제한된 오늘 문맥으로 새 Hermes goal을 시작합니다."
+                    .to_owned()
+            } else {
+                "선택된 제공자에 이어갈 세션이 없어 새 컨텍스트가 필요합니다.".to_owned()
+            });
         }
         if !budget_is_ready {
             risks.push("현재 사용량을 확인하지 못해 공급자 선택 확신이 낮습니다.".to_owned());
@@ -308,7 +315,11 @@ fn build_overnight_plan_inner(
             execution_surface,
             capacity_pool,
             route_reason,
-            native_session_id: provider_session.map(|session| session.native_id.clone()),
+            native_session_id: if resume_existing {
+                provider_session.map(|session| session.native_id.clone())
+            } else {
+                None
+            },
             resume_existing,
             score: round_one(score),
             confidence,
@@ -317,7 +328,17 @@ fn build_overnight_plan_inner(
                 .iter()
                 .map(|session| format!("{}:{}", session.provider.as_str(), session.native_id))
                 .collect(),
-            provider_reason: provider_choice.reason,
+            provider_reason: if provider_session.is_some()
+                && !resume_existing
+                && execution_surface == Provider::Hermes
+            {
+                format!(
+                    "{}의 최근 프로젝트 맥락과 구독 여유를 근거로 삼되, 아직 연결되지 않은 네이티브 재개 대신 승인 가능한 Hermes goal 경로를 사용합니다.",
+                    provider_display_name(provider)
+                )
+            } else {
+                provider_choice.reason
+            },
             expected_outcome: "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고"
                 .to_owned(),
             verification: vec![
@@ -482,7 +503,7 @@ fn candidate_workspace_key(candidate: &OvernightCandidate) -> String {
 
 fn select_execution_route(
     provider: Provider,
-    resume_existing: bool,
+    resume_available: bool,
     inventory: Option<&ExecutionRouteInventory>,
 ) -> Option<&ExecutionRoute> {
     let inventory = inventory?;
@@ -493,7 +514,7 @@ fn select_execution_route(
             route.model_provider == Some(provider) && route.state != ResourceState::Unavailable
         })
         .max_by_key(|route| {
-            let preferred_surface = if resume_existing {
+            let preferred_surface = if resume_available {
                 route.surface == provider
             } else {
                 route.surface == Provider::Hermes && route.configured
@@ -505,10 +526,18 @@ fn select_execution_route(
             };
             (
                 state_rank,
+                route_is_dispatchable(route, resume_available),
                 preferred_surface,
                 std::cmp::Reverse(route.id.as_str()),
             )
         })
+}
+
+fn route_is_dispatchable(route: &ExecutionRoute, resume_available: bool) -> bool {
+    if route.adapter_readiness != crate::model::AdapterReadiness::ContractReady {
+        return false;
+    }
+    crate::night_contract::supports_dispatch(route.surface, resume_available)
 }
 
 fn route_selection(
@@ -888,6 +917,72 @@ mod tests {
             select_execution_route(Provider::Grok, false, Some(&inventory)).expect("Hermes route");
 
         assert_eq!(selected.id, "hermes:default");
+    }
+
+    #[test]
+    fn writable_hermes_goal_beats_an_unimplemented_native_grok_resume() {
+        let snapshot = snapshot(vec![session(
+            Provider::Grok,
+            "grok-session",
+            "alpha",
+            "Continue the overnight implementation",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: Vec::new(),
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let inventory = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![
+                route(
+                    "grok:native",
+                    Provider::Grok,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "hermes:default",
+                    Provider::Hermes,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context_and_routes(
+            &snapshot,
+            vec![budget(Provider::Grok, 10.0)],
+            &context,
+            &inventory,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let candidate = &plan.candidates[0];
+
+        assert_eq!(candidate.execution_route_id, "hermes:default");
+        assert_eq!(candidate.execution_surface, Provider::Hermes);
+        assert!(!candidate.resume_existing);
+        assert!(candidate.native_session_id.is_none());
+        assert!(candidate.provider_reason.contains("네이티브 재개 대신"));
+        assert!(candidate
+            .risks
+            .iter()
+            .any(|risk| risk.contains("직접 재개하지 않고")));
+        assert!(plan.run_drafts[0].dispatch_supported);
+        assert_eq!(
+            plan.run_drafts[0].run_mode,
+            crate::model::RunMode::NewSession
+        );
     }
 
     #[test]

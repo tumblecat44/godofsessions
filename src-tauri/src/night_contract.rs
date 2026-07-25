@@ -6,6 +6,11 @@ use crate::model::{
 const HERMES_CONTINUATION_TURN_BUDGET: u32 = 20;
 const MAX_FIELD_CHARS: usize = 1_200;
 
+pub(crate) fn supports_dispatch(surface: Provider, resume_existing: bool) -> bool {
+    surface == Provider::Hermes
+        || (resume_existing && matches!(surface, Provider::Codex | Provider::Claude))
+}
+
 pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
     let outcome = clean(&candidate.expected_outcome);
     let verification = clean(&candidate.verification.join(" / "));
@@ -68,11 +73,10 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         permission_profile: PermissionProfile::WorkspaceWrite,
         external_side_effects_allowed: false,
         approval_required: true,
-        dispatch_supported: format == RunDraftFormat::HermesGoal
-            || (matches!(
-                candidate.execution_surface,
-                Provider::Codex | Provider::Claude
-            ) && candidate.resume_existing),
+        dispatch_supported: supports_dispatch(
+            candidate.execution_surface,
+            candidate.resume_existing,
+        ),
     }
 }
 
