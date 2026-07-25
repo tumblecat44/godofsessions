@@ -140,7 +140,8 @@ pub fn build_context_index_from_sources(
         );
         let turns = match turns {
             Ok(turns) if !turns.is_empty() => turns,
-            Ok(_) | Err(_) => {
+            Ok(_) => continue,
+            Err(_) => {
                 *unavailable.entry(session.provider.as_str()).or_default() += 1;
                 continue;
             }
@@ -997,5 +998,65 @@ mod tests {
         assert_eq!(index.projects[0].excerpts.len(), 6);
         assert_eq!(index.projects[0].excerpts[0].text, "첫 목표");
         assert_eq!(index.projects[0].excerpts.last().unwrap().text, "최신 결론");
+    }
+
+    #[test]
+    fn a_valid_empty_transcript_is_not_reported_as_an_adapter_failure() {
+        let directory = tempdir().expect("directory");
+        let grok_root = directory.path().join("grok/session-empty");
+        fs::create_dir_all(&grok_root).expect("grok root");
+        let mut transcript = File::create(grok_root.join("updates.jsonl")).expect("transcript");
+        writeln!(
+            transcript,
+            r#"{{"timestamp":1784880300,"params":{{"update":{{"sessionUpdate":"agent_thought_chunk","content":{{"type":"text","text":"private thought"}}}}}}}}"#
+        )
+        .unwrap();
+        let snapshot = Snapshot {
+            generated_at: "2026-07-24T10:00:00Z".to_owned(),
+            sessions: vec![Session {
+                id: "grok:session-empty".to_owned(),
+                provider: Provider::Grok,
+                native_id: "session-empty".to_owned(),
+                native_kind: NativeKind::Interactive,
+                title: Some("Empty session".to_owned()),
+                cwd: Some("/work/empty".to_owned()),
+                repository: Some("empty".to_owned()),
+                branch: None,
+                worktree: None,
+                created_at: Some("2026-07-24T08:00:00Z".to_owned()),
+                updated_at: Some("2026-07-24T09:00:00Z".to_owned()),
+                status: SessionStatus::Idle,
+                status_confidence: StatusConfidence::Inferred,
+                model: None,
+                tokens_used: None,
+                archived: false,
+                parent_native_id: None,
+                child_count: 0,
+                capabilities: vec![Capability::Discover],
+                source_version: "test".to_owned(),
+                signals: Vec::new(),
+            }],
+            providers: Vec::new(),
+            warnings: Vec::new(),
+            privacy_note: "test".to_owned(),
+        };
+        let sources = ContextSources {
+            codex_sessions: directory.path().join("codex"),
+            claude_projects: directory.path().join("claude"),
+            grok_sessions: directory.path().join("grok"),
+            hermes_state: directory.path().join("hermes.db"),
+            openclaw_agents: directory.path().join("openclaw"),
+        };
+
+        let index = build_context_index_from_sources(
+            &snapshot,
+            &sources,
+            chrono::DateTime::parse_from_rfc3339("2026-07-24T10:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+
+        assert!(index.projects.is_empty());
+        assert!(index.warnings.is_empty());
     }
 }

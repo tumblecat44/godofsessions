@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The provider-event recency M27 desktop slice is working.
+The activity-time cross-provider recency M28 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -61,6 +61,9 @@ immediately.
 Claude session recency now comes from the earliest and latest valid transcript
 event times, with filesystem mtime only as fallback, so a provider migration
 cannot make old projects look active today.
+Grok recency likewise prefers provider `last_active_at` over summary rewrite
+time, and a valid transcript with no safe user/final-agent text is treated as
+empty rather than as a broken adapter.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -92,11 +95,14 @@ cannot make old projects look active today.
 - [Capacity revalidation at scheduled start M25](docs/overnight-m25.md)
 - [Visible start opportunity windows M26](docs/overnight-m26.md)
 - [Transcript-time Claude recency M27](docs/overnight-m27.md)
+- [Activity-time Grok context M28](docs/overnight-m28.md)
 
 The app currently:
 
 - indexes Codex threads from its SQLite index in query-only mode
 - indexes Grok Build `summary.json` metadata
+- prefers Grok's explicit last activity over summary rewrite time and keeps
+  valid empty ACP streams distinct from unreadable context sources
 - indexes Claude Code project metadata and merges the official active-agent
   roster
 - derives Claude creation and activity from bounded provider event timestamps

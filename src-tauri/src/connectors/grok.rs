@@ -127,7 +127,7 @@ fn to_session(native_id: &str, session_path: &Path, summary: GrokSummary) -> Ses
         branch: info.branch,
         worktree: info.worktree,
         created_at: summary.created_at,
-        updated_at: summary.updated_at.or(summary.last_active_at),
+        updated_at: summary.last_active_at.or(summary.updated_at),
         status: if is_live {
             SessionStatus::Running
         } else {
@@ -168,6 +168,8 @@ mod tests {
             r#"{
               "generated_title": "Investigate sessions",
               "created_at": "2026-07-24T01:00:00Z",
+              "updated_at": "2026-07-25T09:29:46Z",
+              "last_active_at": "2026-07-24T02:00:00Z",
               "current_model_id": "grok-test",
               "session_summary": "this field must never enter the canonical session"
             }"#,
@@ -177,6 +179,7 @@ mod tests {
         let session = to_session("abc", Path::new("/missing"), summary);
         assert_eq!(session.title.as_deref(), Some("Investigate sessions"));
         assert_eq!(session.model.as_deref(), Some("grok-test"));
+        assert_eq!(session.updated_at.as_deref(), Some("2026-07-24T02:00:00Z"));
         assert!(session.signals.is_empty());
     }
 }
