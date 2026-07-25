@@ -1584,6 +1584,41 @@ button:active:not(:disabled) {
   font-size: 7px;
 }
 
+.route-dispatch {
+  margin-top: 10px;
+  padding-top: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid var(--etched-edge-soft);
+}
+
+.route-dispatch > span {
+  color: var(--signal-teal);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-weight: 650;
+}
+
+.route-dispatch--guardrail_required > span {
+  color: var(--signal-amber);
+}
+
+.route-dispatch--observe_only > span {
+  color: var(--ink-muted);
+}
+
+.route-dispatch strong {
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 580;
+}
+
+.route-dispatch small {
+  color: var(--ink-muted);
+  font-size: 7px;
+}
+
 .route-card details {
   margin-top: 9px;
   color: var(--signal-amber);

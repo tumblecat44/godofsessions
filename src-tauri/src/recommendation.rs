@@ -592,7 +592,7 @@ fn floor_half(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        Capability, ContextExcerpt, ContextIndex, ContextRole, ExecutionRoute,
+        AdapterReadiness, Capability, ContextExcerpt, ContextIndex, ContextRole, ExecutionRoute,
         ExecutionRouteInventory, NativeKind, ProjectContextBrief, Provider, ResourceBudget,
         ResourceState, RouteCapability, Session, SessionSignal, SessionStatus, Snapshot,
         StatusConfidence, UsageWindow,
@@ -680,6 +680,10 @@ mod tests {
             state,
             configured: true,
             capabilities: vec![RouteCapability::Mcp],
+            adapter_readiness: AdapterReadiness::ContractReady,
+            dispatch_interface: "test".to_owned(),
+            receipt_source: Some("test".to_owned()),
+            dispatch_guardrails: Vec::new(),
             source_label: "test".to_owned(),
             message: None,
             limitations: Vec::new(),

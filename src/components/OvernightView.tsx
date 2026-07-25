@@ -98,6 +98,12 @@ const routeCapabilityLabels = {
   native_sandbox: "네이티브 샌드박스",
 } as const;
 
+const adapterReadinessLabels = {
+  contract_ready: "연결 계약 확정",
+  guardrail_required: "권한 설계 필요",
+  observe_only: "관측만",
+} as const;
+
 function RouteCard({ route }: { route: ExecutionRoute }) {
   return (
     <article className={`route-card route-card--${route.state}`}>
@@ -128,12 +134,30 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
           <span key={capability}>{routeCapabilityLabels[capability]}</span>
         ))}
       </div>
-      {(route.message || route.limitations.length > 0) && (
+      <div
+        className={`route-dispatch route-dispatch--${route.adapter_readiness}`}
+      >
+        <span>{adapterReadinessLabels[route.adapter_readiness]}</span>
+        <strong>{route.dispatch_interface}</strong>
+        {route.receipt_source && <small>결과 근거 · {route.receipt_source}</small>}
+      </div>
+      {(route.message ||
+        route.limitations.length > 0 ||
+        route.dispatch_guardrails.length > 0) && (
         <details>
-          <summary>경로 제약 {route.limitations.length + (route.message ? 1 : 0)}개</summary>
+          <summary>
+            경로 제약{" "}
+            {route.limitations.length +
+              route.dispatch_guardrails.length +
+              (route.message ? 1 : 0)}
+            개
+          </summary>
           {route.message && <p>{route.message}</p>}
           {route.limitations.map((limitation) => (
             <p key={limitation}>{limitation}</p>
+          ))}
+          {route.dispatch_guardrails.map((guardrail) => (
+            <p key={guardrail}>{guardrail}</p>
           ))}
         </details>
       )}

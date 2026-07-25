@@ -79,6 +79,12 @@ An operator-approved instruction to start or resume a Run using the exact
 reviewed Run Draft.
 _Avoid_: Recommendation, assignment
 
+**Run Receipt**:
+Provider-owned evidence that a Dispatch was accepted and what happened next,
+such as a thread/turn ID, ACP completion, Kanban run, or durable task record.
+An exited launcher process is not by itself a Run Receipt.
+_Avoid_: Log line, UI toast
+
 **Control Board**:
 A cross-provider projection of Work Items and Runs for supervision. It is not
 the source of truth for provider-owned state.

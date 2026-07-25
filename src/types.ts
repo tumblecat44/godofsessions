@@ -128,6 +128,11 @@ export type RouteCapability =
   | "cross_session_memory"
   | "native_sandbox";
 
+export type AdapterReadiness =
+  | "contract_ready"
+  | "guardrail_required"
+  | "observe_only";
+
 export interface ExecutionRoute {
   id: string;
   surface: Provider;
@@ -138,6 +143,10 @@ export interface ExecutionRoute {
   state: ResourceState;
   configured: boolean;
   capabilities: RouteCapability[];
+  adapter_readiness: AdapterReadiness;
+  dispatch_interface: string;
+  receipt_source: string | null;
+  dispatch_guardrails: string[];
   source_label: string;
   message: string | null;
   limitations: string[];

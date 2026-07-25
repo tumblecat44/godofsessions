@@ -182,6 +182,14 @@ pub enum RouteCapability {
     NativeSandbox,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterReadiness {
+    ContractReady,
+    GuardrailRequired,
+    ObserveOnly,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExecutionRoute {
     pub id: String,
@@ -193,6 +201,10 @@ pub struct ExecutionRoute {
     pub state: ResourceState,
     pub configured: bool,
     pub capabilities: Vec<RouteCapability>,
+    pub adapter_readiness: AdapterReadiness,
+    pub dispatch_interface: String,
+    pub receipt_source: Option<String>,
+    pub dispatch_guardrails: Vec<String>,
     pub source_label: String,
     pub message: Option<String>,
     pub limitations: Vec<String>,

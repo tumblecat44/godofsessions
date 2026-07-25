@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::model::{
-    CapacityPool, ExecutionRoute, ExecutionRouteInventory, Provider, ResourceBudget, ResourceState,
-    RouteCapability,
+    AdapterReadiness, CapacityPool, ExecutionRoute, ExecutionRouteInventory, Provider,
+    ResourceBudget, ResourceState, RouteCapability,
 };
 
 #[derive(Debug, Clone)]
@@ -167,6 +167,7 @@ fn native_route(
     } else {
         budget.and_then(|item| item.message.clone())
     };
+    let dispatch = native_dispatch_profile(provider);
 
     ExecutionRoute {
         id: id.to_owned(),
@@ -178,6 +179,14 @@ fn native_route(
         state,
         configured,
         capabilities: vec![RouteCapability::ResumeSession, RouteCapability::Mcp],
+        adapter_readiness: dispatch.readiness,
+        dispatch_interface: dispatch.interface.to_owned(),
+        receipt_source: Some(dispatch.receipt.to_owned()),
+        dispatch_guardrails: dispatch
+            .guardrails
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         source_label: binary.display().to_string(),
         message,
         limitations: Vec::new(),
@@ -268,6 +277,7 @@ fn hermes_route(
     } else {
         budget.and_then(|item| item.message.clone())
     };
+    let policy_observe_only = policy_blocked || model_provider.is_none();
 
     ExecutionRoute {
         id: "hermes:default".to_owned(),
@@ -283,6 +293,19 @@ fn hermes_route(
         state,
         configured,
         capabilities,
+        adapter_readiness: if policy_observe_only {
+            AdapterReadiness::ObserveOnly
+        } else {
+            AdapterReadiness::ContractReady
+        },
+        dispatch_interface: "Hermes Kanban goal worker".to_owned(),
+        receipt_source: Some("Hermes task_events + task_runs".to_owned()),
+        dispatch_guardrails: vec![
+            "idempotency key 필수".to_owned(),
+            "max-runtime과 goal-max-turns 필수".to_owned(),
+            "dir:<workspace> 경로만 사용".to_owned(),
+            "--yolo와 oneshot 자동승인 경로 금지".to_owned(),
+        ],
         source_label: "Hermes config.yaml (안전한 모델 키만 읽음)".to_owned(),
         message,
         limitations,
@@ -300,9 +323,81 @@ fn unavailable_hermes_route(message: &str) -> ExecutionRoute {
         state: ResourceState::Unavailable,
         configured: false,
         capabilities: Vec::new(),
+        adapter_readiness: AdapterReadiness::ObserveOnly,
+        dispatch_interface: "Hermes Kanban goal worker".to_owned(),
+        receipt_source: None,
+        dispatch_guardrails: vec!["설정과 인증 확인 전에는 관측만 허용".to_owned()],
         source_label: "Hermes config.yaml".to_owned(),
         message: Some(message.to_owned()),
         limitations: Vec::new(),
+    }
+}
+
+struct DispatchProfile {
+    readiness: AdapterReadiness,
+    interface: &'static str,
+    receipt: &'static str,
+    guardrails: &'static [&'static str],
+}
+
+fn native_dispatch_profile(provider: Provider) -> DispatchProfile {
+    match provider {
+        Provider::Codex => DispatchProfile {
+            readiness: AdapterReadiness::ContractReady,
+            interface: "Codex app-server JSON-RPC",
+            receipt: "thread + turn + item events",
+            guardrails: &[
+                "workspace-write sandbox 고정",
+                "approval policy never는 승인 생략이 아니라 권한 밖 실행 실패로 사용",
+                "danger-full-access 금지",
+            ],
+        },
+        Provider::Grok => DispatchProfile {
+            readiness: AdapterReadiness::ContractReady,
+            interface: "Grok ACP stdio",
+            receipt: "ACP session/update + completion",
+            guardrails: &[
+                "ACP 권한 요청을 앱이 명시적으로 판정",
+                "workspace sandbox와 deny 규칙 고정",
+                "--always-approve 금지",
+            ],
+        },
+        Provider::Claude => DispatchProfile {
+            readiness: AdapterReadiness::GuardrailRequired,
+            interface: "Claude background agent",
+            receipt: "claude agents --json",
+            guardrails: &[
+                "background 모드용 allowedTools/deniedTools 정책 필요",
+                "bypassPermissions 금지",
+                "중간 승인 요청이 생길 때 자동으로 Human Gate로 전환",
+            ],
+        },
+        Provider::Cursor => DispatchProfile {
+            readiness: AdapterReadiness::GuardrailRequired,
+            interface: "Cursor Agent stream-json",
+            receipt: "stream-json events + session id",
+            guardrails: &[
+                "print 모드 쓰기에는 --force가 필요하므로 프로젝트별 deny 정책 선행",
+                "sandbox enabled 고정",
+                "외부 경로와 자격 증명 파일 deny 규칙 필요",
+            ],
+        },
+        Provider::Openclaw => DispatchProfile {
+            readiness: AdapterReadiness::GuardrailRequired,
+            interface: "OpenClaw Gateway agent",
+            receipt: "JSON result + durable task/session state",
+            guardrails: &[
+                "--deliver 절대 금지",
+                "실행 전 Gateway approvals 스냅샷 확인",
+                "전송 손실 시 세션 영수증 확인 전 재시도 금지",
+            ],
+        },
+        Provider::Hermes => DispatchProfile {
+            readiness: AdapterReadiness::ObserveOnly,
+            interface: "Hermes",
+            receipt: "Hermes session",
+            guardrails: &["Hermes 기본 경로는 별도 프로필에서 정의"],
+        },
     }
 }
 
@@ -383,7 +478,8 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::model::{
-        CapacityPool, Provider, ResourceBudget, ResourceState, RouteCapability, UsageWindow,
+        AdapterReadiness, CapacityPool, Provider, ResourceBudget, ResourceState, RouteCapability,
+        UsageWindow,
     };
 
     use super::*;
@@ -456,6 +552,12 @@ mod tests {
         assert!(route
             .capabilities
             .contains(&RouteCapability::CrossSessionMemory));
+        assert_eq!(route.adapter_readiness, AdapterReadiness::ContractReady);
+        assert!(route.dispatch_interface.contains("Kanban"));
+        assert!(route
+            .dispatch_guardrails
+            .iter()
+            .any(|item| item.contains("idempotency")));
     }
 
     #[test]
@@ -506,6 +608,7 @@ mod tests {
             .limitations
             .iter()
             .any(|item| item.contains("session_search")));
+        assert_eq!(hermes.adapter_readiness, AdapterReadiness::ContractReady);
     }
 
     #[test]
@@ -536,9 +639,67 @@ mod tests {
 
         assert_eq!(route.state, ResourceState::Degraded);
         assert_eq!(route.capacity_pool, CapacityPool::Unknown);
+        assert_eq!(route.adapter_readiness, AdapterReadiness::ObserveOnly);
         assert!(route
             .limitations
             .iter()
             .any(|item| item.contains("자동 배정하지 않음")));
+    }
+
+    #[test]
+    fn native_routes_expose_provider_specific_dispatch_receipts_and_guardrails() {
+        let (_directory, sources) = sources();
+        for binary in [
+            &sources.claude_binary,
+            &sources.codex_binary,
+            &sources.grok_binary,
+            &sources.cursor_binary,
+            &sources.openclaw_binary,
+        ] {
+            fs::write(binary, "").expect("binary");
+        }
+        fs::write(&sources.codex_auth, r#"{"tokens":{}}"#).expect("codex auth");
+
+        let inventory = load_from(
+            &sources,
+            &[
+                budget(Provider::Claude),
+                budget(Provider::Codex),
+                budget(Provider::Grok),
+            ],
+            Utc.with_ymd_and_hms(2026, 7, 24, 8, 0, 0).unwrap(),
+        );
+        let route = |id: &str| {
+            inventory
+                .routes
+                .iter()
+                .find(|route| route.id == id)
+                .expect("route")
+        };
+
+        assert_eq!(
+            route("codex:native").adapter_readiness,
+            AdapterReadiness::ContractReady
+        );
+        assert!(route("codex:native")
+            .receipt_source
+            .as_deref()
+            .is_some_and(|value| value.contains("turn")));
+        assert_eq!(
+            route("grok:native").adapter_readiness,
+            AdapterReadiness::ContractReady
+        );
+        assert_eq!(
+            route("claude:native").adapter_readiness,
+            AdapterReadiness::GuardrailRequired
+        );
+        assert_eq!(
+            route("cursor:native").adapter_readiness,
+            AdapterReadiness::GuardrailRequired
+        );
+        assert!(route("openclaw:native")
+            .dispatch_guardrails
+            .iter()
+            .any(|item| item.contains("--deliver")));
     }
 }

@@ -37,6 +37,8 @@ The read-only M4 desktop slice is working.
 - [Control Board and Today Context M2](docs/overnight-m2.md)
 - [Execution Routes M3](docs/overnight-m3.md)
 - [Night Contracts M4](docs/overnight-m4.md)
+- [Dispatch adapter feasibility](docs/dispatch-feasibility.md)
+- [Dispatch readiness M5](docs/overnight-m5.md)
 
 The app currently:
 
@@ -61,6 +63,8 @@ The app currently:
   subscription Capacity Pool
 - detects the current Hermes route without exposing credential values
 - compiles each candidate into an inert, operator-reviewable Night Contract
+- shows the proven dispatch interface, durable receipt, and missing guardrails
+  for every route
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
