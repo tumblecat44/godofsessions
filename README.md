@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The route-risk continuity M36 desktop slice is working.
+The bounded external-workspace observation M37 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -96,6 +96,10 @@ Material limitations from the exact selected execution route now appear in
 the answer-first candidate risks as well as the lower route inventory. A
 Codex-backed Hermes candidate therefore discloses unavailable in-loop Hermes
 tools and shared auxiliary subscription use before approval.
+While waiting on an external provider session that occupies the approved
+worktree, the coordinator now persists a one-minute retry time instead of
+rebuilding all six provider snapshots every 15 seconds. Same-plan workspace
+dependencies remain responsive on every cheap coordinator tick.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -136,6 +140,7 @@ tools and shared auxiliary subscription use before approval.
 - [Portfolio-only deferred approvals M34](docs/overnight-m34.md)
 - [Explainable schedule gates M35](docs/overnight-m35.md)
 - [Selected route risks M36](docs/overnight-m36.md)
+- [Bounded external-workspace observation M37](docs/overnight-m37.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:
@@ -183,6 +188,8 @@ The app currently:
   it waits for quota reset, a shared subscription, or a shared worktree
 - carries limitations from the selected route into the recommended
   candidate's visible risks before the bedtime approval
+- separates cheap same-plan workspace tracking from bounded external-session
+  discovery, persisting the next retry instead of polling every heartbeat
 - freezes every contiguous, execution-ready item in each visible independent
   lane into one exact, expiring portfolio approval
 - persists that fixed schedule before launch, then runs a detached,

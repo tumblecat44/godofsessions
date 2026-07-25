@@ -22,6 +22,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const EVIDENCE_GRACE_SECONDS: i64 = 120;
 const EXHAUSTED_REMAINING_PERCENT: f64 = 0.5;
 const CAPACITY_RECHECK_MINUTES: i64 = 5;
+const EXTERNAL_WORKSPACE_RECHECK_MINUTES: i64 = 1;
 
 pub(super) fn run(request: CoordinatorWorkerRequest) -> Result<(), String> {
     let _lease = ledger::acquire_lease(&request.idempotency_key)?;
@@ -141,14 +142,14 @@ fn tick(
             next_startable_item(plan, lane_index, now).map(|item_index| (lane_index, item_index))
         })
         .filter(|(lane_index, item_index)| {
-            capacity_retry_due(&plan.lanes[*lane_index].items[*item_index], now)
+            waiting_retry_due(&plan.lanes[*lane_index].items[*item_index], now)
         })
         .collect::<Vec<_>>();
     if startable.is_empty() {
         return Ok(Vec::new());
     }
-    let mut occupied_workspaces = active_plan_workspace_keys(plan);
-    occupied_workspaces.extend(active_session_workspace_keys());
+    let mut occupied_plan_workspaces = active_plan_workspace_keys(plan);
+    let mut occupied_external_workspaces = None;
     let mut budgets_by_pool = BTreeMap::<CapacityPool, ResourceBudget>::new();
     let mut outcomes = Vec::new();
     for (lane_index, item_index) in startable {
@@ -169,13 +170,25 @@ fn tick(
         let capacity_pool = plan.lanes[lane_index].capacity_pool;
         let workspace_key =
             crate::workspace_identity::key_or_path(&item.approved.dispatch.draft.workspace);
-        if occupied_workspaces.contains(&workspace_key) {
+        if occupied_plan_workspaces.contains(&workspace_key) {
             let item = &mut plan.lanes[lane_index].items[item_index];
             item.waiting_kind = Some(CoordinatorWaitKind::Workspace);
             item.waiting_retry_at = None;
             item.waiting_reason = Some(
-                "같은 실제 작업공간에서 다른 세션이나 승인 작업이 실행 중이라 종료 근거를 기다립니다."
+                "같은 실제 작업공간에서 다른 승인 작업이 실행 중이라 공급자 종료 근거를 기다립니다."
                     .to_owned(),
+            );
+            continue;
+        }
+        let occupied_external_workspaces =
+            occupied_external_workspaces.get_or_insert_with(active_session_workspace_keys);
+        if occupied_external_workspaces.contains(&workspace_key) {
+            let item = &mut plan.lanes[lane_index].items[item_index];
+            item.waiting_kind = Some(CoordinatorWaitKind::Workspace);
+            item.waiting_retry_at =
+                Some(now + chrono::Duration::minutes(EXTERNAL_WORKSPACE_RECHECK_MINUTES));
+            item.waiting_reason = Some(
+                "같은 실제 작업공간에서 외부 세션이 실행 중이라 종료 신호를 기다립니다.".to_owned(),
             );
             continue;
         }
@@ -195,7 +208,7 @@ fn tick(
             item.waiting_retry_at = Some(now + chrono::Duration::minutes(CAPACITY_RECHECK_MINUTES));
             continue;
         }
-        occupied_workspaces.insert(workspace_key.clone());
+        occupied_plan_workspaces.insert(workspace_key.clone());
 
         {
             let item = &mut plan.lanes[lane_index].items[item_index];
@@ -263,7 +276,7 @@ fn tick(
         plan.updated_at = Utc::now();
         ledger::update(plan)?;
         if plan.lanes[lane_index].items[item_index].state.is_terminal() {
-            occupied_workspaces.remove(&workspace_key);
+            occupied_plan_workspaces.remove(&workspace_key);
         }
     }
     halt_uncertain_lanes(plan, Utc::now());
@@ -470,9 +483,8 @@ fn dispatch_one(
     }
 }
 
-fn capacity_retry_due(item: &CoordinatorItem, now: DateTime<Utc>) -> bool {
-    item.waiting_kind != Some(CoordinatorWaitKind::Capacity)
-        || item.waiting_retry_at.is_none_or(|retry_at| now >= retry_at)
+fn waiting_retry_due(item: &CoordinatorItem, now: DateTime<Utc>) -> bool {
+    item.waiting_retry_at.is_none_or(|retry_at| now >= retry_at)
 }
 
 fn capacity_wait_reason(capacity_pool: CapacityPool, budgets: &[ResourceBudget]) -> Option<String> {
@@ -769,13 +781,32 @@ mod tests {
         waiting.waiting_reason = Some("사용량 회복을 기다립니다.".to_owned());
         waiting.waiting_retry_at = Some(now + chrono::Duration::minutes(5));
 
-        assert!(!capacity_retry_due(
+        assert!(!waiting_retry_due(
             &waiting,
             now + chrono::Duration::minutes(4)
         ));
-        assert!(capacity_retry_due(
+        assert!(waiting_retry_due(
             &waiting,
             now + chrono::Duration::minutes(5)
+        ));
+    }
+
+    #[test]
+    fn an_external_workspace_wait_uses_a_bounded_retry_interval() {
+        let mut waiting = item(1, 0.0);
+        let now = plan().approved_at;
+        waiting.waiting_kind = Some(CoordinatorWaitKind::Workspace);
+        waiting.waiting_reason = Some("외부 세션 종료를 기다립니다.".to_owned());
+        waiting.waiting_retry_at =
+            Some(now + chrono::Duration::minutes(EXTERNAL_WORKSPACE_RECHECK_MINUTES));
+
+        assert!(!waiting_retry_due(
+            &waiting,
+            now + chrono::Duration::seconds(59)
+        ));
+        assert!(waiting_retry_due(
+            &waiting,
+            now + chrono::Duration::minutes(1)
         ));
     }
 
