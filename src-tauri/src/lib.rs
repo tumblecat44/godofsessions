@@ -557,7 +557,7 @@ mod live_tests {
                 && !draft.external_side_effects_allowed
                 && (draft.dispatch_supported
                     == (draft.format == crate::model::RunDraftFormat::HermesGoal
-                        || (draft.route_id == "codex:native"
+                        || (matches!(draft.route_id.as_str(), "codex:native" | "claude:native")
                             && draft.run_mode == crate::model::RunMode::ResumeExisting)))
         }));
         assert!(plan
@@ -584,6 +584,10 @@ mod live_tests {
                     .protocol_requests
                     .iter()
                     .any(|request| request.method == "turn/start"),
+                Provider::Claude => preflight
+                    .commands
+                    .iter()
+                    .any(|command| command.step == "fork_claude_session"),
                 _ => false,
             }
         }));

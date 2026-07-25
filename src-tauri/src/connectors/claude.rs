@@ -6,6 +6,7 @@ use std::{
     process::Command,
 };
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use walkdir::WalkDir;
 
@@ -30,6 +31,8 @@ struct ClaudeEventMetadata {
     git_branch: Option<String>,
     timestamp: Option<String>,
     ai_title: Option<String>,
+    #[serde(skip)]
+    latest_timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -155,10 +158,17 @@ fn metadata_from_jsonl(path: &Path) -> std::io::Result<ClaudeEventMetadata> {
             let Ok(event) = serde_json::from_str::<ClaudeEventMetadata>(raw_line) else {
                 continue;
             };
+            if let Some(timestamp) = event
+                .timestamp
+                .as_deref()
+                .filter(|value| DateTime::parse_from_rfc3339(value).is_ok())
+            {
+                replace_timestamp(&mut result.timestamp, timestamp, false);
+                replace_timestamp(&mut result.latest_timestamp, timestamp, true);
+            }
             result.session_id = result.session_id.or(event.session_id);
             result.cwd = result.cwd.or(event.cwd);
             result.git_branch = result.git_branch.or(event.git_branch);
-            result.timestamp = result.timestamp.or(event.timestamp);
             result.ai_title = event.ai_title.or(result.ai_title);
         }
     }
@@ -199,7 +209,9 @@ fn to_session(
         branch: metadata.git_branch,
         worktree: None,
         created_at: metadata.timestamp,
-        updated_at: file_modified_rfc3339(path),
+        updated_at: metadata
+            .latest_timestamp
+            .or_else(|| file_modified_rfc3339(path)),
         status,
         status_confidence: confidence,
         model: None,
@@ -215,6 +227,25 @@ fn to_session(
             .unwrap_or_default(),
         native_id,
     })
+}
+
+fn replace_timestamp(target: &mut Option<String>, candidate: &str, prefer_later: bool) {
+    let Ok(candidate_time) = DateTime::parse_from_rfc3339(candidate) else {
+        return;
+    };
+    let should_replace = target
+        .as_deref()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .is_none_or(|current| {
+            if prefer_later {
+                candidate_time > current
+            } else {
+                candidate_time < current
+            }
+        });
+    if should_replace {
+        *target = Some(candidate_time.with_timezone(&Utc).to_rfc3339());
+    }
 }
 
 fn session_from_agent(agent: &ClaudeAgent) -> Session {
@@ -321,6 +352,10 @@ mod tests {
         assert_eq!(metadata.session_id.as_deref(), Some("session-1"));
         assert_eq!(metadata.cwd.as_deref(), Some("/tmp/repo"));
         assert_eq!(metadata.ai_title.as_deref(), Some("Session title"));
+        assert_eq!(
+            metadata.latest_timestamp.as_deref(),
+            Some("2026-07-24T01:00:00+00:00")
+        );
     }
 
     #[test]
@@ -331,5 +366,32 @@ mod tests {
 
         let metadata = metadata_from_jsonl(file.path()).expect("metadata");
         assert_eq!(metadata.session_id.as_deref(), Some("still-safe"));
+    }
+
+    #[test]
+    fn transcript_event_time_wins_over_a_later_file_migration_mtime() {
+        let mut file = tempfile::NamedTempFile::new().expect("file");
+        writeln!(
+            file,
+            r#"{{"type":"assistant","sessionId":"session-1","cwd":"/tmp/repo","timestamp":"2026-07-23T17:05:40.030Z"}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"user","sessionId":"session-1","cwd":"/tmp/repo","timestamp":"2026-07-23T03:36:51.548Z"}}"#
+        )
+        .unwrap();
+
+        let metadata = metadata_from_jsonl(file.path()).expect("metadata");
+        let session = to_session(file.path(), metadata, &HashMap::new()).expect("session");
+
+        assert_eq!(
+            session.created_at.as_deref(),
+            Some("2026-07-23T03:36:51.548+00:00")
+        );
+        assert_eq!(
+            session.updated_at.as_deref(),
+            Some("2026-07-23T17:05:40.030+00:00")
+        );
     }
 }

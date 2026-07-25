@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The visible start-opportunity M26 desktop slice is working.
+The provider-event recency M27 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -58,6 +58,9 @@ Every durable item now exposes its immutable eligible and latest-safe start
 times. Running work shows its actual start age; delayed work shows the last
 opportunity to fit the full accepted budget instead of claiming it will start
 immediately.
+Claude session recency now comes from the earliest and latest valid transcript
+event times, with filesystem mtime only as fallback, so a provider migration
+cannot make old projects look active today.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -88,6 +91,7 @@ immediately.
 - [Host readiness before approval M24](docs/overnight-m24.md)
 - [Capacity revalidation at scheduled start M25](docs/overnight-m25.md)
 - [Visible start opportunity windows M26](docs/overnight-m26.md)
+- [Transcript-time Claude recency M27](docs/overnight-m27.md)
 
 The app currently:
 
@@ -95,6 +99,8 @@ The app currently:
 - indexes Grok Build `summary.json` metadata
 - indexes Claude Code project metadata and merges the official active-agent
   roster
+- derives Claude creation and activity from bounded provider event timestamps
+  rather than treating transcript file maintenance as conversation activity
 - indexes only Cursor Composer headers, never Composer conversation records
 - indexes Hermes session rows without selecting message content
 - indexes OpenClaw session registries without opening transcript JSONL
