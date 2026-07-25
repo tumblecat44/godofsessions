@@ -29,6 +29,20 @@ export type Capability =
   | "resume"
   | "fork";
 
+export type SessionSignal =
+  | "unread"
+  | "pending_plan"
+  | "blocking_action"
+  | "recent_activity"
+  | "write_lock_recent"
+  | "agent_running"
+  | "agent_idle"
+  | "agent_waiting"
+  | "agent_blocked"
+  | "agent_failed"
+  | "agent_completed"
+  | "agent_unknown";
+
 export interface Session {
   id: string;
   provider: Provider;
@@ -50,7 +64,7 @@ export interface Session {
   child_count: number;
   capabilities: Capability[];
   source_version: string;
-  signals: string[];
+  signals: SessionSignal[];
 }
 
 export type ProviderState = "ready" | "degraded" | "missing";

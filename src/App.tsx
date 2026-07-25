@@ -12,7 +12,12 @@ import { SessionSection } from "./components/SessionSection";
 import { Sidebar } from "./components/Sidebar";
 import { fallbackTitle, relativeTime } from "./lib/format";
 import { previewSnapshot } from "./preview-data";
-import type { Provider, Session, Snapshot } from "./types";
+import type {
+  Provider,
+  Session,
+  SessionStatus,
+  Snapshot,
+} from "./types";
 
 type LoadState =
   | { kind: "loading" }
@@ -33,6 +38,21 @@ function matchesQuery(session: Session, query: string) {
   ]
     .filter(Boolean)
     .some((value) => value!.toLocaleLowerCase().includes(normalized));
+}
+
+type SectionKey = "needs_me" | "running" | "recent";
+
+function sectionForStatus(status: SessionStatus): SectionKey {
+  switch (status) {
+    case "needs_input":
+    case "blocked":
+      return "needs_me";
+    case "running":
+    case "waiting":
+      return "running";
+    default:
+      return "recent";
+  }
 }
 
 function App() {
@@ -92,19 +112,13 @@ function App() {
   }, [query, selectedProvider, snapshot]);
 
   const needsMe = filteredSessions.filter(
-    (session) =>
-      session.status === "needs_input" || session.status === "blocked",
+    (session) => sectionForStatus(session.status) === "needs_me",
   );
   const running = filteredSessions.filter(
-    (session) =>
-      session.status === "running" || session.status === "waiting",
+    (session) => sectionForStatus(session.status) === "running",
   );
   const recent = filteredSessions.filter(
-    (session) =>
-      session.status !== "needs_input" &&
-      session.status !== "blocked" &&
-      session.status !== "running" &&
-      session.status !== "waiting",
+    (session) => sectionForStatus(session.status) === "recent",
   );
 
   if (state.kind === "loading") {

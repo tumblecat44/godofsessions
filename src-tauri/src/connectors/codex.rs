@@ -1,26 +1,30 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use chrono::Utc;
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::model::{
-    Capability, ConnectorOutput, NativeKind, Provider, Session, SessionStatus, StatusConfidence,
+    Capability, ConnectorOutput, NativeKind, Provider, Session, SessionSignal, SessionStatus,
+    StatusConfidence,
 };
 
 use super::{
-    command_version, home_path, metadata_capabilities, repository_name, safe_title,
-    unix_millis_to_rfc3339, unavailable,
+    command_version, home_path, metadata_capabilities, open_read_only_sqlite, repository_name,
+    safe_title, unavailable, unix_millis_to_rfc3339,
 };
 
 const SOURCE_VERSION: &str = "state_5";
 
 pub fn load() -> ConnectorOutput {
     let Some(state_path) = home_path(&[".codex", "state_5.sqlite"]) else {
-        return unavailable(Provider::Codex, SOURCE_VERSION, "홈 폴더를 찾지 못했습니다.");
+        return unavailable(
+            Provider::Codex,
+            SOURCE_VERSION,
+            "홈 폴더를 찾지 못했습니다.",
+        );
     };
 
     if !state_path.is_file() {
@@ -57,18 +61,8 @@ fn codex_version() -> Option<String> {
         .flatten()
 }
 
-fn read_only_connection(path: &Path) -> rusqlite::Result<Connection> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    connection.busy_timeout(Duration::from_millis(800))?;
-    connection.pragma_update(None, "query_only", true)?;
-    Ok(connection)
-}
-
 fn load_from_path(path: &Path) -> rusqlite::Result<Vec<Session>> {
-    let connection = read_only_connection(path)?;
+    let connection = open_read_only_sqlite(path)?;
     let columns = table_columns(&connection, "threads")?;
 
     for required in ["id", "created_at", "updated_at", "source", "cwd", "title"] {
@@ -77,14 +71,14 @@ fn load_from_path(path: &Path) -> rusqlite::Result<Vec<Session>> {
         }
     }
 
-    let expression = |preferred: &str, fallback: &str| {
+    let existing_column_or_expression = |preferred: &str, fallback: &str| {
         if columns.contains(preferred) {
             preferred.to_owned()
         } else {
             fallback.to_owned()
         }
     };
-    let nullable = |column: &str| {
+    let column_or_null = |column: &str| {
         if columns.contains(column) {
             column.to_owned()
         } else {
@@ -92,16 +86,16 @@ fn load_from_path(path: &Path) -> rusqlite::Result<Vec<Session>> {
         }
     };
 
-    let created_ms = expression("created_at_ms", "created_at * 1000");
-    let updated_ms = expression("updated_at_ms", "updated_at * 1000");
+    let created_ms = existing_column_or_expression("created_at_ms", "created_at * 1000");
+    let updated_ms = existing_column_or_expression("updated_at_ms", "updated_at * 1000");
     let sql = format!(
         "SELECT id, {created_ms}, {updated_ms}, source, cwd, title, \
          {branch}, {tokens}, {archived}, {model}, {version} FROM threads",
-        branch = nullable("git_branch"),
-        tokens = nullable("tokens_used"),
-        archived = expression("archived", "0"),
-        model = nullable("model"),
-        version = nullable("cli_version"),
+        branch = column_or_null("git_branch"),
+        tokens = column_or_null("tokens_used"),
+        archived = existing_column_or_expression("archived", "0"),
+        model = column_or_null("model"),
+        version = column_or_null("cli_version"),
     );
 
     let (parents, children) = read_spawn_edges(&connection).unwrap_or_default();
@@ -151,7 +145,7 @@ fn load_from_path(path: &Path) -> rusqlite::Result<Vec<Session>> {
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| SOURCE_VERSION.to_owned()),
             signals: if is_active {
-                vec!["recent_activity".to_owned()]
+                vec![SessionSignal::RecentActivity]
             } else {
                 Vec::new()
             },
@@ -187,7 +181,9 @@ fn read_spawn_edges(
     let mut statement =
         connection.prepare("SELECT parent_thread_id, child_thread_id FROM thread_spawn_edges")?;
     for (parent, child) in statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
         .filter_map(Result::ok)
     {
         parents.insert(child, parent.clone());
@@ -204,10 +200,10 @@ fn read_active_threads() -> rusqlite::Result<HashSet<String>> {
         return Ok(HashSet::new());
     }
 
-    let connection = read_only_connection(&log_path)?;
+    let connection = open_read_only_sqlite(&log_path)?;
     let cutoff = Utc::now().timestamp() - 300;
-    let mut statement =
-        connection.prepare("SELECT DISTINCT thread_id FROM logs WHERE ts >= ?1 AND thread_id IS NOT NULL")?;
+    let mut statement = connection
+        .prepare("SELECT DISTINCT thread_id FROM logs WHERE ts >= ?1 AND thread_id IS NOT NULL")?;
     let rows = statement.query_map([cutoff], |row| row.get::<_, String>(0))?;
     Ok(rows.filter_map(Result::ok).collect())
 }

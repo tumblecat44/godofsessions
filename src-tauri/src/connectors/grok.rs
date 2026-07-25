@@ -8,7 +8,8 @@ use serde::Deserialize;
 use walkdir::WalkDir;
 
 use crate::model::{
-    Capability, ConnectorOutput, NativeKind, Provider, Session, SessionStatus, StatusConfidence,
+    Capability, ConnectorOutput, NativeKind, Provider, Session, SessionSignal, SessionStatus,
+    StatusConfidence,
 };
 
 use super::{
@@ -68,7 +69,7 @@ pub fn load() -> ConnectorOutput {
             continue;
         };
 
-        match fs::File::open(&summary_path)
+        match fs::File::open(summary_path)
             .map_err(serde_json::Error::io)
             .and_then(serde_json::from_reader::<_, GrokSummary>)
         {
@@ -141,7 +142,7 @@ fn to_session(native_id: &str, session_path: &Path, summary: GrokSummary) -> Ses
         capabilities,
         source_version: SOURCE_VERSION.to_owned(),
         signals: if is_live {
-            vec!["write_lock_recent".to_owned()]
+            vec![SessionSignal::WriteLockRecent]
         } else {
             Vec::new()
         },

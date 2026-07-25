@@ -6,9 +6,11 @@ mod grok;
 use std::{
     path::{Path, PathBuf},
     process::Command,
+    time::Duration,
 };
 
 use chrono::{DateTime, TimeZone, Utc};
+use rusqlite::{Connection, OpenFlags};
 
 use crate::model::{Capability, ConnectorOutput};
 
@@ -80,6 +82,16 @@ pub fn command_version(binary: &Path, arguments: &[&str]) -> Option<String> {
     }
     let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     (!version.is_empty()).then_some(version)
+}
+
+pub fn open_read_only_sqlite(path: &Path) -> rusqlite::Result<Connection> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection.busy_timeout(Duration::from_millis(800))?;
+    connection.pragma_update(None, "query_only", true)?;
+    Ok(connection)
 }
 
 pub fn unavailable(

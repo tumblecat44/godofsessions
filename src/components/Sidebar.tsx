@@ -49,7 +49,9 @@ export function Sidebar({
             type="button"
             key={provider.provider}
             onClick={() => onSelectProvider(provider.provider)}
-            title={provider.message || undefined}
+            title={[provider.source_label, provider.message]
+              .filter(Boolean)
+              .join(" · ")}
           >
             <ProviderMark provider={provider.provider} />
             <span>{providerNames[provider.provider]}</span>

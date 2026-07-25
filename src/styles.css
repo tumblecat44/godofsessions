@@ -824,6 +824,24 @@ button:active:not(:disabled) {
   flex: 0 0 auto;
 }
 
+.capability-badges {
+  display: flex !important;
+  justify-content: flex-end;
+  gap: 3px !important;
+  overflow: visible !important;
+}
+
+.capability-badges i {
+  padding: 2px 4px 1px;
+  color: var(--ink-muted);
+  border: 1px solid var(--etched-edge);
+  border-radius: 3px;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
 .session-state {
   min-width: 0;
   display: flex;

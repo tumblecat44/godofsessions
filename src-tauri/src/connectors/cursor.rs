@@ -1,20 +1,17 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::model::{
-    ConnectorOutput, NativeKind, Provider, Session, SessionStatus, StatusConfidence,
+    ConnectorOutput, NativeKind, Provider, Session, SessionSignal, SessionStatus, StatusConfidence,
 };
 
 use super::{
-    command_version, home_path, metadata_capabilities, repository_name, safe_title,
-    unix_millis_to_rfc3339, unix_seconds_to_rfc3339, unavailable,
+    command_version, home_path, metadata_capabilities, open_read_only_sqlite, repository_name,
+    safe_title, unavailable, unix_millis_to_rfc3339, unix_seconds_to_rfc3339,
 };
 
 const SOURCE_VERSION: &str = "composer-headers-v1";
@@ -86,7 +83,11 @@ pub fn load() -> ConnectorOutput {
         "globalStorage",
         "state.vscdb",
     ]) else {
-        return unavailable(Provider::Cursor, SOURCE_VERSION, "홈 폴더를 찾지 못했습니다.");
+        return unavailable(
+            Provider::Cursor,
+            SOURCE_VERSION,
+            "홈 폴더를 찾지 못했습니다.",
+        );
     };
     if !database_path.is_file() {
         return unavailable(
@@ -102,9 +103,7 @@ pub fn load() -> ConnectorOutput {
             installed: true,
             source_label: cursor_version().unwrap_or_else(|| SOURCE_VERSION.to_owned()),
             sessions,
-            warning: Some(
-                "Cursor 내부 Composer 헤더 형식은 실험적으로 지원됩니다.".to_owned(),
-            ),
+            warning: Some("Cursor 내부 Composer 헤더 형식은 실험적으로 지원됩니다.".to_owned()),
         },
         Err(error) => ConnectorOutput {
             provider: Provider::Cursor,
@@ -117,12 +116,7 @@ pub fn load() -> ConnectorOutput {
 }
 
 fn load_from_path(path: &Path) -> Result<Vec<Session>, Box<dyn std::error::Error>> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    connection.busy_timeout(Duration::from_millis(800))?;
-    connection.pragma_update(None, "query_only", true)?;
+    let connection = open_read_only_sqlite(path)?;
 
     let raw: Option<String> = connection
         .query_row(
@@ -163,8 +157,7 @@ fn to_session(header: CursorHeader) -> Option<Session> {
         });
     let has_unread_messages = header.has_unread_messages.unwrap_or(false);
     let has_pending_plan = header.has_pending_plan.unwrap_or(false);
-    let has_blocking_pending_actions =
-        header.has_blocking_pending_actions.unwrap_or(false);
+    let has_blocking_pending_actions = header.has_blocking_pending_actions.unwrap_or(false);
     let is_archived = header.is_archived.unwrap_or(false);
     let is_worktree = header.is_worktree.unwrap_or(false);
     let child_count = header.num_sub_composers.unwrap_or_default();
@@ -178,13 +171,13 @@ fn to_session(header: CursorHeader) -> Option<Session> {
         .filter(|value| !value.is_empty());
     let mut signals = Vec::new();
     if has_unread_messages {
-        signals.push("unread".to_owned());
+        signals.push(SessionSignal::Unread);
     }
     if has_pending_plan {
-        signals.push("pending_plan".to_owned());
+        signals.push(SessionSignal::PendingPlan);
     }
     if has_blocking_pending_actions {
-        signals.push("blocking_action".to_owned());
+        signals.push(SessionSignal::BlockingAction);
     }
     let needs_input = !signals.is_empty();
     let native_id = header.composer_id;
@@ -292,6 +285,7 @@ fn file_uri_to_path(uri: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
 
     #[test]
     fn unread_and_pending_headers_become_attention_signals() {
@@ -312,7 +306,10 @@ mod tests {
         let session = to_session(header).unwrap();
 
         assert_eq!(session.status, SessionStatus::NeedsInput);
-        assert_eq!(session.signals, vec!["unread", "pending_plan"]);
+        assert_eq!(
+            session.signals,
+            vec![SessionSignal::Unread, SessionSignal::PendingPlan]
+        );
         assert_eq!(session.child_count, 2);
         assert_eq!(session.repository.as_deref(), Some("session-app"));
     }

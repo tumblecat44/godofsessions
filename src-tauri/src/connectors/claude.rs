@@ -10,7 +10,8 @@ use serde::Deserialize;
 use walkdir::WalkDir;
 
 use crate::model::{
-    Capability, ConnectorOutput, NativeKind, Provider, Session, SessionStatus, StatusConfidence,
+    Capability, ConnectorOutput, NativeKind, Provider, Session, SessionSignal, SessionStatus,
+    StatusConfidence,
 };
 
 use super::{
@@ -43,7 +44,11 @@ struct ClaudeAgent {
 
 pub fn load() -> ConnectorOutput {
     let Some(projects_path) = home_path(&[".claude", "projects"]) else {
-        return unavailable(Provider::Claude, SOURCE_VERSION, "홈 폴더를 찾지 못했습니다.");
+        return unavailable(
+            Provider::Claude,
+            SOURCE_VERSION,
+            "홈 폴더를 찾지 못했습니다.",
+        );
     };
     if !projects_path.is_dir() {
         return unavailable(
@@ -205,8 +210,8 @@ fn to_session(
         capabilities,
         source_version: SOURCE_VERSION.to_owned(),
         signals: agent
-            .and_then(|agent| agent.status.as_deref())
-            .map(|status| vec![format!("agent_{status}")])
+            .map(agent_signal)
+            .map(|signal| vec![signal])
             .unwrap_or_default(),
         native_id,
     })
@@ -239,11 +244,7 @@ fn session_from_agent(agent: &ClaudeAgent) -> Session {
         child_count: 0,
         capabilities,
         source_version: "agents-json".to_owned(),
-        signals: agent
-            .status
-            .as_deref()
-            .map(|status| vec![format!("agent_{status}")])
-            .unwrap_or_default(),
+        signals: vec![agent_signal(agent)],
     }
 }
 
@@ -285,6 +286,18 @@ fn agent_kind(agent: &ClaudeAgent) -> NativeKind {
     }
 }
 
+fn agent_signal(agent: &ClaudeAgent) -> SessionSignal {
+    match agent.status.as_deref() {
+        Some("running" | "active") => SessionSignal::AgentRunning,
+        Some("waiting") => SessionSignal::AgentWaiting,
+        Some("idle") => SessionSignal::AgentIdle,
+        Some("blocked") => SessionSignal::AgentBlocked,
+        Some("failed" | "error") => SessionSignal::AgentFailed,
+        Some("completed" | "done") => SessionSignal::AgentCompleted,
+        _ => SessionSignal::AgentUnknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,11 +327,7 @@ mod tests {
     fn malformed_lines_do_not_fail_the_file() {
         let mut file = tempfile::NamedTempFile::new().expect("file");
         writeln!(file, "not json").unwrap();
-        writeln!(
-            file,
-            r#"{{"sessionId":"still-safe","cwd":"/tmp/safe"}}"#
-        )
-        .unwrap();
+        writeln!(file, r#"{{"sessionId":"still-safe","cwd":"/tmp/safe"}}"#).unwrap();
 
         let metadata = metadata_from_jsonl(file.path()).expect("metadata");
         assert_eq!(metadata.session_id.as_deref(), Some("still-safe"));

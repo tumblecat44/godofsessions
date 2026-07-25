@@ -1,8 +1,10 @@
 mod connectors;
 mod model;
 
+use std::collections::HashMap;
+
 use chrono::Utc;
-use model::{Snapshot, StatusConfidence};
+use model::{Session, Snapshot, StatusConfidence};
 
 #[tauri::command]
 async fn load_snapshot() -> Result<Snapshot, String> {
@@ -29,10 +31,12 @@ fn build_snapshot() -> Snapshot {
                 .map(|warning| format!("{}: {warning}", output.provider.as_str()))
         })
         .collect();
-    let mut sessions = outputs
-        .into_iter()
-        .flat_map(|output| output.sessions)
-        .collect::<Vec<_>>();
+    let mut sessions = deduplicate_sessions(
+        outputs
+            .into_iter()
+            .flat_map(|output| output.sessions)
+            .collect(),
+    );
 
     sessions.sort_by(|left, right| {
         right
@@ -42,7 +46,7 @@ fn build_snapshot() -> Snapshot {
     });
 
     for session in &mut sessions {
-        if session.updated_at.is_none() {
+        if session.updated_at.is_none() && session.status_confidence == StatusConfidence::Inferred {
             session.status_confidence = StatusConfidence::Stale;
         }
     }
@@ -56,6 +60,23 @@ fn build_snapshot() -> Snapshot {
             "대화 본문은 읽지 않습니다. 공급자 소유 파일과 데이터베이스는 읽기 전용입니다."
                 .to_owned(),
     }
+}
+
+fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
+    let mut by_id = HashMap::with_capacity(sessions.len());
+    for session in sessions {
+        match by_id.entry(session.id.clone()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(session);
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if session.updated_at.as_deref() > entry.get().updated_at.as_deref() {
+                    entry.insert(session);
+                }
+            }
+        }
+    }
+    by_id.into_values().collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -102,5 +123,51 @@ mod live_tests {
         assert!(count(Provider::Claude) >= 564);
         assert!(count(Provider::Cursor) >= 252);
         assert!(elapsed.as_secs() < 10);
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use crate::model::{NativeKind, Provider, SessionStatus};
+
+    fn session(id: &str, updated_at: Option<&str>) -> Session {
+        Session {
+            id: format!("codex:{id}"),
+            provider: Provider::Codex,
+            native_id: id.to_owned(),
+            native_kind: NativeKind::Interactive,
+            title: None,
+            cwd: None,
+            repository: None,
+            branch: None,
+            worktree: None,
+            created_at: None,
+            updated_at: updated_at.map(str::to_owned),
+            status: SessionStatus::Idle,
+            status_confidence: StatusConfidence::Inferred,
+            model: None,
+            tokens_used: None,
+            archived: false,
+            parent_native_id: None,
+            child_count: 0,
+            capabilities: Vec::new(),
+            source_version: "test".to_owned(),
+            signals: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn duplicate_native_sessions_keep_the_newest_metadata() {
+        let sessions = deduplicate_sessions(vec![
+            session("same", Some("2026-07-23T00:00:00Z")),
+            session("same", Some("2026-07-24T00:00:00Z")),
+        ]);
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].updated_at.as_deref(),
+            Some("2026-07-24T00:00:00Z")
+        );
     }
 }

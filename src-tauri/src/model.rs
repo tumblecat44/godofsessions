@@ -61,6 +61,23 @@ pub enum Capability {
     Fork,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionSignal {
+    Unread,
+    PendingPlan,
+    BlockingAction,
+    RecentActivity,
+    WriteLockRecent,
+    AgentRunning,
+    AgentIdle,
+    AgentWaiting,
+    AgentBlocked,
+    AgentFailed,
+    AgentCompleted,
+    AgentUnknown,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Session {
     pub id: String,
@@ -83,7 +100,7 @@ pub struct Session {
     pub child_count: usize,
     pub capabilities: Vec<Capability>,
     pub source_version: String,
-    pub signals: Vec<String>,
+    pub signals: Vec<SessionSignal>,
 }
 
 #[derive(Debug, Clone, Serialize)]
