@@ -3036,9 +3036,12 @@ button:active:not(:disabled) {
 }
 
 .schedule-slot small {
+  max-width: 230px;
   color: var(--ink-muted);
   font-family: "JetBrains Mono Variable", monospace;
   font-size: 7px;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .schedule-method {
@@ -5268,6 +5271,8 @@ button:active:not(:disabled) {
 
   .schedule-slot small {
     grid-column: 3;
+    max-width: none;
+    text-align: left;
   }
 
   .portfolio-handoff {

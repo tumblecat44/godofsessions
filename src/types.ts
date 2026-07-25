@@ -199,7 +199,13 @@ export interface NightScheduleSlot {
   route_id: string;
   starts_after_hours: number;
   time_budget_hours: number;
+  wait_reasons: ScheduleWaitReason[];
 }
+
+export type ScheduleWaitReason =
+  | "capacity_reset"
+  | "capacity_pool"
+  | "workspace";
 
 export interface NightScheduleLane {
   capacity_pool: CapacityPool;
@@ -280,6 +286,7 @@ export interface PortfolioApprovalItem {
   capacity_pool: CapacityPool;
   starts_after_hours: number;
   time_budget_hours: number;
+  wait_reasons: ScheduleWaitReason[];
 }
 
 export interface PortfolioApprovalChallenge {

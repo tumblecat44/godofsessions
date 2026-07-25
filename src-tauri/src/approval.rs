@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::model::{
     ApprovalChallenge, CapacityPool, DispatchPreflight, DispatchPreflightState, NightRunDraft,
-    NightSchedule, PortfolioApprovalChallenge, PortfolioApprovalItem, Provider,
+    NightSchedule, PortfolioApprovalChallenge, PortfolioApprovalItem, Provider, ScheduleWaitReason,
 };
 
 const PROPOSAL_TTL_MINUTES: i64 = 30;
@@ -39,6 +39,7 @@ struct RegisteredPortfolioItem {
     slot_index: usize,
     starts_after_hours: f64,
     time_budget_hours: f64,
+    wait_reasons: Vec<ScheduleWaitReason>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +62,8 @@ pub struct ApprovedPortfolioItem {
     pub dispatch: ApprovedDispatch,
     pub starts_after_hours: f64,
     pub time_budget_hours: f64,
+    #[serde(default)]
+    pub wait_reasons: Vec<ScheduleWaitReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +188,7 @@ impl ApprovalRegistry {
                     slot_index,
                     starts_after_hours: slot.starts_after_hours,
                     time_budget_hours: slot.time_budget_hours,
+                    wait_reasons: slot.wait_reasons.clone(),
                 });
             }
             if self.portfolio_items.len() > lane_start {
@@ -358,6 +362,7 @@ impl ApprovalRegistry {
             hasher.update(format!("{}:{}\n", item.lane_index, item.slot_index).as_bytes());
             hasher.update(format!("{:.3}\n", item.starts_after_hours).as_bytes());
             hasher.update(format!("{:.3}\n", item.time_budget_hours).as_bytes());
+            hasher.update(format!("{:?}\n", item.wait_reasons).as_bytes());
             items.push(PortfolioApprovalItem {
                 draft_id: item.draft_id.clone(),
                 idempotency_key: proposal.preflight.idempotency_key.clone(),
@@ -368,6 +373,7 @@ impl ApprovalRegistry {
                 capacity_pool: item.capacity_pool,
                 starts_after_hours: item.starts_after_hours,
                 time_budget_hours: item.time_budget_hours,
+                wait_reasons: item.wait_reasons.clone(),
             });
         }
 
@@ -468,6 +474,7 @@ impl ApprovalRegistry {
                 },
                 starts_after_hours: item.starts_after_hours,
                 time_budget_hours: item.time_budget_hours,
+                wait_reasons: item.wait_reasons.clone(),
             });
         }
 
@@ -576,6 +583,7 @@ mod tests {
                         route_id: "hermes:default".to_owned(),
                         starts_after_hours: 0.0,
                         time_budget_hours: 2.0,
+                        wait_reasons: Vec::new(),
                     }],
                 }],
                 parallel: false,
@@ -764,6 +772,7 @@ mod tests {
                             route_id: "hermes:default".to_owned(),
                             starts_after_hours: 0.0,
                             time_budget_hours: 2.0,
+                            wait_reasons: Vec::new(),
                         },
                         crate::model::NightScheduleSlot {
                             candidate_rank: 3,
@@ -771,6 +780,7 @@ mod tests {
                             route_id: "hermes:default".to_owned(),
                             starts_after_hours: 2.0,
                             time_budget_hours: 2.0,
+                            wait_reasons: vec![ScheduleWaitReason::CapacityPool],
                         },
                     ],
                 },
@@ -783,6 +793,7 @@ mod tests {
                         route_id: "codex:existing".to_owned(),
                         starts_after_hours: 0.0,
                         time_budget_hours: 2.0,
+                        wait_reasons: Vec::new(),
                     }],
                 },
             ],
@@ -859,6 +870,7 @@ mod tests {
                     route_id: "hermes:default".to_owned(),
                     starts_after_hours: 1.25,
                     time_budget_hours: 2.0,
+                    wait_reasons: vec![ScheduleWaitReason::CapacityReset],
                 }],
             }],
             parallel: false,
@@ -875,6 +887,10 @@ mod tests {
         let challenge = registry.begin_portfolio(now).expect("portfolio challenge");
         assert_eq!(challenge.items.len(), 1);
         assert_eq!(challenge.items[0].starts_after_hours, 1.25);
+        assert_eq!(
+            challenge.items[0].wait_reasons,
+            vec![ScheduleWaitReason::CapacityReset]
+        );
     }
 
     #[test]
@@ -900,6 +916,7 @@ mod tests {
                         route_id: "hermes:default".to_owned(),
                         starts_after_hours: 0.0,
                         time_budget_hours: 2.0,
+                        wait_reasons: Vec::new(),
                     },
                     crate::model::NightScheduleSlot {
                         candidate_rank: 2,
@@ -907,6 +924,7 @@ mod tests {
                         route_id: "hermes:default".to_owned(),
                         starts_after_hours: 0.0,
                         time_budget_hours: 2.0,
+                        wait_reasons: Vec::new(),
                     },
                 ],
             }],

@@ -283,6 +283,15 @@ pub struct NightScheduleSlot {
     pub route_id: String,
     pub starts_after_hours: f64,
     pub time_budget_hours: f64,
+    pub wait_reasons: Vec<ScheduleWaitReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleWaitReason {
+    CapacityReset,
+    CapacityPool,
+    Workspace,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -384,6 +393,7 @@ pub struct PortfolioApprovalItem {
     pub capacity_pool: CapacityPool,
     pub starts_after_hours: f64,
     pub time_budget_hours: f64,
+    pub wait_reasons: Vec<ScheduleWaitReason>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -605,6 +605,7 @@ mod tests {
                 },
                 starts_after_hours,
                 time_budget_hours: 2.0,
+                wait_reasons: Vec::new(),
             },
             state: CoordinatorItemState::Pending,
             started_at: None,

@@ -549,6 +549,7 @@ mod tests {
                 },
                 starts_after_hours: 0.0,
                 time_budget_hours: 1.0,
+                wait_reasons: Vec::new(),
             },
             state,
             started_at: None,

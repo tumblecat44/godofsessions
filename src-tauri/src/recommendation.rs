@@ -6,7 +6,7 @@ use crate::model::{
     Capability, CapacityPool, ContextIndex, ContextRole, ExcludedProject, ExecutionRoute,
     ExecutionRouteInventory, NightSchedule, NightScheduleLane, NightScheduleSlot,
     OvernightCandidate, OvernightPlan, ProjectContextBrief, Provider, RecommendationConfidence,
-    ResourceBudget, ResourceState, Session, SessionStatus, Snapshot,
+    ResourceBudget, ResourceState, ScheduleWaitReason, Session, SessionStatus, Snapshot,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -483,10 +483,20 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
             .get(&workspace_key)
             .copied()
             .unwrap_or_default();
-        let starts_after_hours = lane
-            .planned_hours
+        let lane_ready_at = lane.planned_hours;
+        let starts_after_hours = lane_ready_at
             .max(workspace_ready_at)
             .max(candidate.capacity_ready_after_hours);
+        let mut wait_reasons = Vec::new();
+        if gate_defines_start(candidate.capacity_ready_after_hours, starts_after_hours) {
+            wait_reasons.push(ScheduleWaitReason::CapacityReset);
+        }
+        if gate_defines_start(lane_ready_at, starts_after_hours) {
+            wait_reasons.push(ScheduleWaitReason::CapacityPool);
+        }
+        if gate_defines_start(workspace_ready_at, starts_after_hours) {
+            wait_reasons.push(ScheduleWaitReason::Workspace);
+        }
         let ends_at = starts_after_hours + candidate.estimated_hours;
         lane.slots.push(NightScheduleSlot {
             candidate_rank: candidate.rank,
@@ -494,6 +504,7 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
             route_id: candidate.execution_route_id.clone(),
             starts_after_hours,
             time_budget_hours: candidate.estimated_hours,
+            wait_reasons,
         });
         lane.planned_hours = ends_at;
         workspace_hours.insert(workspace_key, ends_at);
@@ -525,6 +536,10 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
             "같은 구독 풀과 같은 실제 Git worktree의 작업은 각각 한 번에 하나씩 순차 실행합니다. 보고된 사용량 창이 수면 중 초기화되면 그 뒤를 가장 이른 시작 기회로 삼되 시작 직전에 다시 확인합니다. 서로 다른 구독이더라도 한 checkout을 공유하면 앞 작업의 종료 근거 뒤로 미루며, 별도 worktree는 병렬 실행할 수 있습니다. 수면시간을 넘기거나 남는 시간을 채우기 위한 작업은 만들지 않습니다."
                 .to_owned(),
     }
+}
+
+fn gate_defines_start(gate_hours: f64, starts_after_hours: f64) -> bool {
+    gate_hours > f64::EPSILON && (gate_hours - starts_after_hours).abs() < 0.001
 }
 
 fn candidate_workspace_key(candidate: &OvernightCandidate) -> String {
@@ -1368,6 +1383,10 @@ mod tests {
             .provider_reason
             .contains("사용량을 다시 확인"));
         assert_eq!(plan.schedule.lanes[0].slots[0].starts_after_hours, 1.0);
+        assert_eq!(
+            plan.schedule.lanes[0].slots[0].wait_reasons,
+            vec![ScheduleWaitReason::CapacityReset]
+        );
         assert!(plan.run_drafts[0].dispatch_supported);
     }
 
@@ -1503,6 +1522,10 @@ mod tests {
         assert_eq!(lane.planned_hours, 4.0);
         assert_eq!(lane.slots[0].starts_after_hours, 0.0);
         assert_eq!(lane.slots[1].starts_after_hours, 2.0);
+        assert_eq!(
+            lane.slots[1].wait_reasons,
+            vec![ScheduleWaitReason::CapacityPool]
+        );
         assert!(lane.planned_hours <= plan.sleep_hours);
         assert!(plan
             .exclusions
@@ -1616,6 +1639,14 @@ mod tests {
         starts.sort_by(f64::total_cmp);
 
         assert_eq!(starts, vec![0.0, 2.0]);
+        let delayed = plan
+            .schedule
+            .lanes
+            .iter()
+            .flat_map(|lane| &lane.slots)
+            .find(|slot| slot.starts_after_hours > 0.0)
+            .expect("delayed workspace slot");
+        assert_eq!(delayed.wait_reasons, vec![ScheduleWaitReason::Workspace]);
         assert!(!plan.schedule.parallel);
         assert!(plan
             .schedule

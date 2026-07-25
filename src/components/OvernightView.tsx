@@ -50,6 +50,7 @@ import type {
   PortfolioApprovalChallenge,
   PortfolioDispatchResult,
   ResourceBudget,
+  ScheduleWaitReason,
   WorkspaceChangeEvidence,
 } from "../types";
 import { ProviderMark } from "./ProviderMark";
@@ -201,6 +202,17 @@ function approvalEffectsFor(surface?: DispatchPreflight["surface"]) {
     "전용 Hermes 보드만 사용",
     "최대 한 작업자·계약된 시간과 턴만 허용",
   ];
+}
+
+function scheduleWaitLabel(reasons: ScheduleWaitReason[]) {
+  if (reasons.length === 0) return "승인된 시작 시각에 재확인";
+  return reasons
+    .map((reason) => {
+      if (reason === "capacity_reset") return "구독 초기화 뒤 용량 재확인";
+      if (reason === "capacity_pool") return "같은 구독의 앞 작업 종료 뒤";
+      return "같은 작업공간이 빈 뒤";
+    })
+    .join(" · ");
 }
 
 function readyPortfolioPreflightsForPlan(plan: OvernightPlan) {
@@ -1013,6 +1025,7 @@ function CandidateCard({
   preflight,
   receipt,
   startsAfterHours = 0,
+  waitReasons = [],
   approvalLoading = false,
   onRequestApproval,
   primary = false,
@@ -1022,6 +1035,7 @@ function CandidateCard({
   preflight?: DispatchPreflight;
   receipt?: DispatchReceipt;
   startsAfterHours?: number;
+  waitReasons?: ScheduleWaitReason[];
   approvalLoading?: boolean;
   onRequestApproval?: (preflight: DispatchPreflight) => void;
   primary?: boolean;
@@ -1319,8 +1333,8 @@ function CandidateCard({
                         {durationHoursLabel(startsAfterHours)} 뒤 실행 슬롯
                       </strong>
                       <small>
-                        아래 밤 전체 일정에서 예약하면 시작 직전에 용량과
-                        작업공간을 다시 확인합니다.
+                        {scheduleWaitLabel(waitReasons)} · 아래 밤 전체 일정에서
+                        예약하면 시작 직전에 다시 확인합니다.
                       </small>
                     </span>
                   </div>
@@ -1760,6 +1774,16 @@ export function OvernightView() {
   const readyPortfolioPreflights = plan
     ? readyPortfolioPreflightsForPlan(plan)
     : [];
+  const portfolioResetWaitCount =
+    portfolioApproval?.items.filter((item) =>
+      item.wait_reasons.includes("capacity_reset"),
+    ).length || 0;
+  const portfolioDependencyWaitCount =
+    portfolioApproval?.items.filter((item) =>
+      item.wait_reasons.some(
+        (reason) => reason === "capacity_pool" || reason === "workspace",
+      ),
+    ).length || 0;
   const approvalDraft = approval
     ? plan?.run_drafts.find((draft) => draft.id === approval.draft_id)
     : undefined;
@@ -1859,6 +1883,7 @@ export function OvernightView() {
                 capacity_pool: candidate?.capacity_pool || "unknown",
                 starts_after_hours: slot?.starts_after_hours || 0,
                 time_budget_hours: draft?.time_budget_hours || 0,
+                wait_reasons: slot?.wait_reasons || [],
               };
             }),
             deferred_count:
@@ -2269,6 +2294,12 @@ export function OvernightView() {
                     .find((slot) => slot.candidate_rank === 1)
                     ?.starts_after_hours || 0
                 }
+                waitReasons={
+                  plan.schedule.lanes
+                    .flatMap((lane) => lane.slots)
+                    .find((slot) => slot.candidate_rank === 1)?.wait_reasons ||
+                  []
+                }
                 draft={plan.run_drafts.find((draft) => draft.candidate_rank === 1)}
                 preflight={plan.dispatch_preflights.find(
                   (preflight) =>
@@ -2310,6 +2341,14 @@ export function OvernightView() {
                             (slot) =>
                               slot.candidate_rank === candidate.rank,
                           )?.starts_after_hours || 0
+                      }
+                      waitReasons={
+                        plan.schedule.lanes
+                          .flatMap((lane) => lane.slots)
+                          .find(
+                            (slot) =>
+                              slot.candidate_rank === candidate.rank,
+                          )?.wait_reasons || []
                       }
                       draft={plan.run_drafts.find(
                         (draft) => draft.candidate_rank === candidate.rank,
@@ -2394,7 +2433,7 @@ export function OvernightView() {
                             <small>
                               {slot.starts_after_hours === 0
                                 ? "바로 시작"
-                                : `${durationHoursLabel(slot.starts_after_hours)} 후`}
+                                : `${durationHoursLabel(slot.starts_after_hours)} 후 · ${scheduleWaitLabel(slot.wait_reasons)}`}
                               {" · "}
                               최대 {durationHoursLabel(slot.time_budget_hours)}
                             </small>
@@ -2642,7 +2681,7 @@ export function OvernightView() {
                       {capacityPoolLabels[item.capacity_pool]} · 최대{" "}
                       {item.time_budget_hours}시간 ·{" "}
                       {item.starts_after_hours > 0
-                        ? `약 ${durationHoursLabel(item.starts_after_hours)} 뒤`
+                        ? `약 ${durationHoursLabel(item.starts_after_hours)} 뒤 · ${scheduleWaitLabel(item.wait_reasons)}`
                         : "바로 시작"}{" "}
                       · {compactPath(item.workspace)}
                     </em>
@@ -2664,11 +2703,18 @@ export function OvernightView() {
                 <AlertTriangle size={12} />
                 프로젝트 파일이 바뀌고 연결된 구독이 사용될 수 있음
               </p>
-              {portfolioApproval.deferred_count > 0 && (
+              {portfolioResetWaitCount > 0 && (
                 <p>
                   <Clock3 size={12} />
-                  후속 {portfolioApproval.deferred_count}개는 승인된 예상 시각과
-                  앞 작업 종료 뒤 자동 점검
+                  구독 초기화 후보 {portfolioResetWaitCount}개는 해당 시각에
+                  용량을 다시 확인한 뒤 시작
+                </p>
+              )}
+              {portfolioDependencyWaitCount > 0 && (
+                <p>
+                  <Clock3 size={12} />
+                  선행 작업·공간 대기 {portfolioDependencyWaitCount}개는 종료
+                  근거와 작업공간 상태를 확인한 뒤 시작
                 </p>
               )}
               {plan?.host_readiness.checks
