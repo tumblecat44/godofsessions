@@ -1304,8 +1304,11 @@ mod tests {
         std::fs::create_dir_all(workspace.join(".git")).expect("git dir");
         let binary = directory.path().join("hermes");
         std::fs::write(&binary, "").expect("binary");
-        let default_preview =
-            preview_hermes(&draft(&workspace), &route(), &environment(&workspace, &binary));
+        let default_preview = preview_hermes(
+            &draft(&workspace),
+            &route(),
+            &environment(&workspace, &binary),
+        );
         let mut unsupported_profile = route();
         unsupported_profile.executor_profile = Some("researcher".to_owned());
 
