@@ -3827,6 +3827,42 @@ button:active:not(:disabled) {
   cursor: not-allowed;
 }
 
+.deferred-dispatch-note {
+  min-width: 220px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.06);
+  border: 1px solid rgba(228, 169, 74, 0.2);
+  border-radius: 5px;
+}
+
+.deferred-dispatch-note > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.deferred-dispatch-note > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.deferred-dispatch-note strong {
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 620;
+}
+
+.deferred-dispatch-note small {
+  max-width: 360px;
+  color: var(--ink-muted);
+  font-size: 7px;
+  line-height: 1.45;
+}
+
 .dispatch-receipt {
   width: 100%;
   display: grid;

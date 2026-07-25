@@ -1012,6 +1012,7 @@ function CandidateCard({
   draft,
   preflight,
   receipt,
+  startsAfterHours = 0,
   approvalLoading = false,
   onRequestApproval,
   primary = false,
@@ -1020,6 +1021,7 @@ function CandidateCard({
   draft?: NightRunDraft;
   preflight?: DispatchPreflight;
   receipt?: DispatchReceipt;
+  startsAfterHours?: number;
   approvalLoading?: boolean;
   onRequestApproval?: (preflight: DispatchPreflight) => void;
   primary?: boolean;
@@ -1188,7 +1190,9 @@ function CandidateCard({
               }
             >
               {preflight.state === "ready_for_approval"
-                ? "승인만 남음"
+                ? startsAfterHours > 0
+                  ? "전체 일정으로 예약"
+                  : "승인만 남음"
                 : "실행 차단"}
             </em>
           </summary>
@@ -1306,30 +1310,46 @@ function CandidateCard({
                   <span>예상 실행 영수증</span>
                   <p>{preflight.expected_receipt}</p>
                 </div>
-                <button
-                  className="request-approval-button"
-                  type="button"
-                  disabled={
-                    preflight.state !== "ready_for_approval" ||
-                    approvalLoading ||
-                    !onRequestApproval
-                  }
-                  onClick={() => onRequestApproval?.(preflight)}
-                >
-                  {approvalLoading ? (
-                    <>
-                      <RefreshCw className="is-spinning" size={12} />
-                      승인 준비 중
-                    </>
-                  ) : preflight.state === "ready_for_approval" ? (
-                    <>
-                      <ShieldCheck size={12} />
-                      검토하고 1개 시작
-                    </>
-                  ) : (
-                    "차단 이유 먼저 해결"
-                  )}
-                </button>
+                {startsAfterHours > 0 &&
+                preflight.state === "ready_for_approval" ? (
+                  <div className="deferred-dispatch-note">
+                    <Clock3 size={13} />
+                    <span>
+                      <strong>
+                        {durationHoursLabel(startsAfterHours)} 뒤 실행 슬롯
+                      </strong>
+                      <small>
+                        아래 밤 전체 일정에서 예약하면 시작 직전에 용량과
+                        작업공간을 다시 확인합니다.
+                      </small>
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    className="request-approval-button"
+                    type="button"
+                    disabled={
+                      preflight.state !== "ready_for_approval" ||
+                      approvalLoading ||
+                      !onRequestApproval
+                    }
+                    onClick={() => onRequestApproval?.(preflight)}
+                  >
+                    {approvalLoading ? (
+                      <>
+                        <RefreshCw className="is-spinning" size={12} />
+                        승인 준비 중
+                      </>
+                    ) : preflight.state === "ready_for_approval" ? (
+                      <>
+                        <ShieldCheck size={12} />
+                        검토하고 1개 시작
+                      </>
+                    ) : (
+                      "차단 이유 먼저 해결"
+                    )}
+                  </button>
+                )}
               </>
             )}
           </footer>
@@ -2243,6 +2263,12 @@ export function OvernightView() {
             <section className="candidate-stack">
               <CandidateCard
                 candidate={plan.candidates[0]}
+                startsAfterHours={
+                  plan.schedule.lanes
+                    .flatMap((lane) => lane.slots)
+                    .find((slot) => slot.candidate_rank === 1)
+                    ?.starts_after_hours || 0
+                }
                 draft={plan.run_drafts.find((draft) => draft.candidate_rank === 1)}
                 preflight={plan.dispatch_preflights.find(
                   (preflight) =>
@@ -2277,6 +2303,14 @@ export function OvernightView() {
                   {plan.candidates.slice(1).map((candidate) => (
                     <CandidateCard
                       candidate={candidate}
+                      startsAfterHours={
+                        plan.schedule.lanes
+                          .flatMap((lane) => lane.slots)
+                          .find(
+                            (slot) =>
+                              slot.candidate_rank === candidate.rank,
+                          )?.starts_after_hours || 0
+                      }
                       draft={plan.run_drafts.find(
                         (draft) => draft.candidate_rank === candidate.rank,
                       )}

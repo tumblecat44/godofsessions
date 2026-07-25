@@ -18,6 +18,7 @@ struct RegisteredProposal {
     generation: u64,
     draft: NightRunDraft,
     preflight: DispatchPreflight,
+    starts_after_hours: f64,
     expires_at: DateTime<Utc>,
 }
 
@@ -98,6 +99,8 @@ pub enum ApprovalError {
     ProposalExpired,
     #[error("실행할 수 없는 사전점검 상태입니다.")]
     NotReady,
+    #[error("이 작업은 지연 실행 슬롯입니다. 밤 전체 일정으로 승인해 주세요.")]
+    DeferredRequiresPortfolio,
     #[error("한 번에 시작할 수 있는 야간 작업이 없습니다.")]
     EmptyPortfolio,
     #[error("승인 요청을 찾지 못했습니다. 다시 검토해 주세요.")]
@@ -139,12 +142,22 @@ impl ApprovalRegistry {
             {
                 continue;
             }
+            let starts_after_hours = schedule
+                .lanes
+                .iter()
+                .flat_map(|lane| lane.slots.iter())
+                .find(|slot| {
+                    slot.candidate_rank == draft.candidate_rank && slot.route_id == draft.route_id
+                })
+                .map(|slot| slot.starts_after_hours)
+                .unwrap_or_default();
             self.proposals.insert(
                 draft.id.clone(),
                 RegisteredProposal {
                     generation: self.generation,
                     draft: draft.clone(),
                     preflight: preflight.clone(),
+                    starts_after_hours,
                     expires_at,
                 },
             );
@@ -199,6 +212,9 @@ impl ApprovalRegistry {
             || proposal.preflight.execution_enabled
         {
             return Err(ApprovalError::NotReady);
+        }
+        if proposal.starts_after_hours > f64::EPSILON {
+            return Err(ApprovalError::DeferredRequiresPortfolio);
         }
         if proposal.preflight.idempotency_key != idempotency_key {
             return Err(ApprovalError::FingerprintMismatch);
@@ -828,6 +844,37 @@ mod tests {
             ),
             Err(ApprovalError::MissingChallenge)
         ));
+    }
+
+    #[test]
+    fn a_deferred_slot_cannot_be_approved_as_an_immediate_single_run() {
+        let now = Utc::now();
+        let schedule = crate::model::NightSchedule {
+            lanes: vec![crate::model::NightScheduleLane {
+                capacity_pool: crate::model::CapacityPool::ApiCredits,
+                planned_hours: 2.0,
+                slots: vec![crate::model::NightScheduleSlot {
+                    candidate_rank: 1,
+                    project: "alpha".to_owned(),
+                    route_id: "hermes:default".to_owned(),
+                    starts_after_hours: 1.25,
+                    time_budget_hours: 2.0,
+                }],
+            }],
+            parallel: false,
+            methodology: "wait for reset".to_owned(),
+        };
+        let mut registry = ApprovalRegistry::default();
+        registry.replace_plan(&[draft()], &[preflight()], &schedule, 7.0, now);
+
+        assert!(matches!(
+            registry.begin("night:1:alpha:hermes:default", "gos-night-exact", now),
+            Err(ApprovalError::DeferredRequiresPortfolio)
+        ));
+
+        let challenge = registry.begin_portfolio(now).expect("portfolio challenge");
+        assert_eq!(challenge.items.len(), 1);
+        assert_eq!(challenge.items[0].starts_after_hours, 1.25);
     }
 
     #[test]

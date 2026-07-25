@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The quota-reset start-opportunity M33 desktop slice is working.
+The portfolio-only deferred approval M34 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -84,6 +84,10 @@ An exhausted fresh quota window with a complete reset inside the accepted
 sleep period can now become a delayed start opportunity. Its wait reduces
 ranking and confidence, is visible in the candidate and schedule, and only
 authorizes an exact provider recheck at that time.
+Every delayed slot is now portfolio-only. The candidate no longer offers an
+immediate single-run action, and the approval registry independently rejects
+one before creating a challenge. Full-night approval preserves the exact
+offset and start-time revalidation.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -121,6 +125,7 @@ authorizes an exact provider recheck at that time.
 - [Answer-first bedtime briefing M31](docs/overnight-m31.md)
 - [Dispatchable route continuity M32](docs/overnight-m32.md)
 - [Quota-reset start opportunities M33](docs/overnight-m33.md)
+- [Portfolio-only deferred approvals M34](docs/overnight-m34.md)
 
 The app currently:
 
@@ -161,6 +166,8 @@ The app currently:
   Capacity Pool sequential and within the sleep window
 - turns a complete in-sleep provider reset into a visible delayed recheck
   opportunity without treating future quota as reserved capacity
+- reserves every positive-offset task through the full-night portfolio only,
+  preventing an individual approval from discarding its wait condition
 - freezes every contiguous, execution-ready item in each visible independent
   lane into one exact, expiring portfolio approval
 - persists that fixed schedule before launch, then runs a detached,
