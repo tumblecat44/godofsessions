@@ -1,6 +1,6 @@
-import { LockKeyhole, Orbit } from "lucide-react";
+import { Inbox, LockKeyhole, MoonStar, Orbit } from "lucide-react";
 import { compactNumber, providerNames } from "../lib/format";
-import type { Provider, ProviderSummary } from "../types";
+import type { Provider, ProviderSummary, WorkspaceView } from "../types";
 import { ProviderMark } from "./ProviderMark";
 
 interface SidebarProps {
@@ -9,6 +9,8 @@ interface SidebarProps {
   onSelectProvider: (provider: Provider | "all") => void;
   total: number;
   privacyNote: string;
+  activeView: WorkspaceView;
+  onSelectView: (view: WorkspaceView) => void;
 }
 
 export function Sidebar({
@@ -17,6 +19,8 @@ export function Sidebar({
   onSelectProvider,
   total,
   privacyNote,
+  activeView,
+  onSelectView,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -30,12 +34,33 @@ export function Sidebar({
         </span>
       </div>
 
+      <nav className="workspace-nav" aria-label="작업 화면">
+        <button
+          className={activeView === "overnight" ? "is-selected" : ""}
+          type="button"
+          onClick={() => onSelectView("overnight")}
+        >
+          <MoonStar size={16} />
+          <span>오늘 밤 추천</span>
+          <i className="nav-new">M1</i>
+        </button>
+        <button
+          className={activeView === "inbox" ? "is-selected" : ""}
+          type="button"
+          onClick={() => onSelectView("inbox")}
+        >
+          <Inbox size={16} />
+          <span>세션 인박스</span>
+        </button>
+      </nav>
+
       <nav className="provider-nav" aria-label="공급자 필터">
         <span className="nav-label">세션 소스</span>
         <button
           className={selectedProvider === "all" ? "is-selected" : ""}
           type="button"
           onClick={() => onSelectProvider("all")}
+          disabled={activeView !== "inbox"}
         >
           <span className="all-sources-mark">ALL</span>
           <span>모든 세션</span>
@@ -49,6 +74,7 @@ export function Sidebar({
             type="button"
             key={provider.provider}
             onClick={() => onSelectProvider(provider.provider)}
+            disabled={activeView !== "inbox"}
             title={[provider.source_label, provider.message]
               .filter(Boolean)
               .join(" · ")}

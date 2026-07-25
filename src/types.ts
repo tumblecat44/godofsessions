@@ -1,4 +1,12 @@
-export type Provider = "claude" | "codex" | "grok" | "cursor";
+export type Provider =
+  | "claude"
+  | "codex"
+  | "grok"
+  | "cursor"
+  | "hermes"
+  | "openclaw";
+
+export type WorkspaceView = "overnight" | "inbox";
 
 export type NativeKind =
   | "interactive"
@@ -84,4 +92,62 @@ export interface Snapshot {
   providers: ProviderSummary[];
   warnings: string[];
   privacy_note: string;
+}
+
+export type ResourceState = "ready" | "degraded" | "unavailable";
+
+export interface UsageWindow {
+  label: string;
+  used_percent: number;
+  resets_at: string | null;
+}
+
+export interface ResourceBudget {
+  provider: Provider;
+  state: ResourceState;
+  plan: string | null;
+  windows: UsageWindow[];
+  credits: string | null;
+  observed_at: string;
+  source_label: string;
+  message: string | null;
+}
+
+export type RecommendationConfidence = "high" | "medium" | "low";
+
+export interface OvernightCandidate {
+  rank: number;
+  project: string;
+  cwd: string;
+  goal: string;
+  provider: Provider;
+  native_session_id: string | null;
+  resume_existing: boolean;
+  score: number;
+  confidence: RecommendationConfidence;
+  evidence: string[];
+  source_session_ids: string[];
+  provider_reason: string;
+  expected_outcome: string;
+  verification: string[];
+  risks: string[];
+  estimated_hours: number;
+}
+
+export interface ExcludedProject {
+  project: string;
+  reason: string;
+}
+
+export interface OvernightPlan {
+  generated_at: string;
+  evidence_window_hours: number;
+  sleep_hours: number;
+  sessions_considered: number;
+  projects_considered: number;
+  budgets: ResourceBudget[];
+  candidates: OvernightCandidate[];
+  exclusions: ExcludedProject[];
+  read_only: boolean;
+  methodology: string;
 }

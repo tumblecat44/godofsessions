@@ -1,4 +1,10 @@
-import type { Provider, ProviderSummary, Session, Snapshot } from "./types";
+import type {
+  OvernightPlan,
+  Provider,
+  ProviderSummary,
+  Session,
+  Snapshot,
+} from "./types";
 
 const now = Date.now();
 
@@ -66,10 +72,19 @@ const sessions: Session[] = [
   session("grok", "g2", "대시보드 경쟁 제품 비교", "agent-research", "idle", 76),
   session("cursor", "c3", "온보딩 문구 수정", "fable-project", "idle", 118),
   session("claude", "cl3", "테스트 실패 원인 분석", "orca", "failed", 184),
+  session("hermes", "h1", "밤샘 목표 계약 다듬기", "godofsessions", "idle", 210),
+  session(
+    "openclaw",
+    "o1",
+    "에이전트 게이트웨이 확인",
+    "agent-research",
+    "idle",
+    240,
+  ),
 ];
 
 const providers: ProviderSummary[] = (
-  ["claude", "codex", "grok", "cursor"] as Provider[]
+  ["claude", "codex", "grok", "cursor", "hermes", "openclaw"] as Provider[]
 ).map((provider) => ({
   provider,
   state: provider === "cursor" ? "degraded" : "ready",
@@ -81,7 +96,11 @@ const providers: ProviderSummary[] = (
         ? 54
         : provider === "grok"
           ? 254
-          : 252,
+          : provider === "cursor"
+            ? 252
+            : provider === "hermes"
+              ? 16
+              : 1,
   source_label: "preview",
   message:
     provider === "cursor"
@@ -96,4 +115,135 @@ export const previewSnapshot: Snapshot = {
   warnings: [],
   privacy_note:
     "대화 본문은 읽지 않습니다. 공급자 소유 파일과 데이터베이스는 읽기 전용입니다.",
+};
+
+export const previewOvernightPlan: OvernightPlan = {
+  generated_at: new Date().toISOString(),
+  evidence_window_hours: 24,
+  sleep_hours: 7,
+  sessions_considered: 12,
+  projects_considered: 4,
+  read_only: true,
+  methodology:
+    "최근성·반복 활동·구체적 제목·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다.",
+  budgets: [
+    {
+      provider: "claude",
+      state: "ready",
+      plan: null,
+      windows: [
+        {
+          label: "5시간",
+          used_percent: 2,
+          resets_at: new Date(now + 4 * 60 * 60 * 1000).toISOString(),
+        },
+        {
+          label: "7일",
+          used_percent: 2,
+          resets_at: new Date(now + 6 * 86_400_000).toISOString(),
+        },
+      ],
+      credits: null,
+      observed_at: new Date().toISOString(),
+      source_label: "OpenClaw usage adapter",
+      message: null,
+    },
+    {
+      provider: "codex",
+      state: "ready",
+      plan: "Pro",
+      windows: [
+        {
+          label: "7일",
+          used_percent: 13,
+          resets_at: new Date(now + 6 * 86_400_000).toISOString(),
+        },
+      ],
+      credits: "리셋권 2개",
+      observed_at: new Date().toISOString(),
+      source_label: "Codex app-server",
+      message: null,
+    },
+    {
+      provider: "grok",
+      state: "ready",
+      plan: "SuperGrok Heavy",
+      windows: [
+        {
+          label: "7일",
+          used_percent: 28,
+          resets_at: new Date(now + 2 * 86_400_000).toISOString(),
+        },
+      ],
+      credits: null,
+      observed_at: new Date().toISOString(),
+      source_label: "Grok ACP billing",
+      message: null,
+    },
+  ],
+  candidates: [
+    {
+      rank: 1,
+      project: "godofsessions",
+      cwd: "/Users/you/projects/godofsessions",
+      goal: "Overnight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행",
+      provider: "codex",
+      native_session_id: "co1",
+      resume_existing: true,
+      score: 91.4,
+      confidence: "high",
+      evidence: [
+        "최근 24시간에 godofsessions 관련 세션 4개",
+        "가장 최근 근거: “네 공급자 커넥터 구현” · 약 1시간 전",
+        "3개 도구에서 같은 프로젝트 맥락이 발견됨",
+      ],
+      source_session_ids: ["codex:co1", "claude:cl1", "grok:g1"],
+      provider_reason:
+        "Codex에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 87% 남아 있습니다.",
+      expected_outcome:
+        "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고",
+      verification: [
+        "프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것",
+        "변경 범위와 생성된 산출물을 아침 보고에 명시할 것",
+        "검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인을 남길 것",
+      ],
+      risks: [
+        "대화 본문이 아닌 로컬 메타데이터만으로 목표를 추론했습니다.",
+      ],
+      estimated_hours: 3.5,
+    },
+    {
+      rank: 2,
+      project: "agent-research",
+      cwd: "/Users/you/projects/agent-research",
+      goal: "로컬 에이전트 시장 조사 — 검증 가능한 결과까지 진행",
+      provider: "grok",
+      native_session_id: "g1",
+      resume_existing: true,
+      score: 78.2,
+      confidence: "medium",
+      evidence: [
+        "최근 24시간에 agent-research 관련 세션 2개",
+        "가장 최근 근거: “로컬 에이전트 시장 조사” · 약 2시간 전",
+        "2개 도구에서 같은 프로젝트 맥락이 발견됨",
+      ],
+      source_session_ids: ["grok:g1", "codex:co2"],
+      provider_reason:
+        "Grok에 이어갈 프로젝트 컨텍스트가 있어 전환 비용이 가장 낮습니다.",
+      expected_outcome: "근거 링크가 포함된 경쟁 제품 비교와 남은 조사 질문",
+      verification: ["모든 핵심 주장에 출처가 있을 것"],
+      risks: ["조사 범위가 열려 있어 종료 조건을 더 좁혀야 할 수 있습니다."],
+      estimated_hours: 2.5,
+    },
+  ],
+  exclusions: [
+    {
+      project: "malgun-app",
+      reason: "사람의 판단이나 승인이 먼저 필요한 상태입니다.",
+    },
+    {
+      project: "orca",
+      reason: "이미 실행 중인 세션이 있어 중복 작업과 충돌 위험이 큽니다.",
+    },
+  ],
 };

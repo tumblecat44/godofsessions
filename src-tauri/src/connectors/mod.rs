@@ -2,6 +2,8 @@ mod claude;
 mod codex;
 mod cursor;
 mod grok;
+mod hermes;
+mod openclaw;
 
 use std::{
     path::{Path, PathBuf},
@@ -9,15 +11,18 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 
 use crate::model::{Capability, ConnectorOutput};
 
+pub use crate::time_utils::{unix_millis_to_rfc3339, unix_seconds_to_rfc3339};
 pub use claude::load as load_claude;
 pub use codex::load as load_codex;
 pub use cursor::load as load_cursor;
 pub use grok::load as load_grok;
+pub use hermes::load as load_hermes;
+pub use openclaw::load as load_openclaw;
 
 pub fn home_path(parts: &[&str]) -> Option<PathBuf> {
     let mut path = dirs::home_dir()?;
@@ -25,18 +30,6 @@ pub fn home_path(parts: &[&str]) -> Option<PathBuf> {
         path.push(part);
     }
     Some(path)
-}
-
-pub fn unix_seconds_to_rfc3339(value: i64) -> Option<String> {
-    Utc.timestamp_opt(value, 0)
-        .single()
-        .map(|value| value.to_rfc3339())
-}
-
-pub fn unix_millis_to_rfc3339(value: i64) -> Option<String> {
-    Utc.timestamp_millis_opt(value)
-        .single()
-        .map(|value| value.to_rfc3339())
 }
 
 pub fn file_modified_rfc3339(path: &Path) -> Option<String> {

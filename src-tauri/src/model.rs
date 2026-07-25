@@ -1,12 +1,14 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
     Codex,
     Grok,
     Claude,
     Cursor,
+    Hermes,
+    Openclaw,
 }
 
 impl Provider {
@@ -16,6 +18,8 @@ impl Provider {
             Self::Grok => "grok",
             Self::Claude => "claude",
             Self::Cursor => "cursor",
+            Self::Hermes => "hermes",
+            Self::Openclaw => "openclaw",
         }
     }
 }
@@ -128,6 +132,81 @@ pub struct Snapshot {
     pub providers: Vec<ProviderSummary>,
     pub warnings: Vec<String>,
     pub privacy_note: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceState {
+    Ready,
+    Degraded,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageWindow {
+    pub label: String,
+    pub used_percent: f64,
+    pub resets_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceBudget {
+    pub provider: Provider,
+    pub state: ResourceState,
+    pub plan: Option<String>,
+    pub windows: Vec<UsageWindow>,
+    pub credits: Option<String>,
+    pub observed_at: String,
+    pub source_label: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecommendationConfidence {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OvernightCandidate {
+    pub rank: usize,
+    pub project: String,
+    pub cwd: String,
+    pub goal: String,
+    pub provider: Provider,
+    pub native_session_id: Option<String>,
+    pub resume_existing: bool,
+    pub score: f64,
+    pub confidence: RecommendationConfidence,
+    pub evidence: Vec<String>,
+    pub source_session_ids: Vec<String>,
+    pub provider_reason: String,
+    pub expected_outcome: String,
+    pub verification: Vec<String>,
+    pub risks: Vec<String>,
+    pub estimated_hours: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExcludedProject {
+    pub project: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OvernightPlan {
+    pub generated_at: String,
+    pub evidence_window_hours: u32,
+    pub sleep_hours: f64,
+    pub sessions_considered: usize,
+    pub projects_considered: usize,
+    pub budgets: Vec<ResourceBudget>,
+    pub candidates: Vec<OvernightCandidate>,
+    pub exclusions: Vec<ExcludedProject>,
+    pub read_only: bool,
+    pub methodology: String,
 }
 
 #[derive(Debug)]

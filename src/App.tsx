@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { SessionSection } from "./components/SessionSection";
 import { Sidebar } from "./components/Sidebar";
+import { OvernightView } from "./components/OvernightView";
 import { fallbackTitle, relativeTime } from "./lib/format";
 import { previewSnapshot } from "./preview-data";
 import type {
@@ -17,6 +18,7 @@ import type {
   Session,
   SessionStatus,
   Snapshot,
+  WorkspaceView,
 } from "./types";
 
 type LoadState =
@@ -61,6 +63,7 @@ function App() {
     "all",
   );
   const [query, setQuery] = useState("");
+  const [activeView, setActiveView] = useState<WorkspaceView>("inbox");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -153,8 +156,13 @@ function App() {
         onSelectProvider={setSelectedProvider}
         total={state.snapshot.sessions.length}
         privacyNote={state.snapshot.privacy_note}
+        activeView={activeView}
+        onSelectView={setActiveView}
       />
 
+      {activeView === "overnight" ? (
+        <OvernightView />
+      ) : (
       <main className="workspace">
         <header className="workspace-header">
           <div className="header-copy">
@@ -262,6 +270,7 @@ function App() {
           limit={12}
         />
       </main>
+      )}
     </div>
   );
 }

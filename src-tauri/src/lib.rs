@@ -1,10 +1,13 @@
 mod connectors;
 mod model;
+mod recommendation;
+mod time_utils;
+mod usage;
 
 use std::collections::HashMap;
 
 use chrono::Utc;
-use model::{Session, Snapshot, StatusConfidence};
+use model::{OvernightPlan, Session, Snapshot, StatusConfidence};
 
 #[tauri::command]
 async fn load_snapshot() -> Result<Snapshot, String> {
@@ -13,12 +16,34 @@ async fn load_snapshot() -> Result<Snapshot, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, String> {
+    let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot_thread = std::thread::spawn(build_snapshot);
+        let budgets = usage::load_budgets();
+        let snapshot = snapshot_thread
+            .join()
+            .map_err(|_| "로컬 세션 증거를 모으지 못했습니다.".to_owned())?;
+        Ok(recommendation::build_overnight_plan(
+            &snapshot,
+            budgets,
+            sleep_hours,
+            Utc::now(),
+        ))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 fn build_snapshot() -> Snapshot {
     let outputs = [
         connectors::load_codex(),
         connectors::load_grok(),
         connectors::load_claude(),
         connectors::load_cursor(),
+        connectors::load_hermes(),
+        connectors::load_openclaw(),
     ];
 
     let providers = outputs.iter().map(|output| output.summary()).collect();
@@ -82,7 +107,10 @@ fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_snapshot])
+        .invoke_handler(tauri::generate_handler![
+            load_snapshot,
+            generate_overnight_plan
+        ])
         .run(tauri::generate_context!())
         .expect("error while running God of Sessions");
 }
@@ -123,6 +151,44 @@ mod live_tests {
         assert!(count(Provider::Claude) >= 564);
         assert!(count(Provider::Cursor) >= 252);
         assert!(elapsed.as_secs() < 10);
+    }
+
+    #[test]
+    #[ignore = "reads current local sessions and provider usage"]
+    fn local_overnight_plan_is_read_only_and_explainable() {
+        let snapshot = build_snapshot();
+        let budgets = usage::load_budgets();
+        let plan = recommendation::build_overnight_plan(
+            &snapshot,
+            budgets,
+            recommendation::SleepHours::new(7.0).expect("valid sleep duration"),
+            chrono::Utc::now(),
+        );
+
+        eprintln!(
+            "sessions={} projects={} candidates={} budgets={:?}",
+            plan.sessions_considered,
+            plan.projects_considered,
+            plan.candidates.len(),
+            plan.budgets
+                .iter()
+                .map(|budget| (
+                    budget.provider.as_str(),
+                    &budget.state,
+                    budget.windows.len(),
+                    budget.message.as_deref(),
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert!(plan.read_only);
+        assert_eq!(plan.budgets.len(), 3);
+        assert!(!plan.candidates.is_empty());
+        assert!(plan
+            .candidates
+            .iter()
+            .all(|candidate| !candidate.evidence.is_empty()
+                && !candidate.verification.is_empty()
+                && !candidate.risks.is_empty()));
     }
 }
 

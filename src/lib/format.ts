@@ -10,6 +10,8 @@ export const providerNames: Record<Provider, string> = {
   codex: "Codex",
   grok: "Grok",
   cursor: "Cursor",
+  hermes: "Hermes",
+  openclaw: "OpenClaw",
 };
 
 export const providerMarks: Record<Provider, string> = {
@@ -17,7 +19,15 @@ export const providerMarks: Record<Provider, string> = {
   codex: "CX",
   grok: "GK",
   cursor: "CR",
+  hermes: "HM",
+  openclaw: "OC",
 };
+
+export const recommendationConfidenceLabels = {
+  high: "높은 확신",
+  medium: "중간 확신",
+  low: "낮은 확신",
+} as const;
 
 export const statusLabels: Record<SessionStatus, string> = {
   running: "작업 중",
@@ -53,6 +63,17 @@ export function relativeTime(value: string | null): string {
   const months = Math.round(days / 30);
   if (months < 12) return `${months}개월 전`;
   return `${Math.round(months / 12)}년 전`;
+}
+
+export function timeUntil(value: string | null): string {
+  if (!value) return "시각 정보 없음";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "시각 정보 없음";
+  const minutes = Math.max(0, Math.round((timestamp - Date.now()) / 60_000));
+  if (minutes < 60) return `${Math.max(1, minutes)}분 후`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}시간 후`;
+  return `${Math.round(hours / 24)}일 후`;
 }
 
 export function fallbackTitle(session: Session): string {
