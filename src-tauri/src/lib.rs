@@ -90,6 +90,15 @@ async fn generate_overnight_plan(
 }
 
 #[tauri::command]
+async fn prewarm_overnight_evidence() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let _ = usage::load_budgets();
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn prepare_dispatch_approval(
     draft_id: String,
     idempotency_key: String,
@@ -488,6 +497,7 @@ pub fn run() {
             cancel_night_plan_resume,
             resume_approved_night_plan,
             load_night_run_detail,
+            prewarm_overnight_evidence,
             generate_overnight_plan,
             prepare_dispatch_approval,
             prepare_portfolio_approval,
@@ -551,6 +561,9 @@ mod live_tests {
         let context_ready_ms = started.elapsed().as_millis();
         let budgets = budgets_thread.join().expect("usage thread");
         let evidence_ready_ms = started.elapsed().as_millis();
+        let cached_started = Instant::now();
+        let cached_budgets = usage::load_budgets();
+        let cached_budget_ms = cached_started.elapsed().as_millis();
         let routes = execution_routes::load(&budgets, now);
         let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
             &snapshot,
@@ -565,7 +578,7 @@ mod live_tests {
         let remaining_ms = started.elapsed().as_millis() - evidence_ready_ms;
 
         eprintln!(
-            "sessions={} projects={} candidates={} preflights={} timing_ms={{snapshot:{snapshot_ms},local_context_ready:{context_ready_ms},all_evidence_ready:{evidence_ready_ms},plan_and_preflight:{remaining_ms}}} budgets={:?}",
+            "sessions={} projects={} candidates={} preflights={} timing_ms={{snapshot:{snapshot_ms},local_context_ready:{context_ready_ms},all_evidence_ready:{evidence_ready_ms},cached_budget:{cached_budget_ms},plan_and_preflight:{remaining_ms}}} budgets={:?}",
             plan.sessions_considered,
             plan.projects_considered,
             plan.candidates.len(),
@@ -582,6 +595,8 @@ mod live_tests {
         );
         assert!(plan.read_only);
         assert_eq!(plan.budgets.len(), 3);
+        assert_eq!(cached_budgets.len(), 3);
+        assert!(cached_budget_ms < 100);
         let hermes_route = plan
             .route_inventory
             .routes

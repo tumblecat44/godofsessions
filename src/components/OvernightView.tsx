@@ -1689,6 +1689,9 @@ export function OvernightView() {
     void loadNightHistory();
     void loadNightPlanHistory();
     void loadMorningBrief();
+    if (isTauri()) {
+      void invoke("prewarm_overnight_evidence").catch(() => undefined);
+    }
     if (!isTauri()) return;
     const interval = window.setInterval(() => {
       void loadNightHistory();

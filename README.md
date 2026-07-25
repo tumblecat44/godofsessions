@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The visible no-run explanation M41 desktop slice is working.
+The prewarmed bedtime evidence M42 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -115,6 +115,11 @@ When that leaves no candidates, the empty recommendation card itself shows up
 to three project-specific reasons immediately. The operator no longer has to
 cross the capacity and route diagnostics to discover why doing nothing is the
 safe answer.
+Entering the Overnight screen now begins the slow read-only subscription
+observation before the operator asks for a plan. Concurrent requests share
+one in-process result for 60 seconds, so an immediate duplicate or
+regeneration does not repeat OpenClaw's expensive full status probe. Exact
+capacity revalidation at a scheduled start deliberately bypasses this cache.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -160,6 +165,7 @@ safe answer.
 - [Writable-provider choice M39](docs/overnight-m39.md)
 - [Actionable-only recommendations M40](docs/overnight-m40.md)
 - [Visible no-run explanations M41](docs/overnight-m41.md)
+- [Prewarmed bedtime evidence M42](docs/overnight-m42.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:

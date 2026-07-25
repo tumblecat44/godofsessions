@@ -4,11 +4,42 @@ mod codex;
 mod grok;
 mod transport;
 
+use std::{
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
+};
+
 use chrono::Utc;
 
 use crate::model::{Provider, ResourceBudget, ResourceState, UsageWindow};
 
+const PLAN_EVIDENCE_TTL: Duration = Duration::from_secs(60);
+
+struct PlanEvidenceCache {
+    loaded_at: Instant,
+    budgets: Vec<ResourceBudget>,
+}
+
+static PLAN_EVIDENCE: OnceLock<Mutex<Option<PlanEvidenceCache>>> = OnceLock::new();
+
 pub fn load_budgets() -> Vec<ResourceBudget> {
+    let cache = PLAN_EVIDENCE.get_or_init(|| Mutex::new(None));
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    if let Some(budgets) = cached_plan_evidence(&cache, now) {
+        return budgets;
+    }
+    let budgets = load_budgets_uncached();
+    *cache = Some(PlanEvidenceCache {
+        loaded_at: Instant::now(),
+        budgets: budgets.clone(),
+    });
+    budgets
+}
+
+fn load_budgets_uncached() -> Vec<ResourceBudget> {
     let (claude, codex, grok) = std::thread::scope(|scope| {
         let claude = scope.spawn(claude::load);
         let codex = scope.spawn(codex::load);
@@ -38,6 +69,15 @@ pub fn load_budgets() -> Vec<ResourceBudget> {
         )
     });
     cache::merge_with_cache(vec![claude, codex, grok])
+}
+
+fn cached_plan_evidence(
+    cache: &Option<PlanEvidenceCache>,
+    now: Instant,
+) -> Option<Vec<ResourceBudget>> {
+    let cached = cache.as_ref()?;
+    let age = now.checked_duration_since(cached.loaded_at)?;
+    (age <= PLAN_EVIDENCE_TTL).then(|| cached.budgets.clone())
 }
 
 pub(crate) fn load_budget(provider: Provider) -> ResourceBudget {
@@ -81,5 +121,22 @@ fn state_for_windows(windows: &[UsageWindow]) -> ResourceState {
         ResourceState::Degraded
     } else {
         ResourceState::Ready
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_evidence_cache_is_short_lived() {
+        let loaded_at = Instant::now();
+        let cached = Some(PlanEvidenceCache {
+            loaded_at,
+            budgets: vec![unavailable(Provider::Claude, "test", "cached test budget")],
+        });
+
+        assert!(cached_plan_evidence(&cached, loaded_at + Duration::from_secs(60)).is_some());
+        assert!(cached_plan_evidence(&cached, loaded_at + Duration::from_secs(61)).is_none());
     }
 }
