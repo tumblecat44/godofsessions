@@ -12,6 +12,7 @@ mod night_coordinator;
 mod recommendation;
 mod time_utils;
 mod usage;
+mod workspace_identity;
 
 use std::{collections::HashMap, sync::Mutex};
 
@@ -367,7 +368,7 @@ fn build_workspace_overview() -> WorkspaceOverview {
     }
 }
 
-fn build_snapshot() -> Snapshot {
+pub(crate) fn build_snapshot() -> Snapshot {
     let outputs = [
         connectors::load_codex(),
         connectors::load_grok(),

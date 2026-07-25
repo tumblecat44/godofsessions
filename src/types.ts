@@ -353,6 +353,7 @@ export interface NightPlanItemSummary {
   completed_at: string | null;
   idempotency_key: string;
   error: string | null;
+  waiting_reason: string | null;
 }
 
 export interface NightPlanLaneSummary {

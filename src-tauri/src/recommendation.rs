@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Duration, Utc};
 
@@ -102,6 +102,24 @@ fn build_overnight_plan_inner(
         };
         projects.entry(key).or_default().push(session);
     }
+    let active_workspaces = snapshot
+        .sessions
+        .iter()
+        .filter(|session| {
+            !session.archived
+                && matches!(
+                    session.status,
+                    SessionStatus::Running | SessionStatus::Waiting
+                )
+        })
+        .filter_map(|session| {
+            session
+                .cwd
+                .as_deref()
+                .or(session.repository.as_deref())
+                .and_then(crate::workspace_identity::key)
+        })
+        .collect::<BTreeSet<_>>();
 
     let mut candidates = Vec::new();
     let mut exclusions = Vec::new();
@@ -114,15 +132,23 @@ fn build_overnight_plan_inner(
             })
         });
 
-        if sessions.iter().any(|session| {
+        let exact_project_is_active = sessions.iter().any(|session| {
             matches!(
                 session.status,
                 SessionStatus::Running | SessionStatus::Waiting
             )
-        }) {
+        });
+        let shared_worktree_is_active = crate::workspace_identity::key(project_key)
+            .is_some_and(|identity| active_workspaces.contains(&identity));
+        if exact_project_is_active || shared_worktree_is_active {
             exclusions.push(ExcludedProject {
                 project,
-                reason: "이미 실행 중인 세션이 있어 중복 작업과 충돌 위험이 큽니다.".to_owned(),
+                reason: if exact_project_is_active {
+                    "이미 실행 중인 세션이 있어 중복 작업과 충돌 위험이 큽니다.".to_owned()
+                } else {
+                    "같은 Git worktree의 다른 경로에서 실행 중인 세션이 있어 파일 충돌을 피합니다."
+                        .to_owned()
+                },
             });
             continue;
         }
@@ -314,6 +340,7 @@ fn build_overnight_plan_inner(
     });
     let mut selected = Vec::new();
     let mut lane_hours = BTreeMap::<CapacityPool, f64>::new();
+    let mut workspace_hours = BTreeMap::<String, f64>::new();
     for mut candidate in candidates {
         if selected.len() >= 3 {
             exclusions.push(ExcludedProject {
@@ -325,23 +352,36 @@ fn build_overnight_plan_inner(
             });
             continue;
         }
-        let used = lane_hours
+        let lane_ready_at = lane_hours
             .get(&candidate.capacity_pool)
             .copied()
             .unwrap_or_default();
-        let remaining = floor_half((sleep_hours - used).max(0.0));
+        let workspace_key = candidate_workspace_key(&candidate);
+        let workspace_ready_at = workspace_hours
+            .get(&workspace_key)
+            .copied()
+            .unwrap_or_default();
+        let starts_after_hours = lane_ready_at.max(workspace_ready_at);
+        let remaining = floor_half((sleep_hours - starts_after_hours).max(0.0));
         if remaining < 1.0 {
             exclusions.push(ExcludedProject {
                 project: candidate.project,
-                reason: format!(
-                    "{}의 오늘 밤 시간 예산을 더 높은 순위 작업이 이미 사용합니다.",
-                    capacity_pool_display_name(candidate.capacity_pool)
-                ),
+                reason: if workspace_ready_at > lane_ready_at {
+                    "같은 Git worktree의 더 높은 순위 작업 뒤에는 검증 가능한 최소 시간이 남지 않습니다."
+                        .to_owned()
+                } else {
+                    format!(
+                        "{}의 오늘 밤 시간 예산을 더 높은 순위 작업이 이미 사용합니다.",
+                        capacity_pool_display_name(candidate.capacity_pool)
+                    )
+                },
             });
             continue;
         }
         candidate.estimated_hours = candidate.estimated_hours.min(remaining);
-        lane_hours.insert(candidate.capacity_pool, used + candidate.estimated_hours);
+        let ends_at = starts_after_hours + candidate.estimated_hours;
+        lane_hours.insert(candidate.capacity_pool, ends_at);
+        workspace_hours.insert(workspace_key, ends_at);
         selected.push(candidate);
     }
     let mut candidates = selected;
@@ -379,6 +419,7 @@ fn build_overnight_plan_inner(
 
 fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
     let mut lanes = BTreeMap::<CapacityPool, NightScheduleLane>::new();
+    let mut workspace_hours = BTreeMap::<String, f64>::new();
     for candidate in candidates {
         let lane = lanes
             .entry(candidate.capacity_pool)
@@ -387,7 +428,13 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
                 planned_hours: 0.0,
                 slots: Vec::new(),
             });
-        let starts_after_hours = lane.planned_hours;
+        let workspace_key = candidate_workspace_key(candidate);
+        let workspace_ready_at = workspace_hours
+            .get(&workspace_key)
+            .copied()
+            .unwrap_or_default();
+        let starts_after_hours = lane.planned_hours.max(workspace_ready_at);
+        let ends_at = starts_after_hours + candidate.estimated_hours;
         lane.slots.push(NightScheduleSlot {
             candidate_rank: candidate.rank,
             project: candidate.project.clone(),
@@ -395,16 +442,40 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
             starts_after_hours,
             time_budget_hours: candidate.estimated_hours,
         });
-        lane.planned_hours += candidate.estimated_hours;
+        lane.planned_hours = ends_at;
+        workspace_hours.insert(workspace_key, ends_at);
     }
     let lanes = lanes.into_values().collect::<Vec<_>>();
+    let intervals = lanes
+        .iter()
+        .enumerate()
+        .flat_map(|(lane_index, lane)| {
+            lane.slots.iter().map(move |slot| {
+                (
+                    lane_index,
+                    slot.starts_after_hours,
+                    slot.starts_after_hours + slot.time_budget_hours,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let parallel = intervals.iter().enumerate().any(|(index, left)| {
+        intervals
+            .iter()
+            .skip(index + 1)
+            .any(|right| left.0 != right.0 && left.1 < right.2 && right.1 < left.2)
+    });
     NightSchedule {
-        parallel: lanes.len() > 1,
+        parallel,
         lanes,
         methodology:
-            "같은 구독 풀의 작업은 한 번에 하나씩 순차 실행하고, 서로 다른 구독 풀은 동시에 시작합니다. 각 레인의 합은 수면시간을 넘지 않으며 남는 시간을 채우기 위한 작업은 만들지 않습니다."
+            "같은 구독 풀과 같은 실제 Git worktree의 작업은 각각 한 번에 하나씩 순차 실행합니다. 서로 다른 구독이더라도 한 checkout을 공유하면 앞 작업의 종료 근거 뒤로 미루며, 별도 worktree는 병렬 실행할 수 있습니다. 수면시간을 넘기거나 남는 시간을 채우기 위한 작업은 만들지 않습니다."
                 .to_owned(),
     }
+}
+
+fn candidate_workspace_key(candidate: &OvernightCandidate) -> String {
+    crate::workspace_identity::key_or_path(&candidate.cwd)
 }
 
 fn select_execution_route(
@@ -660,6 +731,8 @@ fn floor_half(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::{path::Path, process::Command};
+
     use crate::model::{
         AdapterReadiness, Capability, ContextExcerpt, ContextIndex, ContextRole, ExecutionRoute,
         ExecutionRouteInventory, NativeKind, ProjectContextBrief, Provider, ResourceBudget,
@@ -1169,6 +1242,121 @@ mod tests {
     }
 
     #[test]
+    fn different_subdirectories_of_one_worktree_are_serialized_across_subscriptions() {
+        let repository = temporary_repository();
+        let mut claude = session(
+            Provider::Claude,
+            "alpha",
+            "alpha",
+            "Claude work",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        );
+        claude.cwd = Some(
+            repository
+                .path()
+                .join("packages/alpha")
+                .display()
+                .to_string(),
+        );
+        let mut codex = session(
+            Provider::Codex,
+            "beta",
+            "beta",
+            "Codex work",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        );
+        codex.cwd = Some(
+            repository
+                .path()
+                .join("packages/beta")
+                .display()
+                .to_string(),
+        );
+
+        let plan = build_overnight_plan(
+            &snapshot(vec![claude, codex]),
+            vec![
+                budget(Provider::Claude, 10.0),
+                budget(Provider::Codex, 10.0),
+            ],
+            SleepHours::new(4.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let mut starts = plan
+            .schedule
+            .lanes
+            .iter()
+            .flat_map(|lane| &lane.slots)
+            .map(|slot| slot.starts_after_hours)
+            .collect::<Vec<_>>();
+        starts.sort_by(f64::total_cmp);
+
+        assert_eq!(starts, vec![0.0, 2.0]);
+        assert!(!plan.schedule.parallel);
+        assert!(plan
+            .schedule
+            .lanes
+            .iter()
+            .all(|lane| lane.planned_hours <= plan.sleep_hours));
+    }
+
+    #[test]
+    fn an_old_but_running_sibling_excludes_the_shared_worktree() {
+        let repository = temporary_repository();
+        let mut idle = session(
+            Provider::Codex,
+            "alpha",
+            "alpha",
+            "Idle sibling",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        );
+        idle.cwd = Some(
+            repository
+                .path()
+                .join("packages/alpha")
+                .display()
+                .to_string(),
+        );
+        let mut running = session(
+            Provider::Claude,
+            "beta",
+            "beta",
+            "Running sibling",
+            SessionStatus::Running,
+            "2026-07-22T21:31:00Z",
+        );
+        running.cwd = Some(
+            repository
+                .path()
+                .join("packages/beta")
+                .display()
+                .to_string(),
+        );
+
+        let plan = build_overnight_plan(
+            &snapshot(vec![idle, running]),
+            vec![
+                budget(Provider::Claude, 10.0),
+                budget(Provider::Codex, 10.0),
+            ],
+            SleepHours::new(4.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan.exclusions.iter().any(|item| {
+            item.project == "alpha" && item.reason.contains("같은 Git worktree")
+        }));
+    }
+
+    #[test]
     fn sleep_duration_is_validated_once_at_the_boundary() {
         assert!(SleepHours::new(0.5).is_err());
         assert!(SleepHours::new(f64::NAN).is_err());
@@ -1198,6 +1386,30 @@ mod tests {
 
         assert_eq!(plan.candidates[0].estimated_hours, 1.0);
         assert!(plan.candidates[0].estimated_hours <= plan.sleep_hours);
+    }
+
+    fn temporary_repository() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().expect("temporary repository");
+        let root = directory.path();
+        run_git(root, &["init", "-q"]);
+        run_git(root, &["config", "user.name", "God of Sessions test"]);
+        run_git(root, &["config", "user.email", "test@godofsessions.local"]);
+        std::fs::write(root.join("README.md"), "baseline\n").expect("seed file");
+        std::fs::create_dir_all(root.join("packages/alpha")).expect("alpha directory");
+        std::fs::create_dir_all(root.join("packages/beta")).expect("beta directory");
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-qm", "baseline"]);
+        directory
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let status = Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git command failed: {args:?}");
     }
 
     #[test]

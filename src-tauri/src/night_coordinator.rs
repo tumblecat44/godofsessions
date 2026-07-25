@@ -78,6 +78,8 @@ struct CoordinatorItem {
     receipt: Option<DispatchReceipt>,
     error: Option<String>,
     #[serde(default)]
+    waiting_reason: Option<String>,
+    #[serde(default)]
     workspace_baseline: Option<workspace_evidence::WorkspaceSnapshot>,
     #[serde(default)]
     workspace_final: Option<workspace_evidence::WorkspaceSnapshot>,
@@ -128,6 +130,7 @@ impl CoordinatorPlan {
                             completed_at: None,
                             receipt: None,
                             error: None,
+                            waiting_reason: None,
                             workspace_baseline: None,
                             workspace_final: None,
                         })
@@ -483,6 +486,7 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
                         completed_at: item.completed_at.map(|value| value.to_rfc3339()),
                         idempotency_key: item.approved.dispatch.preflight.idempotency_key,
                         error: item.error,
+                        waiting_reason: item.waiting_reason,
                     })
                     .collect(),
             })

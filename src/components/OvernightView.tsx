@@ -1320,7 +1320,8 @@ function NightPlanHistorySection({
           <span className="eyebrow">DURABLE NIGHT PLAN</span>
           <h2>승인한 순서를 지키는 밤 coordinator</h2>
           <p>
-            공급자 완료 근거를 확인한 뒤 같은 구독 lane의 다음 작업만 엽니다.
+            공급자 완료 근거를 확인하고, 같은 구독이나 실제 작업공간이 비어
+            있을 때만 다음 작업을 엽니다.
           </p>
         </div>
         {plan && (
@@ -1413,6 +1414,9 @@ function NightPlanHistorySection({
                             : "바로 시작"}{" "}
                           · 최대 {item.time_budget_hours}시간
                         </small>
+                        {item.waiting_reason && (
+                          <em className="is-waiting">{item.waiting_reason}</em>
+                        )}
                         {item.error && <em>{item.error}</em>}
                       </div>
                     </div>
@@ -2169,8 +2173,8 @@ export function OvernightView() {
                 <h2>구독별 실행 순서</h2>
                 <p>
                   {plan.schedule.parallel
-                    ? `${plan.schedule.lanes.length}개 구독은 동시에 시작하고, 같은 구독 안에서만 순서대로 실행합니다.`
-                    : "한 구독 안에서 추천 순서대로 실행합니다."}
+                    ? `${plan.schedule.lanes.length}개 구독을 활용하되, 같은 구독이나 같은 실제 작업공간은 순서대로 실행합니다.`
+                    : "같은 구독 또는 같은 실제 작업공간의 안전 경계에 따라 추천 순서대로 실행합니다."}
                 </p>
               </header>
               <div className="schedule-grid">
@@ -2225,8 +2229,8 @@ export function OvernightView() {
                       예약
                     </strong>
                     <small>
-                      각 lane은 앞 작업의 공급자 종료 근거를 확인한 뒤 다음
-                      작업을 다시 점검합니다.
+                      각 lane은 앞 작업의 공급자 종료 근거를 확인하고, 공유
+                      작업공간이 비었는지 다시 점검한 뒤 시작합니다.
                     </small>
                   </div>
                   <button

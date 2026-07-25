@@ -162,6 +162,13 @@ fn validate(plan: &CoordinatorPlan) -> Result<(), String> {
                 item.workspace_baseline.as_ref(),
                 item.workspace_final.as_ref(),
             )?;
+            if item
+                .waiting_reason
+                .as_deref()
+                .is_some_and(|value| value.is_empty() || value.len() > 500)
+            {
+                return Err("밤 coordinator 대기 이유가 올바르지 않습니다.".to_owned());
+            }
             if dispatch.draft.id != dispatch.preflight.draft_id
                 || dispatch.preflight.idempotency_key.is_empty()
                 || dispatch.preflight.state

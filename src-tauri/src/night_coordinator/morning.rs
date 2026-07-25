@@ -243,12 +243,15 @@ fn morning_item(
         }
     });
     let evidence_fingerprint = evidence_fingerprint(item, &observation);
-    let (verdict, verdict_reason, next_action, provenance_verified) = classify(
+    let (verdict, verdict_reason, mut next_action, provenance_verified) = classify(
         item.state,
         &observation,
         after_deadline,
         plan_requires_attention,
     );
+    if item.state == CoordinatorItemState::Pending && item.waiting_reason.is_some() {
+        next_action = "공유 작업공간 종료 기다리기".to_owned();
+    }
     let (review_state, reviewed_at) = match review {
         Some(review)
             if review.evidence_fingerprint == evidence_fingerprint
@@ -278,6 +281,7 @@ fn morning_item(
         error: record
             .and_then(|value| value.error.clone())
             .or_else(|| item.error.clone())
+            .or_else(|| item.waiting_reason.clone())
             .or(observation.warning),
         started_at: record
             .and_then(|value| value.started_at.clone())
@@ -545,6 +549,7 @@ mod tests {
             completed_at: None,
             receipt: None,
             error: None,
+            waiting_reason: None,
             workspace_baseline: None,
             workspace_final: None,
         }
@@ -683,6 +688,25 @@ mod tests {
         assert_eq!(brief.attention_count, 1);
         assert_eq!(brief.not_started_count, 0);
         assert_eq!(brief.items[0].next_action, "안전 복구 여부 결정");
+    }
+
+    #[test]
+    fn workspace_wait_is_explained_without_turning_into_attention() {
+        let mut waiting = item("waiting", CoordinatorItemState::Pending);
+        waiting.waiting_reason = Some("같은 실제 작업공간의 다른 실행을 기다립니다.".to_owned());
+        let source = plan(vec![waiting]);
+        let brief = build(&source, "active", &HashMap::new(), |_| Observation {
+            record: None,
+            detail: None,
+            warning: None,
+        });
+
+        assert_eq!(brief.items[0].verdict, MorningBriefVerdict::NotStarted);
+        assert_eq!(brief.items[0].next_action, "공유 작업공간 종료 기다리기");
+        assert!(brief.items[0]
+            .error
+            .as_deref()
+            .is_some_and(|value| value.contains("다른 실행")));
     }
 
     #[test]

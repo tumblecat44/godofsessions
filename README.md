@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The workspace-evidence Morning Review M22 desktop slice is working.
+The worktree-aware overnight coordinator M23 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -42,6 +42,10 @@ reopens when an attempt, handoff, lifecycle fact, or observed workspace
 snapshot changes. Each scheduled Git task now records a bounded pre-dispatch
 baseline and terminal observation, so the morning review shows changes
 observed during the run without claiming exclusive agent authorship.
+The planner and detached coordinator now treat the actual Git worktree as a
+second capacity boundary: sibling subdirectories are serialized even across
+different subscriptions, while explicitly isolated linked worktrees may run
+in parallel.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -68,6 +72,7 @@ observed during the run without claiming exclusive agent authorship.
 - [Evidence-ranked Morning Inbox M20](docs/overnight-m20.md)
 - [Evidence-bound morning acknowledgement M21](docs/overnight-m21.md)
 - [Workspace-change evidence M22](docs/overnight-m22.md)
+- [Worktree-aware collision control M23](docs/overnight-m23.md)
 
 The app currently:
 
@@ -143,6 +148,14 @@ The app currently:
   authorship
 - binds final workspace evidence into Morning Review acknowledgement and keeps
   in-progress observations ineligible for review completion
+- resolves monorepo subdirectories to one actual worktree identity and schedules
+  it independently from subscription Capacity Pools
+- excludes candidates when any indexed provider is already active in the same
+  worktree, then rechecks all local session activity immediately before every
+  approved start
+- leaves a colliding item pending with a durable workspace-wait explanation;
+  it never substitutes work, extends the wake deadline, or silently redirects
+  an existing provider session into a new checkout
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

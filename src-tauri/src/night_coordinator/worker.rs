@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use chrono::{DateTime, Utc};
 
@@ -115,6 +115,7 @@ fn tick(
             if item.state == CoordinatorItemState::Pending {
                 item.state = CoordinatorItemState::SkippedDeadline;
                 item.completed_at = Some(now);
+                item.waiting_reason = None;
                 item.error = Some(
                     "승인된 수면 마감 안에 전체 시간 예산이 남지 않아 시작하지 않음".to_owned(),
                 );
@@ -136,6 +137,8 @@ fn tick(
     if startable.is_empty() {
         return Ok(Vec::new());
     }
+    let mut occupied_workspaces = active_plan_workspace_keys(plan);
+    occupied_workspaces.extend(active_session_workspace_keys());
     let budgets = crate::usage::load_budgets();
     let routes = crate::execution_routes::load(&budgets, now);
     let mut outcomes = Vec::new();
@@ -145,12 +148,24 @@ fn tick(
             let item = &mut plan.lanes[lane_index].items[item_index];
             item.state = CoordinatorItemState::SkippedDeadline;
             item.completed_at = Some(now);
+            item.waiting_reason = None;
             item.error =
                 Some("남은 수면 시간보다 승인된 작업 시간 예산이 커서 시작하지 않음".to_owned());
             plan.updated_at = now;
             ledger::update(plan)?;
             continue;
         }
+        let workspace_key =
+            crate::workspace_identity::key_or_path(&item.approved.dispatch.draft.workspace);
+        if occupied_workspaces.contains(&workspace_key) {
+            let item = &mut plan.lanes[lane_index].items[item_index];
+            item.waiting_reason = Some(
+                "같은 실제 작업공간에서 다른 세션이나 승인 작업이 실행 중이라 종료 근거를 기다립니다."
+                    .to_owned(),
+            );
+            continue;
+        }
+        occupied_workspaces.insert(workspace_key.clone());
 
         {
             let item = &mut plan.lanes[lane_index].items[item_index];
@@ -161,6 +176,7 @@ fn tick(
             item.state = CoordinatorItemState::Starting;
             item.started_at = Some(now);
             item.error = None;
+            item.waiting_reason = None;
         }
         plan.updated_at = now;
         ledger::update(plan)?;
@@ -213,6 +229,9 @@ fn tick(
         }
         plan.updated_at = Utc::now();
         ledger::update(plan)?;
+        if plan.lanes[lane_index].items[item_index].state.is_terminal() {
+            occupied_workspaces.remove(&workspace_key);
+        }
     }
     halt_uncertain_lanes(plan, Utc::now());
     plan.updated_at = Utc::now();
@@ -291,6 +310,42 @@ fn capture_workspace_final(item: &mut CoordinatorItem) {
     ));
 }
 
+fn active_plan_workspace_keys(plan: &CoordinatorPlan) -> BTreeSet<String> {
+    plan.lanes
+        .iter()
+        .flat_map(|lane| &lane.items)
+        .filter(|item| {
+            matches!(
+                item.state,
+                CoordinatorItemState::Starting | CoordinatorItemState::Running
+            )
+        })
+        .map(|item| crate::workspace_identity::key_or_path(&item.approved.dispatch.draft.workspace))
+        .collect()
+}
+
+fn active_session_workspace_keys() -> BTreeSet<String> {
+    crate::build_snapshot()
+        .sessions
+        .into_iter()
+        .filter(|session| {
+            !session.archived
+                && matches!(
+                    session.status,
+                    crate::model::SessionStatus::Running | crate::model::SessionStatus::Waiting
+                )
+                && session.status_confidence != crate::model::StatusConfidence::Stale
+        })
+        .filter_map(|session| {
+            session
+                .cwd
+                .as_deref()
+                .or(session.repository.as_deref())
+                .and_then(crate::workspace_identity::key)
+        })
+        .collect()
+}
+
 fn evidence_grace_elapsed(item: &CoordinatorItem, now: DateTime<Utc>) -> bool {
     item.started_at
         .is_some_and(|started| now - started >= chrono::Duration::seconds(EVIDENCE_GRACE_SECONDS))
@@ -309,6 +364,7 @@ fn halt_uncertain_lanes(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
             if item.state == CoordinatorItemState::Pending {
                 item.state = CoordinatorItemState::SkippedUncertain;
                 item.completed_at = Some(now);
+                item.waiting_reason = None;
                 item.error = Some(
                     "앞 작업의 공급자 시작·종료 증거가 불확실해 이 lane의 후속 작업을 시작하지 않음"
                         .to_owned(),
@@ -471,6 +527,7 @@ mod tests {
             completed_at: None,
             receipt: None,
             error: None,
+            waiting_reason: None,
             workspace_baseline: None,
             workspace_final: None,
         }
@@ -541,6 +598,28 @@ mod tests {
         plan.lanes[0].items[0].state = CoordinatorItemState::Blocked;
 
         assert_eq!(next_startable_item(&plan, 0, now), Some(1));
+    }
+
+    #[test]
+    fn active_workspace_identity_crosses_capacity_pool_lanes() {
+        let mut source = plan();
+        source.lanes[0].items[0].state = CoordinatorItemState::Running;
+        let shared_workspace = source.lanes[0].items[0]
+            .approved
+            .dispatch
+            .draft
+            .workspace
+            .clone();
+        let mut candidate = item(3, 0.0);
+        candidate.approved.dispatch.draft.workspace = shared_workspace.clone();
+        candidate.approved.dispatch.preflight.scope_value = shared_workspace.clone();
+        source.lanes.push(CoordinatorLane {
+            capacity_pool: CapacityPool::ClaudeSubscription,
+            items: vec![candidate],
+        });
+
+        let occupied = active_plan_workspace_keys(&source);
+        assert!(occupied.contains(&crate::workspace_identity::key_or_path(&shared_workspace)));
     }
 
     #[test]
