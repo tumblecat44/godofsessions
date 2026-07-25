@@ -803,6 +803,8 @@ fn receipt(
         run_id: task.run_id,
         worker_pid: task.worker_pid,
         session_id: task.session_id.clone(),
+        thread_id: None,
+        turn_id: None,
         idempotency_key: approved.preflight.idempotency_key.clone(),
         receipt_source: "Hermes task + task_runs".to_owned(),
         message,

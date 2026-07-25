@@ -289,6 +289,8 @@ export interface DispatchReceipt {
   run_id: number | null;
   worker_pid: number | null;
   session_id: string | null;
+  thread_id: string | null;
+  turn_id: string | null;
   idempotency_key: string;
   receipt_source: string;
   message: string;

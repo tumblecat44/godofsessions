@@ -396,6 +396,8 @@ pub struct DispatchReceipt {
     pub run_id: Option<i64>,
     pub worker_pid: Option<i64>,
     pub session_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
     pub idempotency_key: String,
     pub receipt_source: String,
     pub message: String,

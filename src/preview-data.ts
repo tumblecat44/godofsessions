@@ -739,7 +739,7 @@ export const previewOvernightPlan: OvernightPlan = {
       permission_profile: "workspace_write",
       external_side_effects_allowed: false,
       approval_required: true,
-      dispatch_supported: false,
+      dispatch_supported: true,
     },
     {
       id: "night:2:agent-research:hermes:default",
@@ -807,7 +807,7 @@ export const previewOvernightPlan: OvernightPlan = {
   dispatch_preflights: [
     {
       draft_id: "night:1:godofsessions:codex:native",
-      state: "blocked",
+      state: "ready_for_approval",
       surface: "codex",
       adapter: "Codex app-server v2",
       scope_label: "writable root",
@@ -851,6 +851,13 @@ export const previewOvernightPlan: OvernightPlan = {
             "정규화된 Git 작업공간 한 곳만 writable root로 사용합니다.",
         },
         {
+          key: "contract",
+          level: "pass",
+          label: "Night Contract",
+          message:
+            "workspace-write, 외부 부작용 금지, 제한된 시간 예산이 고정되어 있습니다.",
+        },
+        {
           key: "thread",
           level: "pass",
           label: "Codex thread",
@@ -858,14 +865,25 @@ export const previewOvernightPlan: OvernightPlan = {
             "기존 thread가 같은 작업공간에 있고 현재 실행 중이 아니며 보관되지 않았습니다.",
         },
         {
-          key: "adapter_wiring",
-          level: "block",
-          label: "실행 연결",
+          key: "idempotency",
+          level: "pass",
+          label: "중복 실행 방지",
           message:
-            "프로토콜 계약은 검증됐지만 승인 소비·turn 감시·실패 영수증 연결 전이므로 아직 실행하지 않습니다.",
+            "provider rollout에 같은 clientUserMessageId가 없습니다.",
         },
       ],
       commands: [
+        {
+          step: "start_night_worker",
+          program: "/usr/bin/caffeinate",
+          arguments: [
+            "-i",
+            "/Applications/God of Sessions.app/Contents/MacOS/god-of-sessions",
+            "--codex-night-worker",
+          ],
+          mutates_local_state: false,
+          summary: "GUI와 분리된 유휴 절전 방지 야간 작업자 시작",
+        },
         {
           step: "start_app_server",
           program: "/Applications/ChatGPT.app/Contents/Resources/codex",
@@ -903,8 +921,10 @@ export const previewOvernightPlan: OvernightPlan = {
             threadId: "co1",
             cwd: "/Users/you/projects/godofsessions",
             approvalPolicy: "never",
+            approvalsReviewer: "user",
             sandbox: "workspace-write",
             runtimeWorkspaceRoots: ["/Users/you/projects/godofsessions"],
+            excludeTurns: true,
           },
           mutates_local_state: true,
           summary: "승인한 기존 thread를 같은 cwd로 재개",

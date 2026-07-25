@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
 
-use crate::model::{ApprovalChallenge, DispatchPreflight, DispatchPreflightState, NightRunDraft};
+use crate::model::{
+    ApprovalChallenge, DispatchPreflight, DispatchPreflightState, NightRunDraft, Provider,
+};
 
 const PROPOSAL_TTL_MINUTES: i64 = 30;
 const CHALLENGE_TTL_MINUTES: i64 = 5;
@@ -125,7 +127,9 @@ impl ApprovalRegistry {
             "approval-{}-{}-{}",
             self.generation,
             self.sequence,
-            idempotency_key.trim_start_matches("gos-night-")
+            idempotency_key
+                .trim_start_matches("gos-night-")
+                .trim_start_matches("gos-codex-")
         );
         let confirmation_phrase = format!("{} 시작 승인", proposal.draft.project);
         let expires_at = now + Duration::minutes(CHALLENGE_TTL_MINUTES);
@@ -149,8 +153,14 @@ impl ApprovalRegistry {
             workspace: proposal.draft.workspace.clone(),
             confirmation_phrase,
             expires_at: expires_at.to_rfc3339(),
-            warning: "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다."
-                .to_owned(),
+            warning: match proposal.preflight.surface {
+                Provider::Codex => concat!(
+                    "확인하면 이 기존 Codex 작업에 network-off workspace-write turn 하나를 ",
+                    "시작합니다. GUI를 닫아도 전용 야간 작업자는 계속됩니다."
+                ),
+                _ => "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
+            }
+            .to_owned(),
         })
     }
 

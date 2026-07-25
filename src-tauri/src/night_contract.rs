@@ -68,7 +68,8 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         permission_profile: PermissionProfile::WorkspaceWrite,
         external_side_effects_allowed: false,
         approval_required: true,
-        dispatch_supported: format == RunDraftFormat::HermesGoal,
+        dispatch_supported: format == RunDraftFormat::HermesGoal
+            || (candidate.execution_surface == Provider::Codex && candidate.resume_existing),
     }
 }
 
@@ -176,6 +177,16 @@ mod tests {
         assert_eq!(draft.continuation_turn_budget, None);
         assert!(!draft.prompt.starts_with("/goal "));
         assert!(!draft.dispatch_supported);
+    }
+
+    #[test]
+    fn codex_existing_thread_is_dispatchable_but_new_thread_is_not() {
+        let resumed = build(&candidate(Provider::Codex, true));
+        let fresh = build(&candidate(Provider::Codex, false));
+
+        assert!(resumed.dispatch_supported);
+        assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
+        assert!(!fresh.dispatch_supported);
     }
 
     #[test]

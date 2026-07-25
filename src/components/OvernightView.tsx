@@ -667,9 +667,9 @@ function CandidateCard({
           <div className="preflight-safety">
             <span>
               <ShieldCheck size={13} />
-              읽기 전용 점검
+              승인 전 읽기 전용 점검
             </span>
-            <strong>실행 꺼짐</strong>
+            <strong>자동 실행 꺼짐</strong>
             <small>
               {preflight.scope_label}{" "}
               <code>{preflight.scope_value}</code>
@@ -717,7 +717,9 @@ function CandidateCard({
                 <summary>
                   <span>{index + 1}</span>
                   <strong>{command.summary}</strong>
-                  <small>로컬 변경</small>
+                  <small>
+                    {command.mutates_local_state ? "로컬 변경" : "프로세스"}
+                  </small>
                 </summary>
                 <pre>
                   {[command.program, ...command.arguments]
@@ -893,6 +895,11 @@ export function OvernightView() {
         (candidate) => candidate.rank === approvalDraft.candidate_rank,
       )
     : undefined;
+  const approvalPreflight = approval
+    ? plan?.dispatch_preflights.find(
+        (preflight) => preflight.draft_id === approval.draft_id,
+      )
+    : undefined;
 
   const requestApproval = async (preflight: DispatchPreflight) => {
     setPreparingDraftId(preflight.draft_id);
@@ -926,7 +933,9 @@ export function OvernightView() {
             } 시작 승인`,
             expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
             warning:
-              "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
+              preflight.surface === "codex"
+                ? "확인하면 이 기존 Codex 작업에 network-off workspace-write turn 하나를 시작합니다. GUI를 닫아도 전용 야간 작업자는 계속됩니다."
+                : "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
           };
       setApproval(challenge);
       setConfirmationPhrase("");
@@ -964,7 +973,9 @@ export function OvernightView() {
     setApprovalError(null);
     try {
       const receipt = await invoke<DispatchReceipt>(
-        "dispatch_approved_hermes",
+        approvalPreflight?.surface === "codex"
+          ? "dispatch_approved_codex"
+          : "dispatch_approved_hermes",
         {
           approvalId: approval.id,
           idempotencyKey: approval.idempotency_key,
@@ -1361,11 +1372,15 @@ export function OvernightView() {
             <div className="approval-effects">
               <p>
                 <Check size={12} />
-                전용 Hermes 보드만 사용
+                {approvalPreflight?.surface === "codex"
+                  ? "승인한 기존 Codex 작업만 재개"
+                  : "전용 Hermes 보드만 사용"}
               </p>
               <p>
                 <Check size={12} />
-                최대 한 작업자·계약된 시간과 턴만 허용
+                {approvalPreflight?.surface === "codex"
+                  ? "단일 writable root · 네트워크 차단"
+                  : "최대 한 작업자·계약된 시간과 턴만 허용"}
               </p>
               <p>
                 <AlertTriangle size={12} />

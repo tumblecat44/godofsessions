@@ -16,7 +16,7 @@ God of Sessions is:
 - a live activity and attention dashboard
 - a cross-agent task and session graph
 - a read-only overnight portfolio planner with reviewable Run Drafts
-- a future native-session launcher and approval-gated control surface
+- an approval-gated control surface for proven provider routes
 - local-only by default
 
 It is not:
@@ -29,13 +29,12 @@ It is not:
 
 ## Current phase
 
-The Codex-preflight M12 desktop slice is working. Recommendation and
-preflight remain read-only; a provider process can start only after an exact,
-expiring, one-time approval in the desktop app, and its state is recovered
-from Hermes after an app restart. Morning Review keeps provider completion
-separate from human verification. Codex now has a live, version-matched
-protocol preflight but remains execution-blocked until turn monitoring and
-recovery are wired.
+The Codex-dispatch M13 desktop slice is working. Recommendation and preflight
+remain read-only; a provider process can start only after an exact, expiring,
+one-time approval in the desktop app. Hermes state is recovered after an app
+restart, while Codex uses the provider rollout as its idempotency and recovery
+ledger. Morning Review keeps provider completion separate from human
+verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -52,6 +51,7 @@ recovery are wired.
 - [Durable Night Run recovery M10](docs/overnight-m10.md)
 - [Evidence-backed Morning Review M11](docs/overnight-m11.md)
 - [Codex app-server safety preflight M12](docs/overnight-m12.md)
+- [Approval-gated Codex night turns M13](docs/overnight-m13.md)
 
 The app currently:
 
@@ -104,16 +104,21 @@ The app currently:
   transaction
 - fixes Codex turns to one workspace-write root, network off, no approval
   escalation, no external environment, and a stable client message identity
-- keeps Codex execution blocked until the app can consume one exact approval,
-  follow item/turn events, and recover an ambiguous start
+- resumes an eligible existing Codex thread only after an exact approval, in a
+  detached idle-sleep-resistant worker
+- denies unexpected Codex approval or user-input requests, enforces the time
+  budget with turn interrupt, and never retries an ambiguous start
+- recovers the accepted Codex contract from its provider rollout using the
+  stable client message identity
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
-The Overnight screen never auto-dispatches. Only an eligible Hermes proposal
-has a start control, and the operator must review the effects and type the
-project-specific confirmation phrase. Native Codex, Claude, Grok, Cursor, and
-OpenClaw dispatch remain disabled until their guardrail contracts are equally
-strong. The tools that created the sessions remain the source of truth.
+The Overnight screen never auto-dispatches. Eligible Hermes proposals and
+provenance-checked existing Codex threads have a start control, and the
+operator must review the effects and type the project-specific confirmation
+phrase. New Codex threads plus native Claude, Grok, Cursor, and OpenClaw
+dispatch remain disabled until their guardrail contracts are equally strong.
+The tools that created the sessions remain the source of truth.
 
 ## Run locally
 

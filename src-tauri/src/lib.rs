@@ -22,6 +22,10 @@ use tauri::State;
 
 type ApprovalState = Mutex<approval::ApprovalRegistry>;
 
+pub fn run_codex_night_worker() {
+    codex_dispatch::run_night_worker_from_stdin();
+}
+
 #[tauri::command]
 async fn load_snapshot() -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(build_snapshot)
@@ -115,6 +119,37 @@ async fn dispatch_approved_hermes(
             .find(|route| route.id == approved.draft.route_id)
             .ok_or_else(|| "승인한 Hermes 실행 경로를 더 이상 찾지 못했습니다.".to_owned())?;
         dispatch::execute_approved(approved, route)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn dispatch_approved_codex(
+    approval_id: String,
+    idempotency_key: String,
+    confirmation_phrase: String,
+    approvals: State<'_, ApprovalState>,
+) -> Result<DispatchReceipt, String> {
+    let approved = approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .consume(
+            &approval_id,
+            &idempotency_key,
+            &confirmation_phrase,
+            Utc::now(),
+        )
+        .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let budgets = usage::load_budgets();
+        let routes = execution_routes::load(&budgets, Utc::now());
+        let route = routes
+            .routes
+            .iter()
+            .find(|route| route.id == approved.draft.route_id)
+            .ok_or_else(|| "승인한 Codex 실행 경로를 더 이상 찾지 못했습니다.".to_owned())?;
+        codex_dispatch::execute_approved(approved, route)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -239,7 +274,8 @@ pub fn run() {
             generate_overnight_plan,
             prepare_dispatch_approval,
             cancel_dispatch_approval,
-            dispatch_approved_hermes
+            dispatch_approved_hermes,
+            dispatch_approved_codex
         ])
         .run(tauri::generate_context!())
         .expect("error while running God of Sessions");
@@ -334,7 +370,9 @@ mod live_tests {
             draft.approval_required
                 && !draft.external_side_effects_allowed
                 && (draft.dispatch_supported
-                    == (draft.format == crate::model::RunDraftFormat::HermesGoal))
+                    == (draft.format == crate::model::RunDraftFormat::HermesGoal
+                        || (draft.route_id == "codex:native"
+                            && draft.run_mode == crate::model::RunMode::ResumeExisting)))
         }));
         assert!(plan
             .schedule
