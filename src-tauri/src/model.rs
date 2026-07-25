@@ -461,6 +461,7 @@ pub struct NightPlanItemSummary {
     pub error: Option<String>,
     pub waiting_reason: Option<String>,
     pub waiting_kind: Option<String>,
+    pub waiting_retry_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

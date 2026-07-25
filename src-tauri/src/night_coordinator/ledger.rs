@@ -167,6 +167,8 @@ fn validate(plan: &CoordinatorPlan) -> Result<(), String> {
                 .as_deref()
                 .is_some_and(|value| value.is_empty() || value.len() > 500)
                 || (item.waiting_kind.is_some() && item.waiting_reason.is_none())
+                || (item.waiting_retry_at.is_some()
+                    && item.waiting_kind != Some(super::CoordinatorWaitKind::Capacity))
             {
                 return Err("밤 coordinator 대기 이유가 올바르지 않습니다.".to_owned());
             }

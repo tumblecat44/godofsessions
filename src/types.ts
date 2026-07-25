@@ -357,6 +357,7 @@ export interface NightPlanItemSummary {
   error: string | null;
   waiting_reason: string | null;
   waiting_kind: "workspace" | "capacity" | null;
+  waiting_retry_at: string | null;
 }
 
 export interface NightPlanLaneSummary {

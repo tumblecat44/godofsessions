@@ -760,6 +760,7 @@ export const previewNightPlanHistory: NightPlanHistory = {
               error: null,
               waiting_reason: null,
               waiting_kind: null,
+              waiting_retry_at: null,
             },
           ],
         },
@@ -782,6 +783,7 @@ export const previewNightPlanHistory: NightPlanHistory = {
               error: null,
               waiting_reason: null,
               waiting_kind: null,
+              waiting_retry_at: null,
             },
           ],
         },
@@ -805,6 +807,7 @@ export const previewNightPlanHistory: NightPlanHistory = {
               waiting_reason:
                 "Claude 구독의 5시간 창에 0.0%만 남았습니다. 초기화 뒤 승인한 마감 안에서 다시 확인합니다.",
               waiting_kind: "capacity",
+              waiting_retry_at: new Date(now + 5 * 60_000).toISOString(),
             },
           ],
         },

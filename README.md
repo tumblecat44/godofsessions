@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The activity-time cross-provider recency M28 desktop slice is working.
+The bounded exact-capacity observation M29 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -64,6 +64,11 @@ cannot make old projects look active today.
 Grok recency likewise prefers provider `last_active_at` over summary rewrite
 time, and a valid transcript with no safe user/final-agent text is treated as
 empty rather than as a broken adapter.
+Planning still compares all supported subscriptions, but each approved start
+now reloads only its exact Capacity Pool after ruling out a busy worktree.
+Known capacity waits persist a visible five-minute retry time, avoiding an
+expensive provider query on every coordinator heartbeat without authorizing
+work from stale evidence.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -96,6 +101,7 @@ empty rather than as a broken adapter.
 - [Visible start opportunity windows M26](docs/overnight-m26.md)
 - [Transcript-time Claude recency M27](docs/overnight-m27.md)
 - [Activity-time Grok context M28](docs/overnight-m28.md)
+- [Bounded exact capacity observation M29](docs/overnight-m29.md)
 
 The app currently:
 
@@ -191,6 +197,11 @@ The app currently:
   every scheduled start instead of trusting the approval-time observation
 - leaves exhausted, missing, or degraded usage pending with a durable
   capacity-wait reason, then retries only inside the original wake deadline
+- reloads only the frozen route's exact Capacity Pool at dispatch, checks
+  workspace collisions before provider quota, and gives a known capacity wait
+  a durable five-minute recheck time instead of polling it every heartbeat
+- overlaps full cross-provider quota observation with local session and
+  safe-context work while generating recommendations
 - distinguishes capacity recovery from shared-worktree release in the durable
   plan and Morning Inbox while preserving pre-M25 waiting ledgers
 - derives each item's start eligibility and last safe start directly from the

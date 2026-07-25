@@ -40,6 +40,29 @@ pub fn load_budgets() -> Vec<ResourceBudget> {
     cache::merge_with_cache(vec![claude, codex, grok])
 }
 
+pub(crate) fn load_budget(provider: Provider) -> ResourceBudget {
+    let budget = match provider {
+        Provider::Claude => claude::load(),
+        Provider::Codex => codex::load(),
+        Provider::Grok => grok::load(),
+        _ => unavailable(
+            provider,
+            "unsupported usage adapter",
+            "이 공급자의 구독 사용량 어댑터가 없습니다.",
+        ),
+    };
+    cache::merge_with_cache(vec![budget])
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| {
+            unavailable(
+                provider,
+                "usage cache",
+                "공급자 사용량 결과를 만들지 못했습니다.",
+            )
+        })
+}
+
 fn unavailable(provider: Provider, source_label: &str, message: &str) -> ResourceBudget {
     ResourceBudget {
         provider,

@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use chrono::{DateTime, Utc};
 
@@ -18,6 +21,7 @@ use super::{
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const EVIDENCE_GRACE_SECONDS: i64 = 120;
 const EXHAUSTED_REMAINING_PERCENT: f64 = 0.5;
+const CAPACITY_RECHECK_MINUTES: i64 = 5;
 
 pub(super) fn run(request: CoordinatorWorkerRequest) -> Result<(), String> {
     let _lease = ledger::acquire_lease(&request.idempotency_key)?;
@@ -118,6 +122,7 @@ fn tick(
                 item.completed_at = Some(now);
                 item.waiting_reason = None;
                 item.waiting_kind = None;
+                item.waiting_retry_at = None;
                 item.error = Some(
                     "승인된 수면 마감 안에 전체 시간 예산이 남지 않아 시작하지 않음".to_owned(),
                 );
@@ -135,14 +140,16 @@ fn tick(
         .filter_map(|lane_index| {
             next_startable_item(plan, lane_index, now).map(|item_index| (lane_index, item_index))
         })
+        .filter(|(lane_index, item_index)| {
+            capacity_retry_due(&plan.lanes[*lane_index].items[*item_index], now)
+        })
         .collect::<Vec<_>>();
     if startable.is_empty() {
         return Ok(Vec::new());
     }
     let mut occupied_workspaces = active_plan_workspace_keys(plan);
     occupied_workspaces.extend(active_session_workspace_keys());
-    let budgets = crate::usage::load_budgets();
-    let routes = crate::execution_routes::load(&budgets, now);
+    let mut budgets_by_pool = BTreeMap::<CapacityPool, ResourceBudget>::new();
     let mut outcomes = Vec::new();
     for (lane_index, item_index) in startable {
         let item = &plan.lanes[lane_index].items[item_index];
@@ -152,6 +159,7 @@ fn tick(
             item.completed_at = Some(now);
             item.waiting_reason = None;
             item.waiting_kind = None;
+            item.waiting_retry_at = None;
             item.error =
                 Some("남은 수면 시간보다 승인된 작업 시간 예산이 커서 시작하지 않음".to_owned());
             plan.updated_at = now;
@@ -159,21 +167,32 @@ fn tick(
             continue;
         }
         let capacity_pool = plan.lanes[lane_index].capacity_pool;
-        if let Some(reason) = capacity_wait_reason(capacity_pool, &budgets) {
-            let item = &mut plan.lanes[lane_index].items[item_index];
-            item.waiting_kind = Some(CoordinatorWaitKind::Capacity);
-            item.waiting_reason = Some(reason);
-            continue;
-        }
         let workspace_key =
             crate::workspace_identity::key_or_path(&item.approved.dispatch.draft.workspace);
         if occupied_workspaces.contains(&workspace_key) {
             let item = &mut plan.lanes[lane_index].items[item_index];
             item.waiting_kind = Some(CoordinatorWaitKind::Workspace);
+            item.waiting_retry_at = None;
             item.waiting_reason = Some(
                 "같은 실제 작업공간에서 다른 세션이나 승인 작업이 실행 중이라 종료 근거를 기다립니다."
                     .to_owned(),
             );
+            continue;
+        }
+        if let Some((provider, _)) = capacity_budget_source(capacity_pool) {
+            budgets_by_pool
+                .entry(capacity_pool)
+                .or_insert_with(|| crate::usage::load_budget(provider));
+        }
+        let route_budgets = budgets_by_pool
+            .get(&capacity_pool)
+            .map(std::slice::from_ref)
+            .unwrap_or_default();
+        if let Some(reason) = capacity_wait_reason(capacity_pool, route_budgets) {
+            let item = &mut plan.lanes[lane_index].items[item_index];
+            item.waiting_kind = Some(CoordinatorWaitKind::Capacity);
+            item.waiting_reason = Some(reason);
+            item.waiting_retry_at = Some(now + chrono::Duration::minutes(CAPACITY_RECHECK_MINUTES));
             continue;
         }
         occupied_workspaces.insert(workspace_key.clone());
@@ -189,6 +208,7 @@ fn tick(
             item.error = None;
             item.waiting_reason = None;
             item.waiting_kind = None;
+            item.waiting_retry_at = None;
         }
         plan.updated_at = now;
         ledger::update(plan)?;
@@ -200,6 +220,7 @@ fn tick(
         let project = approved.draft.project.clone();
         let draft_id = approved.draft.id.clone();
         let surface = approved.preflight.surface;
+        let routes = crate::execution_routes::load(route_budgets, now);
         let result = dispatch_one(approved, &routes);
         let item = &mut plan.lanes[lane_index].items[item_index];
         match result {
@@ -378,6 +399,7 @@ fn halt_uncertain_lanes(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
                 item.completed_at = Some(now);
                 item.waiting_reason = None;
                 item.waiting_kind = None;
+                item.waiting_retry_at = None;
                 item.error = Some(
                     "앞 작업의 공급자 시작·종료 증거가 불확실해 이 lane의 후속 작업을 시작하지 않음"
                         .to_owned(),
@@ -448,14 +470,13 @@ fn dispatch_one(
     }
 }
 
+fn capacity_retry_due(item: &CoordinatorItem, now: DateTime<Utc>) -> bool {
+    item.waiting_kind != Some(CoordinatorWaitKind::Capacity)
+        || item.waiting_retry_at.is_none_or(|retry_at| now >= retry_at)
+}
+
 fn capacity_wait_reason(capacity_pool: CapacityPool, budgets: &[ResourceBudget]) -> Option<String> {
-    let (provider, pool_label) = match capacity_pool {
-        CapacityPool::ClaudeSubscription => (Provider::Claude, "Claude 구독"),
-        CapacityPool::CodexSubscription => (Provider::Codex, "Codex 구독"),
-        CapacityPool::GrokSubscription => (Provider::Grok, "Grok 구독"),
-        CapacityPool::CursorSubscription => (Provider::Cursor, "Cursor 구독"),
-        CapacityPool::ApiCredits | CapacityPool::Unknown => return None,
-    };
+    let (provider, pool_label) = capacity_budget_source(capacity_pool)?;
     let Some(budget) = budgets.iter().find(|budget| budget.provider == provider) else {
         return Some(format!(
             "{pool_label} 사용량을 지금 확인하지 못했습니다. 승인한 마감 안에서 다시 확인합니다."
@@ -484,6 +505,17 @@ fn capacity_wait_reason(capacity_pool: CapacityPool, budgets: &[ResourceBudget])
         "{pool_label}의 {} 창에 {:.1}%만 남았습니다.{reset} 승인한 마감은 늘리지 않고 사용량 회복을 다시 확인합니다.",
         constrained.label, remaining
     ))
+}
+
+fn capacity_budget_source(capacity_pool: CapacityPool) -> Option<(Provider, &'static str)> {
+    match capacity_pool {
+        CapacityPool::ClaudeSubscription => (Provider::Claude, "Claude 구독"),
+        CapacityPool::CodexSubscription => (Provider::Codex, "Codex 구독"),
+        CapacityPool::GrokSubscription => (Provider::Grok, "Grok 구독"),
+        CapacityPool::CursorSubscription => (Provider::Cursor, "Cursor 구독"),
+        CapacityPool::ApiCredits | CapacityPool::Unknown => return None,
+    }
+    .into()
 }
 
 fn hours(value: f64) -> chrono::Duration {
@@ -581,6 +613,7 @@ mod tests {
             error: None,
             waiting_reason: None,
             waiting_kind: None,
+            waiting_retry_at: None,
             workspace_baseline: None,
             workspace_final: None,
         }
@@ -725,6 +758,24 @@ mod tests {
             capacity_wait_reason(CapacityPool::CodexSubscription, &healthy),
             None
         );
+    }
+
+    #[test]
+    fn a_capacity_wait_uses_a_bounded_retry_interval() {
+        let mut waiting = item(1, 0.0);
+        let now = plan().approved_at;
+        waiting.waiting_kind = Some(CoordinatorWaitKind::Capacity);
+        waiting.waiting_reason = Some("사용량 회복을 기다립니다.".to_owned());
+        waiting.waiting_retry_at = Some(now + chrono::Duration::minutes(5));
+
+        assert!(!capacity_retry_due(
+            &waiting,
+            now + chrono::Duration::minutes(4)
+        ));
+        assert!(capacity_retry_due(
+            &waiting,
+            now + chrono::Duration::minutes(5)
+        ));
     }
 
     #[test]

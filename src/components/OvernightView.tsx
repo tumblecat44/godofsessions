@@ -1487,7 +1487,15 @@ function NightPlanHistorySection({
                           · 최대 {item.time_budget_hours}시간
                         </small>
                         {item.waiting_reason && (
-                          <em className="is-waiting">{item.waiting_reason}</em>
+                          <em className="is-waiting">
+                            {item.waiting_reason}
+                            {item.waiting_retry_at && (
+                              <span>
+                                {" "}
+                                · {timeUntil(item.waiting_retry_at)} 다시 확인
+                              </span>
+                            )}
+                          </em>
                         )}
                         {item.error && <em>{item.error}</em>}
                       </div>
@@ -2175,8 +2183,8 @@ export function OvernightView() {
           <div>
             <strong>오늘 밤의 기회비용을 계산하고 있습니다</strong>
             <p>
-              프로젝트 맥락 복원 → 제공자별 사용량 확인 → 충돌 위험 제외 → 추천
-              순위 생성
+              프로젝트 맥락과 Claude·Codex·Grok 사용량을 함께 확인합니다. 로컬
+              인증 상태에 따라 20초 안팎 걸릴 수 있습니다.
             </p>
           </div>
         </section>

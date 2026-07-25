@@ -98,6 +98,8 @@ struct CoordinatorItem {
     #[serde(default)]
     waiting_kind: Option<CoordinatorWaitKind>,
     #[serde(default)]
+    waiting_retry_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     workspace_baseline: Option<workspace_evidence::WorkspaceSnapshot>,
     #[serde(default)]
     workspace_final: Option<workspace_evidence::WorkspaceSnapshot>,
@@ -150,6 +152,7 @@ impl CoordinatorPlan {
                             error: None,
                             waiting_reason: None,
                             waiting_kind: None,
+                            waiting_retry_at: None,
                             workspace_baseline: None,
                             workspace_final: None,
                         })
@@ -525,6 +528,7 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
                                 })
                                 .map(|kind| kind.as_str().to_owned()),
                             waiting_reason: item.waiting_reason,
+                            waiting_retry_at: item.waiting_retry_at.map(|value| value.to_rfc3339()),
                         }
                     })
                     .collect(),

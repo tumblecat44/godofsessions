@@ -557,6 +557,7 @@ mod tests {
             error: None,
             waiting_reason: None,
             waiting_kind: None,
+            waiting_retry_at: None,
             workspace_baseline: None,
             workspace_final: None,
         }

@@ -19,9 +19,10 @@ use std::{collections::HashMap, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, DispatchReceipt, MorningBrief, NightPlanHistory, NightPlanResumeChallenge,
-    NightRunDetail, NightRunHistory, OvernightPlan, PortfolioApprovalChallenge,
-    PortfolioDispatchResult, Provider, Session, Snapshot, StatusConfidence, WorkspaceOverview,
+    ApprovalChallenge, CapacityPool, DispatchReceipt, ExecutionRouteInventory, MorningBrief,
+    NightPlanHistory, NightPlanResumeChallenge, NightRunDetail, NightRunHistory, OvernightPlan,
+    PortfolioApprovalChallenge, PortfolioDispatchResult, Provider, Session, Snapshot,
+    StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
@@ -54,13 +55,13 @@ async fn generate_overnight_plan(
 ) -> Result<OvernightPlan, String> {
     let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
     let plan = tauri::async_runtime::spawn_blocking(move || -> Result<OvernightPlan, String> {
-        let snapshot_thread = std::thread::spawn(build_snapshot);
-        let budgets = usage::load_budgets();
-        let snapshot = snapshot_thread
-            .join()
-            .map_err(|_| "로컬 세션 증거를 모으지 못했습니다.".to_owned())?;
+        let budgets_thread = std::thread::spawn(usage::load_budgets);
+        let snapshot = build_snapshot();
         let now = Utc::now();
         let context = context_brief::build_context_index(&snapshot, now);
+        let budgets = budgets_thread
+            .join()
+            .map_err(|_| "구독 사용량 증거를 모으지 못했습니다.".to_owned())?;
         let routes = execution_routes::load(&budgets, now);
         let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
             &snapshot,
@@ -142,8 +143,7 @@ async fn dispatch_approved_hermes(
         )
         .map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let budgets = usage::load_budgets();
-        let routes = execution_routes::load(&budgets, Utc::now());
+        let routes = load_exact_route_inventory(&approved.draft.route_id);
         let route = routes
             .routes
             .iter()
@@ -173,8 +173,7 @@ async fn dispatch_approved_codex(
         )
         .map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let budgets = usage::load_budgets();
-        let routes = execution_routes::load(&budgets, Utc::now());
+        let routes = load_exact_route_inventory(&approved.draft.route_id);
         let route = routes
             .routes
             .iter()
@@ -204,8 +203,7 @@ async fn dispatch_approved_claude(
         )
         .map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let budgets = usage::load_budgets();
-        let routes = execution_routes::load(&budgets, Utc::now());
+        let routes = load_exact_route_inventory(&approved.draft.route_id);
         let route = routes
             .routes
             .iter()
@@ -369,6 +367,23 @@ fn build_workspace_overview() -> WorkspaceOverview {
     }
 }
 
+fn load_exact_route_inventory(route_id: &str) -> ExecutionRouteInventory {
+    let initial = execution_routes::load(&[], Utc::now());
+    let provider = initial
+        .routes
+        .iter()
+        .find(|route| route.id == route_id)
+        .and_then(|route| match route.capacity_pool {
+            CapacityPool::ClaudeSubscription => Some(Provider::Claude),
+            CapacityPool::CodexSubscription => Some(Provider::Codex),
+            CapacityPool::GrokSubscription => Some(Provider::Grok),
+            CapacityPool::CursorSubscription => Some(Provider::Cursor),
+            CapacityPool::ApiCredits | CapacityPool::Unknown => None,
+        });
+    let budget = provider.map(usage::load_budget);
+    execution_routes::load(budget.as_slice(), Utc::now())
+}
+
 pub(crate) fn build_snapshot() -> Snapshot {
     let outputs = [
         connectors::load_codex(),
@@ -508,10 +523,15 @@ mod live_tests {
     #[test]
     #[ignore = "reads current local sessions and provider usage"]
     fn local_overnight_plan_is_read_only_and_explainable() {
+        let started = Instant::now();
+        let budgets_thread = std::thread::spawn(usage::load_budgets);
         let snapshot = build_snapshot();
-        let budgets = usage::load_budgets();
+        let snapshot_ms = started.elapsed().as_millis();
         let now = chrono::Utc::now();
         let context = context_brief::build_context_index(&snapshot, now);
+        let context_ready_ms = started.elapsed().as_millis();
+        let budgets = budgets_thread.join().expect("usage thread");
+        let evidence_ready_ms = started.elapsed().as_millis();
         let routes = execution_routes::load(&budgets, now);
         let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
             &snapshot,
@@ -523,9 +543,10 @@ mod live_tests {
         );
         plan.dispatch_preflights =
             dispatch::build_preflights(&plan.run_drafts, &plan.route_inventory);
+        let remaining_ms = started.elapsed().as_millis() - evidence_ready_ms;
 
         eprintln!(
-            "sessions={} projects={} candidates={} preflights={} budgets={:?}",
+            "sessions={} projects={} candidates={} preflights={} timing_ms={{snapshot:{snapshot_ms},local_context_ready:{context_ready_ms},all_evidence_ready:{evidence_ready_ms},plan_and_preflight:{remaining_ms}}} budgets={:?}",
             plan.sessions_considered,
             plan.projects_considered,
             plan.candidates.len(),
