@@ -33,6 +33,7 @@ import type {
   ApprovalChallenge,
   DispatchPreflight,
   DispatchReceipt,
+  HostReadiness,
   MorningBrief,
   MorningBriefItem,
   NightRunDetail,
@@ -109,6 +110,55 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
         <span>{relativeTime(budget.observed_at)} 관측</span>
       </footer>
     </article>
+  );
+}
+
+function HostReadinessPanel({ readiness }: { readiness: HostReadiness }) {
+  const warnings = readiness.checks.filter(
+    (check) => check.level === "warning",
+  ).length;
+  return (
+    <section
+      className={`host-readiness host-readiness--${readiness.state}`}
+      aria-label="밤 실행 호스트 준비 상태"
+    >
+      <header>
+        <div>
+          <span className="eyebrow">HOST READINESS</span>
+          <h2>이 Mac, 밤새 버틸 준비</h2>
+          <p>
+            {warnings > 0
+              ? `잠들기 전에 ${warnings}가지만 확인하면 됩니다.`
+              : "전원과 실행 지속 조건이 준비되어 있습니다."}
+          </p>
+        </div>
+        <span>
+          {warnings > 0 ? <AlertTriangle size={12} /> : <Check size={12} />}
+          {warnings > 0 ? `${warnings}개 확인` : "준비됨"}
+        </span>
+      </header>
+      <div>
+        {readiness.checks.map((check) => (
+          <article
+            className={`host-readiness-check host-readiness-check--${check.level}`}
+            key={check.key}
+          >
+            <header>
+              <strong>{check.label}</strong>
+              <span>
+                {check.level === "pass"
+                  ? "확인"
+                  : check.level === "warning"
+                    ? "확인 필요"
+                    : "직접 확인"}
+              </span>
+            </header>
+            <p>{check.message}</p>
+            {check.action && <small>{check.action}</small>}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -2137,6 +2187,8 @@ export function OvernightView() {
             </span>
           </div>
 
+          <HostReadinessPanel readiness={plan.host_readiness} />
+
           <section className="budget-section">
             <header>
               <span className="eyebrow">AVAILABLE CAPACITY</span>
@@ -2520,7 +2572,7 @@ export function OvernightView() {
               </p>
               <p>
                 <Check size={12} />
-                lane별 한 작업씩 · 종료 근거 뒤 다음 작업 점검
+                같은 구독·작업공간별 한 작업씩 · 종료 근거 뒤 다음 작업 점검
               </p>
               <p>
                 <AlertTriangle size={12} />
@@ -2533,6 +2585,14 @@ export function OvernightView() {
                   앞 작업 종료 뒤 자동 점검
                 </p>
               )}
+              {plan?.host_readiness.checks
+                .filter((check) => check.level === "warning")
+                .map((check) => (
+                  <p key={check.key}>
+                    <AlertTriangle size={12} />
+                    {check.label}: {check.action || check.message}
+                  </p>
+                ))}
             </div>
 
             <label className="approval-phrase">

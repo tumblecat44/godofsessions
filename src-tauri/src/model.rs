@@ -723,6 +723,39 @@ pub struct ExcludedProject {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostReadinessState {
+    Ready,
+    NeedsAttention,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostReadinessLevel {
+    Pass,
+    Info,
+    Warning,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HostReadinessCheck {
+    pub key: String,
+    pub level: HostReadinessLevel,
+    pub label: String,
+    pub message: String,
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HostReadiness {
+    pub observed_at: String,
+    pub state: HostReadinessState,
+    pub checks: Vec<HostReadinessCheck>,
+    pub read_only: bool,
+    pub methodology: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OvernightPlan {
     pub generated_at: String,
@@ -737,6 +770,7 @@ pub struct OvernightPlan {
     pub schedule: NightSchedule,
     pub dispatch_preflights: Vec<DispatchPreflight>,
     pub exclusions: Vec<ExcludedProject>,
+    pub host_readiness: HostReadiness,
     pub read_only: bool,
     pub methodology: String,
 }

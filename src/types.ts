@@ -591,6 +591,25 @@ export interface ExcludedProject {
   reason: string;
 }
 
+export type HostReadinessState = "ready" | "needs_attention";
+export type HostReadinessLevel = "pass" | "info" | "warning";
+
+export interface HostReadinessCheck {
+  key: string;
+  level: HostReadinessLevel;
+  label: string;
+  message: string;
+  action: string | null;
+}
+
+export interface HostReadiness {
+  observed_at: string;
+  state: HostReadinessState;
+  checks: HostReadinessCheck[];
+  read_only: boolean;
+  methodology: string;
+}
+
 export interface OvernightPlan {
   generated_at: string;
   evidence_window_hours: number;
@@ -604,6 +623,7 @@ export interface OvernightPlan {
   schedule: NightSchedule;
   dispatch_preflights: DispatchPreflight[];
   exclusions: ExcludedProject[];
+  host_readiness: HostReadiness;
   read_only: boolean;
   methodology: string;
 }

@@ -6,6 +6,7 @@ mod context_brief;
 mod control_board;
 mod dispatch;
 mod execution_routes;
+mod host_readiness;
 mod model;
 mod night_contract;
 mod night_coordinator;

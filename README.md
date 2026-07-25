@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The worktree-aware overnight coordinator M23 desktop slice is working.
+The host-readiness overnight approval M24 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -46,6 +46,10 @@ The planner and detached coordinator now treat the actual Git worktree as a
 second capacity boundary: sibling subdirectories are serialized even across
 different subscriptions, while explicitly isolated linked worktrees may run
 in parallel.
+Before approval, the plan also reports AC or battery power, `caffeinate`
+availability, MacBook lid limitations, and the minimum free space across
+selected workspace volumes. Any unresolved host warning is repeated in the
+typed-confirmation dialog.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -73,6 +77,7 @@ in parallel.
 - [Evidence-bound morning acknowledgement M21](docs/overnight-m21.md)
 - [Workspace-change evidence M22](docs/overnight-m22.md)
 - [Worktree-aware collision control M23](docs/overnight-m23.md)
+- [Host readiness before approval M24](docs/overnight-m24.md)
 
 The app currently:
 
@@ -156,6 +161,10 @@ The app currently:
 - leaves a colliding item pending with a durable workspace-wait explanation;
   it never substitutes work, extends the wake deadline, or silently redirects
   an existing provider session into a new checkout
+- inspects host power, idle-sleep protection, portable-Mac lid risk, and
+  selected-volume disk space without changing system settings
+- repeats actionable host warnings in the exact one-night approval rather than
+  burying a sleep or power assumption in coordinator internals
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

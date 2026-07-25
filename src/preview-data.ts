@@ -823,6 +823,44 @@ export const previewOvernightPlan: OvernightPlan = {
   read_only: true,
   methodology:
     "최근성·반복 활동·구체적 제목·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다.",
+  host_readiness: {
+    observed_at: new Date().toISOString(),
+    state: "needs_attention",
+    read_only: true,
+    methodology:
+      "macOS 전원 소스, idle-sleep 보호, 노트북 덮개 제약, 작업공간 디스크 여유를 읽기 전용으로 확인했습니다.",
+    checks: [
+      {
+        key: "power",
+        level: "pass",
+        label: "전원",
+        message: "AC 전원 연결 · 배터리 100%",
+        action: null,
+      },
+      {
+        key: "idle_sleep",
+        level: "pass",
+        label: "Idle sleep",
+        message: "coordinator가 caffeinate -i 아래에서 실행됩니다.",
+        action: null,
+      },
+      {
+        key: "lid",
+        level: "warning",
+        label: "MacBook 덮개",
+        message:
+          "caffeinate는 덮개를 닫아 생기는 sleep까지 보장하지 않습니다.",
+        action: "덮개를 열어두거나 전원 연결된 정상 clamshell 환경 사용",
+      },
+      {
+        key: "disk",
+        level: "pass",
+        label: "디스크",
+        message: "선택된 작업공간에 최소 48.2 GiB가 남아 있습니다.",
+        action: null,
+      },
+    ],
+  },
   budgets: [
     {
       provider: "claude",

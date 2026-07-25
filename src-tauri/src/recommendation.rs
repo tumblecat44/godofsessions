@@ -393,7 +393,8 @@ fn build_overnight_plan_inner(
     let run_drafts = candidates
         .iter()
         .map(crate::night_contract::build)
-        .collect();
+        .collect::<Vec<_>>();
+    let host_readiness = crate::host_readiness::inspect(&run_drafts, now);
 
     OvernightPlan {
         generated_at: now.to_rfc3339(),
@@ -410,6 +411,7 @@ fn build_overnight_plan_inner(
         schedule,
         dispatch_preflights: Vec::new(),
         exclusions,
+        host_readiness,
         read_only: true,
         methodology:
             "최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
