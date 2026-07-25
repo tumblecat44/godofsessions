@@ -263,6 +263,10 @@ fn hermes_route(
             "Codex app-server 턴에서는 delegate_task, memory, session_search, todo를 사용할 수 없음"
                 .to_owned(),
         );
+        limitations.push(
+            "별도 auxiliary override가 없으면 제목·압축·goal judge·백그라운드 리뷰도 같은 Codex 구독을 사용함"
+                .to_owned(),
+        );
     } else {
         capabilities.push(RouteCapability::CrossSessionMemory);
     }
@@ -614,6 +618,10 @@ mod tests {
             .limitations
             .iter()
             .any(|item| item.contains("session_search")));
+        assert!(hermes
+            .limitations
+            .iter()
+            .any(|item| item.contains("같은 Codex 구독")));
         assert_eq!(hermes.adapter_readiness, AdapterReadiness::ContractReady);
     }
 

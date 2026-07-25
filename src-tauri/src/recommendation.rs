@@ -290,6 +290,15 @@ fn build_overnight_plan_inner(
                     .to_owned(),
             );
         }
+        if let Some(route) = route {
+            risks.extend(
+                route
+                    .limitations
+                    .iter()
+                    .take(3)
+                    .map(|limitation| format!("실행 경로 제약: {limitation}")),
+            );
+        }
 
         let cwd = latest
             .cwd
@@ -1070,6 +1079,13 @@ mod tests {
             ephemeral: true,
             methodology: "test".to_owned(),
         };
+        let mut hermes = route(
+            "hermes:default",
+            Provider::Hermes,
+            Provider::Grok,
+            ResourceState::Ready,
+        );
+        hermes.limitations = vec!["이 경로는 제한된 보조 도구만 사용함".to_owned()];
         let inventory = ExecutionRouteInventory {
             generated_at: "2026-07-24T22:00:00Z".to_owned(),
             routes: vec![
@@ -1079,12 +1095,7 @@ mod tests {
                     Provider::Grok,
                     ResourceState::Ready,
                 ),
-                route(
-                    "hermes:default",
-                    Provider::Hermes,
-                    Provider::Grok,
-                    ResourceState::Ready,
-                ),
+                hermes,
             ],
             warnings: Vec::new(),
             methodology: "test".to_owned(),
@@ -1111,6 +1122,10 @@ mod tests {
             .risks
             .iter()
             .any(|risk| risk.contains("직접 재개하지 않고")));
+        assert!(candidate
+            .risks
+            .iter()
+            .any(|risk| risk.contains("실행 경로 제약")));
         assert!(plan.run_drafts[0].dispatch_supported);
         assert_eq!(
             plan.run_drafts[0].run_mode,
