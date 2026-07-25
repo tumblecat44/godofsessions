@@ -7,9 +7,20 @@ execution model.
 ## Language
 
 **Provider**:
-An agent product that owns sessions and performs work, such as Codex, Claude,
-Grok, Cursor, Hermes, or OpenClaw.
-_Avoid_: Model, tool
+An external agent family represented in normalized evidence, such as Codex,
+Claude, Grok, Cursor, Hermes, or OpenClaw. When routing or billing matters,
+prefer the more precise Execution Surface, Model Provider, or Capacity Pool.
+_Avoid_: Model, tool, subscription
+
+**Execution Surface**:
+The application or runtime that receives a Dispatch and owns its execution
+receipt, such as native Codex or Hermes.
+_Avoid_: Model Provider, Capacity Pool
+
+**Model Provider**:
+The model family used inside an Execution Route, which may differ from the
+Execution Surface. Hermes can be the surface while Grok is the Model Provider.
+_Avoid_: Execution Surface, Provider when routing matters
 
 **Session**:
 A provider-owned conversation or execution context that can contain one or
@@ -36,16 +47,28 @@ Locally observed facts used to understand a Project or Work Item, with enough
 provenance to trace them back to their source.
 _Avoid_: Memory, context
 
+**Context Source**:
+An explicitly identified origin of intent evidence, with its own provenance,
+observation time, retention boundary, and failure state.
+_Avoid_: Transcript dump, memory
+
 **Capacity**:
 The currently observed provider allowance across all applicable reset
 windows. Unknown capacity is not spare capacity.
 _Avoid_: Credits, quota
 
 **Execution Route**:
-The concrete path used to perform a Run: execution surface, runtime, model
-provider, and relevant capabilities. Hermes using Grok and Grok Build are two
-Execution Routes even when they charge the same subscription.
+The concrete path used to perform a Run: Execution Surface, runtime, Model
+Provider, Assignee when applicable, and relevant capabilities. Hermes using
+Grok and Grok Build are two Execution Routes even when they charge the same
+subscription.
 _Avoid_: Provider, model
+
+**Assignee**:
+A named agent role or profile selected to execute work within an Execution
+Route. It is part of the reviewed executor identity, not a late dispatch
+preference.
+_Avoid_: Model, session owner
 
 **Capacity Pool**:
 One allowance charged by one or more Execution Routes, such as the Codex,
@@ -57,6 +80,27 @@ _Avoid_: Provider, execution route
 A time-bounded, ranked proposal of Work Items and Execution Routes for an
 unattended period.
 _Avoid_: Schedule, queue
+
+**Overnight Candidate**:
+An actionable pairing of one Project goal and one currently feasible
+Execution Route, ranked for inclusion in a Night Plan.
+_Avoid_: Diagnostic, interesting project, session
+
+**Excluded Project**:
+A Project considered for a Night Plan but not made actionable, together with
+the exact reason it is unsafe, infeasible, or lower priority.
+_Avoid_: Failed Run, hidden candidate
+
+**Start Opportunity**:
+The earliest time a scheduled Run may be rechecked for start while its full
+approved time budget still fits before the wake deadline. It is not reserved
+capacity or a promised start.
+_Avoid_: Reservation, guaranteed start time
+
+**Night Portfolio**:
+The exact set of selected Run Drafts, lane order, Start Opportunities, and
+wake deadline reviewed together for one approval.
+_Avoid_: Dynamic queue, blanket permission
 
 **Run Draft**:
 The exact, reviewable prompt, completion contract, permission boundary, and

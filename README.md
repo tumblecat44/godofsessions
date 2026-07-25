@@ -27,6 +27,9 @@ It is not:
 - a replacement session format
 - an autonomous supervisor that acts without operator approval
 
+The canonical distinction between Project, Session, Work Item, Run, Execution
+Route, Capacity Pool, and Night Portfolio lives in [CONTEXT.md](CONTEXT.md).
+
 ## Current phase
 
 The stable refresh surface M43 desktop slice is working.
