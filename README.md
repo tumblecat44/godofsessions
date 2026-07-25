@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The scheduled-start capacity revalidation M25 desktop slice is working.
+The visible start-opportunity M26 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -54,6 +54,10 @@ Immediately before each later scheduled start, the coordinator also reloads
 the exact selected subscription pool. Exhausted or ambiguous capacity remains
 pending with a durable explanation until fresh capacity returns or the
 original wake deadline makes the accepted task no longer fit.
+Every durable item now exposes its immutable eligible and latest-safe start
+times. Running work shows its actual start age; delayed work shows the last
+opportunity to fit the full accepted budget instead of claiming it will start
+immediately.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -83,6 +87,7 @@ original wake deadline makes the accepted task no longer fit.
 - [Worktree-aware collision control M23](docs/overnight-m23.md)
 - [Host readiness before approval M24](docs/overnight-m24.md)
 - [Capacity revalidation at scheduled start M25](docs/overnight-m25.md)
+- [Visible start opportunity windows M26](docs/overnight-m26.md)
 
 The app currently:
 
@@ -176,6 +181,10 @@ The app currently:
   capacity-wait reason, then retries only inside the original wake deadline
 - distinguishes capacity recovery from shared-worktree release in the durable
   plan and Morning Inbox while preserving pre-M25 waiting ledgers
+- derives each item's start eligibility and last safe start directly from the
+  frozen approval and wake deadline
+- shows actual start age or the remaining start opportunity in the durable
+  plan, so a blocked item is never mislabeled as immediately starting
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt

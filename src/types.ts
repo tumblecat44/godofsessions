@@ -349,6 +349,8 @@ export interface NightPlanItemSummary {
     | "skipped_uncertain";
   starts_after_hours: number;
   time_budget_hours: number;
+  not_before_at: string;
+  latest_start_at: string;
   started_at: string | null;
   completed_at: string | null;
   idempotency_key: string;

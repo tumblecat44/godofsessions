@@ -453,6 +453,8 @@ pub struct NightPlanItemSummary {
     pub state: String,
     pub starts_after_hours: f64,
     pub time_budget_hours: f64,
+    pub not_before_at: String,
+    pub latest_start_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub idempotency_key: String,

@@ -40,6 +40,7 @@ import type {
   NightRunHistory,
   NightRunRecord,
   NightPlanHistory,
+  NightPlanItemSummary,
   NightPlanResumeChallenge,
   OvernightCandidate,
   OvernightPlan,
@@ -1351,6 +1352,25 @@ const nightPlanItemStateLabels: Record<string, string> = {
   skipped_uncertain: "앞 작업 불확실",
 };
 
+function nightPlanTimingLabel(item: NightPlanItemSummary) {
+  if (item.started_at) {
+    return `${relativeTime(item.started_at)} 시작`;
+  }
+  const now = Date.now();
+  const notBefore = Date.parse(item.not_before_at);
+  const latestStart = Date.parse(item.latest_start_at);
+  if (!Number.isNaN(notBefore) && now < notBefore) {
+    return `${timeUntil(item.not_before_at)} 시작 가능`;
+  }
+  if (!Number.isNaN(latestStart) && now >= latestStart) {
+    return "시작 시간창 종료";
+  }
+  if (item.waiting_kind) {
+    return `${timeUntil(item.latest_start_at)} 마지막 시작`;
+  }
+  return "지금 시작 가능";
+}
+
 function NightPlanHistorySection({
   history,
   recoveryLoading,
@@ -1463,10 +1483,7 @@ function NightPlanHistorySection({
                             : item.waiting_kind === "capacity"
                               ? "사용량 대기"
                               : nightPlanItemStateLabels[item.state] || item.state}{" "}
-                          ·{" "}
-                          {item.starts_after_hours > 0
-                            ? `약 ${item.starts_after_hours}시간 뒤`
-                            : "바로 시작"}{" "}
+                          · {nightPlanTimingLabel(item)}{" "}
                           · 최대 {item.time_budget_hours}시간
                         </small>
                         {item.waiting_reason && (

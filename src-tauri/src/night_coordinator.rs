@@ -462,6 +462,8 @@ pub(crate) fn reopen_morning_item(
 }
 
 fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
+    let approved_at = plan.approved_at;
+    let deadline_at = plan.deadline_at;
     let recovery_state = recovery_state(&plan);
     let has_attention = plan.lanes.iter().flat_map(|lane| &lane.items).any(|item| {
         matches!(
@@ -481,8 +483,8 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
     NightPlanSummary {
         idempotency_key: plan.idempotency_key,
         state,
-        approved_at: plan.approved_at.to_rfc3339(),
-        deadline_at: plan.deadline_at.to_rfc3339(),
+        approved_at: approved_at.to_rfc3339(),
+        deadline_at: deadline_at.to_rfc3339(),
         worker_pid: plan.worker_pid,
         recovery_state,
         lanes: plan
@@ -493,33 +495,54 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
                 items: lane
                     .items
                     .into_iter()
-                    .map(|item| NightPlanItemSummary {
-                        draft_id: item.approved.dispatch.draft.id,
-                        project: item.approved.dispatch.draft.project,
-                        surface: item.approved.dispatch.preflight.surface,
-                        capacity_pool: lane.capacity_pool,
-                        state: item.state.as_str().to_owned(),
-                        starts_after_hours: item.approved.starts_after_hours,
-                        time_budget_hours: item.approved.time_budget_hours,
-                        started_at: item.started_at.map(|value| value.to_rfc3339()),
-                        completed_at: item.completed_at.map(|value| value.to_rfc3339()),
-                        idempotency_key: item.approved.dispatch.preflight.idempotency_key,
-                        error: item.error,
-                        waiting_kind: item
-                            .waiting_kind
-                            .or_else(|| {
-                                item.waiting_reason
-                                    .as_ref()
-                                    .map(|_| CoordinatorWaitKind::Workspace)
-                            })
-                            .map(|kind| kind.as_str().to_owned()),
-                        waiting_reason: item.waiting_reason,
+                    .map(|item| {
+                        let (not_before_at, latest_start_at) = approved_start_window(
+                            approved_at,
+                            deadline_at,
+                            item.approved.starts_after_hours,
+                            item.approved.time_budget_hours,
+                        );
+                        NightPlanItemSummary {
+                            draft_id: item.approved.dispatch.draft.id,
+                            project: item.approved.dispatch.draft.project,
+                            surface: item.approved.dispatch.preflight.surface,
+                            capacity_pool: lane.capacity_pool,
+                            state: item.state.as_str().to_owned(),
+                            starts_after_hours: item.approved.starts_after_hours,
+                            time_budget_hours: item.approved.time_budget_hours,
+                            not_before_at: not_before_at.to_rfc3339(),
+                            latest_start_at: latest_start_at.to_rfc3339(),
+                            started_at: item.started_at.map(|value| value.to_rfc3339()),
+                            completed_at: item.completed_at.map(|value| value.to_rfc3339()),
+                            idempotency_key: item.approved.dispatch.preflight.idempotency_key,
+                            error: item.error,
+                            waiting_kind: item
+                                .waiting_kind
+                                .or_else(|| {
+                                    item.waiting_reason
+                                        .as_ref()
+                                        .map(|_| CoordinatorWaitKind::Workspace)
+                                })
+                                .map(|kind| kind.as_str().to_owned()),
+                            waiting_reason: item.waiting_reason,
+                        }
                     })
                     .collect(),
             })
             .collect(),
         error: plan.error,
     }
+}
+
+fn approved_start_window(
+    approved_at: DateTime<Utc>,
+    deadline_at: DateTime<Utc>,
+    starts_after_hours: f64,
+    time_budget_hours: f64,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    let offset = chrono::Duration::milliseconds((starts_after_hours * 3_600_000.0).round() as i64);
+    let budget = chrono::Duration::milliseconds((time_budget_hours * 3_600_000.0).round() as i64);
+    (approved_at + offset, deadline_at - budget)
 }
 
 fn recovery_state(plan: &CoordinatorPlan) -> String {
@@ -605,4 +628,25 @@ fn read_worker_request() -> Result<CoordinatorWorkerRequest, String> {
         return Err("밤 coordinator 계약 식별자가 올바르지 않습니다.".to_owned());
     }
     Ok(request)
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use chrono::TimeZone;
+
+    use super::*;
+
+    #[test]
+    fn start_window_preserves_not_before_and_full_budget_before_wake() {
+        let approved_at = Utc
+            .with_ymd_and_hms(2026, 7, 24, 8, 0, 0)
+            .single()
+            .expect("approved time");
+        let deadline_at = approved_at + chrono::Duration::hours(7);
+
+        let (not_before, latest_start) = approved_start_window(approved_at, deadline_at, 2.0, 3.5);
+
+        assert_eq!(not_before, approved_at + chrono::Duration::hours(2));
+        assert_eq!(latest_start, approved_at + chrono::Duration::minutes(210));
+    }
 }

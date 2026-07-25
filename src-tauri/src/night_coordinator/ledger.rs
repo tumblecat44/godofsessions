@@ -392,7 +392,7 @@ mod tests {
                 .expect("entry")
                 .file_name()
                 .to_string_lossy()
-            .ends_with(".tmp")));
+                .ends_with(".tmp")));
     }
 
     #[test]
