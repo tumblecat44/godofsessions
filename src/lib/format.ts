@@ -1,4 +1,5 @@
 import type {
+  CapacityPool,
   Provider,
   Session,
   SessionStatus,
@@ -28,6 +29,15 @@ export const recommendationConfidenceLabels = {
   medium: "중간 확신",
   low: "낮은 확신",
 } as const;
+
+export const capacityPoolLabels: Record<CapacityPool, string> = {
+  claude_subscription: "Claude 구독",
+  codex_subscription: "Codex 구독",
+  grok_subscription: "Grok 구독",
+  cursor_subscription: "Cursor 구독",
+  api_credits: "API 크레딧",
+  unknown: "용량 미확인",
+};
 
 export const statusLabels: Record<SessionStatus, string> = {
   running: "작업 중",

@@ -41,9 +41,21 @@ The currently observed provider allowance across all applicable reset
 windows. Unknown capacity is not spare capacity.
 _Avoid_: Credits, quota
 
+**Execution Route**:
+The concrete path used to perform a Run: execution surface, runtime, model
+provider, and relevant capabilities. Hermes using Grok and Grok Build are two
+Execution Routes even when they charge the same subscription.
+_Avoid_: Provider, model
+
+**Capacity Pool**:
+One allowance charged by one or more Execution Routes, such as the Codex,
+Claude, or Grok subscription. A Capacity Pool is counted once even when
+multiple routes can spend it.
+_Avoid_: Provider, execution route
+
 **Night Plan**:
-A time-bounded, ranked proposal of Work Items and Providers for an unattended
-period.
+A time-bounded, ranked proposal of Work Items and Execution Routes for an
+unattended period.
 _Avoid_: Schedule, queue
 
 **Human Gate**:

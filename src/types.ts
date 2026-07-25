@@ -113,6 +113,43 @@ export interface ResourceBudget {
   message: string | null;
 }
 
+export type CapacityPool =
+  | "claude_subscription"
+  | "codex_subscription"
+  | "grok_subscription"
+  | "cursor_subscription"
+  | "api_credits"
+  | "unknown";
+
+export type RouteCapability =
+  | "resume_session"
+  | "goal_loop"
+  | "mcp"
+  | "cross_session_memory"
+  | "native_sandbox";
+
+export interface ExecutionRoute {
+  id: string;
+  surface: Provider;
+  model_provider: Provider | null;
+  model: string | null;
+  runtime: string;
+  capacity_pool: CapacityPool;
+  state: ResourceState;
+  configured: boolean;
+  capabilities: RouteCapability[];
+  source_label: string;
+  message: string | null;
+  limitations: string[];
+}
+
+export interface ExecutionRouteInventory {
+  generated_at: string;
+  routes: ExecutionRoute[];
+  warnings: string[];
+  methodology: string;
+}
+
 export type RecommendationConfidence = "high" | "medium" | "low";
 
 export interface OvernightCandidate {
@@ -121,6 +158,10 @@ export interface OvernightCandidate {
   cwd: string;
   goal: string;
   provider: Provider;
+  execution_route_id: string;
+  execution_surface: Provider;
+  capacity_pool: CapacityPool;
+  route_reason: string;
   native_session_id: string | null;
   resume_existing: boolean;
   score: number;
@@ -146,6 +187,7 @@ export interface OvernightPlan {
   sessions_considered: number;
   projects_considered: number;
   budgets: ResourceBudget[];
+  route_inventory: ExecutionRouteInventory;
   candidates: OvernightCandidate[];
   exclusions: ExcludedProject[];
   read_only: boolean;

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
+  ArrowRight,
   Check,
   Clock3,
   Database,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   compactPath,
+  capacityPoolLabels,
   providerNames,
   recommendationConfidenceLabels,
   relativeTime,
@@ -21,6 +23,7 @@ import { previewOvernightPlan } from "../preview-data";
 import type {
   OvernightCandidate,
   OvernightPlan,
+  ExecutionRoute,
   ResourceBudget,
 } from "../types";
 import { ProviderMark } from "./ProviderMark";
@@ -86,6 +89,57 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
   );
 }
 
+const routeCapabilityLabels = {
+  resume_session: "세션 재개",
+  goal_loop: "목표 루프",
+  mcp: "MCP",
+  cross_session_memory: "세션 기억",
+  native_sandbox: "네이티브 샌드박스",
+} as const;
+
+function RouteCard({ route }: { route: ExecutionRoute }) {
+  return (
+    <article className={`route-card route-card--${route.state}`}>
+      <header>
+        <ProviderMark provider={route.surface} showName />
+        {route.model_provider && route.model_provider !== route.surface && (
+          <>
+            <ArrowRight size={12} />
+            <ProviderMark provider={route.model_provider} showName />
+          </>
+        )}
+        <span className="route-state">
+          {route.state === "ready"
+            ? "사용 가능"
+            : route.state === "degraded"
+              ? "확인 필요"
+              : "사용 불가"}
+        </span>
+      </header>
+      <strong>{route.runtime}</strong>
+      <p>{route.model || "현재 기본 모델"}</p>
+      <div className="route-pool">
+        <span>차감</span>
+        <b>{capacityPoolLabels[route.capacity_pool]}</b>
+      </div>
+      <div className="route-capabilities">
+        {route.capabilities.map((capability) => (
+          <span key={capability}>{routeCapabilityLabels[capability]}</span>
+        ))}
+      </div>
+      {(route.message || route.limitations.length > 0) && (
+        <details>
+          <summary>경로 제약 {route.limitations.length + (route.message ? 1 : 0)}개</summary>
+          {route.message && <p>{route.message}</p>}
+          {route.limitations.map((limitation) => (
+            <p key={limitation}>{limitation}</p>
+          ))}
+        </details>
+      )}
+    </article>
+  );
+}
+
 function CandidateCard({
   candidate,
   primary = false,
@@ -116,7 +170,15 @@ function CandidateCard({
           <p title={candidate.cwd}>{compactPath(candidate.cwd)}</p>
         </div>
         <div className="candidate-provider">
-          <ProviderMark provider={candidate.provider} showName />
+          <div className="candidate-route">
+            <ProviderMark provider={candidate.execution_surface} showName />
+            {candidate.execution_surface !== candidate.provider && (
+              <>
+                <ArrowRight size={11} />
+                <ProviderMark provider={candidate.provider} showName />
+              </>
+            )}
+          </div>
           <span>{candidate.resume_existing ? "기존 세션 재개" : "새 세션 필요"}</span>
           <small>예상 {candidate.estimated_hours}시간</small>
         </div>
@@ -124,7 +186,12 @@ function CandidateCard({
 
       <div className="candidate-reason">
         <Sparkles size={15} />
-        <p>{candidate.provider_reason}</p>
+        <div>
+          <p>{candidate.provider_reason}</p>
+          <small>
+            {candidate.route_reason} · {capacityPoolLabels[candidate.capacity_pool]} 차감
+          </small>
+        </div>
       </div>
 
       <div className="candidate-details">
@@ -348,6 +415,22 @@ export function OvernightView() {
             <div className="budget-grid">
               {plan.budgets.map((budget) => (
                 <BudgetCard budget={budget} key={budget.provider} />
+              ))}
+            </div>
+          </section>
+
+          <section className="route-section">
+            <header>
+              <span className="eyebrow">EXECUTION ROUTES</span>
+              <h2>오늘 밤 실제 실행 경로</h2>
+              <p>
+                앱과 모델, 차감되는 구독을 따로 봅니다. 같은 구독을 공유하는
+                경로는 남은 용량을 중복 계산하지 않습니다.
+              </p>
+            </header>
+            <div className="route-grid">
+              {plan.route_inventory.routes.map((route) => (
+                <RouteCard route={route} key={route.id} />
               ))}
             </div>
           </section>

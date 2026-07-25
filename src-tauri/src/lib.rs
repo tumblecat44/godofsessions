@@ -1,6 +1,7 @@
 mod connectors;
 mod context_brief;
 mod control_board;
+mod execution_routes;
 mod model;
 mod recommendation;
 mod time_utils;
@@ -29,13 +30,17 @@ async fn generate_overnight_plan(sleep_hours: f64) -> Result<OvernightPlan, Stri
             .map_err(|_| "로컬 세션 증거를 모으지 못했습니다.".to_owned())?;
         let now = Utc::now();
         let context = context_brief::build_context_index(&snapshot, now);
-        Ok(recommendation::build_overnight_plan_with_context(
-            &snapshot,
-            budgets,
-            &context,
-            sleep_hours,
-            now,
-        ))
+        let routes = execution_routes::load(&budgets, now);
+        Ok(
+            recommendation::build_overnight_plan_with_context_and_routes(
+                &snapshot,
+                budgets,
+                &context,
+                &routes,
+                sleep_hours,
+                now,
+            ),
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -151,7 +156,7 @@ mod live_tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::model::{HumanGateKind, Provider, WorkItemOrigin, WorkItemState};
+    use crate::model::{CapacityPool, HumanGateKind, Provider, WorkItemOrigin, WorkItemState};
 
     #[test]
     #[ignore = "reads the current user's installed provider metadata"]
@@ -191,10 +196,12 @@ mod live_tests {
         let budgets = usage::load_budgets();
         let now = chrono::Utc::now();
         let context = context_brief::build_context_index(&snapshot, now);
-        let plan = recommendation::build_overnight_plan_with_context(
+        let routes = execution_routes::load(&budgets, now);
+        let plan = recommendation::build_overnight_plan_with_context_and_routes(
             &snapshot,
             budgets,
             &context,
+            &routes,
             recommendation::SleepHours::new(7.0).expect("valid sleep duration"),
             now,
         );
@@ -216,6 +223,14 @@ mod live_tests {
         );
         assert!(plan.read_only);
         assert_eq!(plan.budgets.len(), 3);
+        let hermes_route = plan
+            .route_inventory
+            .routes
+            .iter()
+            .find(|route| route.id == "hermes:default")
+            .expect("configured Hermes route");
+        assert_eq!(hermes_route.model_provider, Some(Provider::Grok));
+        assert_eq!(hermes_route.capacity_pool, CapacityPool::GrokSubscription);
         assert!(!plan.candidates.is_empty());
         assert!(plan
             .candidates

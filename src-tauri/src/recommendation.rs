@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::model::{
-    Capability, ContextIndex, ContextRole, ExcludedProject, OvernightCandidate, OvernightPlan,
-    ProjectContextBrief, Provider, RecommendationConfidence, ResourceBudget, ResourceState,
-    Session, SessionStatus, Snapshot,
+    Capability, CapacityPool, ContextIndex, ContextRole, ExcludedProject, ExecutionRoute,
+    ExecutionRouteInventory, OvernightCandidate, OvernightPlan, ProjectContextBrief, Provider,
+    RecommendationConfidence, ResourceBudget, ResourceState, Session, SessionStatus, Snapshot,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -37,7 +37,7 @@ pub fn build_overnight_plan(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
-    build_overnight_plan_inner(snapshot, budgets, None, sleep_hours, now)
+    build_overnight_plan_inner(snapshot, budgets, None, None, sleep_hours, now)
 }
 
 pub fn build_overnight_plan_with_context(
@@ -47,13 +47,32 @@ pub fn build_overnight_plan_with_context(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
-    build_overnight_plan_inner(snapshot, budgets, Some(context), sleep_hours, now)
+    build_overnight_plan_inner(snapshot, budgets, Some(context), None, sleep_hours, now)
+}
+
+pub fn build_overnight_plan_with_context_and_routes(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: &ContextIndex,
+    routes: &ExecutionRouteInventory,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
+    build_overnight_plan_inner(
+        snapshot,
+        budgets,
+        Some(context),
+        Some(routes),
+        sleep_hours,
+        now,
+    )
 }
 
 fn build_overnight_plan_inner(
     snapshot: &Snapshot,
     budgets: Vec<ResourceBudget>,
     context: Option<&ContextIndex>,
+    route_inventory: Option<&ExecutionRouteInventory>,
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
@@ -172,6 +191,9 @@ fn build_overnight_plan_inner(
             .collect::<std::collections::HashSet<_>>()
             .len();
         let resume_existing = provider_session.is_some();
+        let route = select_execution_route(provider, resume_existing, route_inventory);
+        let (execution_route_id, execution_surface, capacity_pool, route_reason) =
+            route_selection(provider, resume_existing, route);
         let project_score = (30.0 - latest_age_hours.min(24.0) * 1.25)
             + (sessions.len().min(5) as f64 * 4.0)
             + (distinct_providers.min(3) as f64 * 4.0)
@@ -244,6 +266,10 @@ fn build_overnight_plan_inner(
             cwd,
             goal,
             provider,
+            execution_route_id,
+            execution_surface,
+            capacity_pool,
+            route_reason,
             native_session_id: provider_session.map(|session| session.native_id.clone()),
             resume_existing,
             score: round_one(score),
@@ -297,12 +323,98 @@ fn build_overnight_plan_inner(
         sessions_considered: recent_sessions.len(),
         projects_considered: projects.len(),
         budgets,
+        route_inventory: route_inventory
+            .cloned()
+            .unwrap_or_else(|| empty_route_inventory(now)),
         candidates,
         exclusions,
         read_only: true,
         methodology:
             "최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
                 .to_owned(),
+    }
+}
+
+fn select_execution_route(
+    provider: Provider,
+    resume_existing: bool,
+    inventory: Option<&ExecutionRouteInventory>,
+) -> Option<&ExecutionRoute> {
+    let inventory = inventory?;
+    inventory
+        .routes
+        .iter()
+        .filter(|route| {
+            route.model_provider == Some(provider) && route.state != ResourceState::Unavailable
+        })
+        .max_by_key(|route| {
+            let preferred_surface = if resume_existing {
+                route.surface == provider
+            } else {
+                route.surface == Provider::Hermes && route.configured
+            };
+            let state_rank = match route.state {
+                ResourceState::Ready => 2,
+                ResourceState::Degraded => 1,
+                ResourceState::Unavailable => 0,
+            };
+            (
+                state_rank,
+                preferred_surface,
+                std::cmp::Reverse(route.id.as_str()),
+            )
+        })
+}
+
+fn route_selection(
+    provider: Provider,
+    resume_existing: bool,
+    route: Option<&ExecutionRoute>,
+) -> (String, Provider, CapacityPool, String) {
+    if let Some(route) = route {
+        let reason = if route.surface == Provider::Hermes {
+            format!(
+                "Hermes의 현재 기본 모델이 {}이고 /goal 루프를 쓸 수 있어 새 작업의 오케스트레이션 경로로 선택했습니다.",
+                provider_display_name(provider)
+            )
+        } else if resume_existing {
+            format!(
+                "기존 {} 세션을 그대로 이어 컨텍스트 전환 비용을 줄입니다.",
+                provider_display_name(provider)
+            )
+        } else {
+            format!(
+                "현재 설치되고 사용량을 확인할 수 있는 {} 네이티브 경로입니다.",
+                provider_display_name(provider)
+            )
+        };
+        return (route.id.clone(), route.surface, route.capacity_pool, reason);
+    }
+
+    (
+        format!("{}:native", provider.as_str()),
+        provider,
+        capacity_pool_for(provider),
+        "실행 경로 인벤토리가 없어 제공자의 네이티브 경로를 보수적으로 가정했습니다.".to_owned(),
+    )
+}
+
+fn capacity_pool_for(provider: Provider) -> CapacityPool {
+    match provider {
+        Provider::Claude => CapacityPool::ClaudeSubscription,
+        Provider::Codex => CapacityPool::CodexSubscription,
+        Provider::Grok => CapacityPool::GrokSubscription,
+        Provider::Cursor => CapacityPool::CursorSubscription,
+        Provider::Hermes | Provider::Openclaw => CapacityPool::Unknown,
+    }
+}
+
+fn empty_route_inventory(now: DateTime<Utc>) -> ExecutionRouteInventory {
+    ExecutionRouteInventory {
+        generated_at: now.to_rfc3339(),
+        routes: Vec::new(),
+        warnings: Vec::new(),
+        methodology: "실행 경로 인벤토리를 제공하지 않은 테스트·호환 경로입니다.".to_owned(),
     }
 }
 
@@ -466,8 +578,9 @@ fn floor_half(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        Capability, ContextExcerpt, ContextIndex, ContextRole, NativeKind, ProjectContextBrief,
-        Provider, ResourceBudget, ResourceState, Session, SessionSignal, SessionStatus, Snapshot,
+        Capability, ContextExcerpt, ContextIndex, ContextRole, ExecutionRoute,
+        ExecutionRouteInventory, NativeKind, ProjectContextBrief, Provider, ResourceBudget,
+        ResourceState, RouteCapability, Session, SessionSignal, SessionStatus, Snapshot,
         StatusConfidence, UsageWindow,
     };
 
@@ -535,6 +648,84 @@ mod tests {
             warnings: Vec::new(),
             privacy_note: "test".to_owned(),
         }
+    }
+
+    fn route(
+        id: &str,
+        surface: Provider,
+        model_provider: Provider,
+        state: ResourceState,
+    ) -> ExecutionRoute {
+        ExecutionRoute {
+            id: id.to_owned(),
+            surface,
+            model_provider: Some(model_provider),
+            model: None,
+            runtime: "test".to_owned(),
+            capacity_pool: capacity_pool_for(model_provider),
+            state,
+            configured: true,
+            capabilities: vec![RouteCapability::Mcp],
+            source_label: "test".to_owned(),
+            message: None,
+            limitations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn route_selection_prefers_safety_before_orchestrator_convenience() {
+        let inventory = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![
+                route(
+                    "claude:native",
+                    Provider::Claude,
+                    Provider::Claude,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "hermes:default",
+                    Provider::Hermes,
+                    Provider::Claude,
+                    ResourceState::Degraded,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+
+        let selected =
+            select_execution_route(Provider::Claude, false, Some(&inventory)).expect("safe route");
+
+        assert_eq!(selected.id, "claude:native");
+    }
+
+    #[test]
+    fn new_work_prefers_ready_hermes_route_for_the_same_capacity_pool() {
+        let inventory = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![
+                route(
+                    "grok:native",
+                    Provider::Grok,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "hermes:default",
+                    Provider::Hermes,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+
+        let selected =
+            select_execution_route(Provider::Grok, false, Some(&inventory)).expect("Hermes route");
+
+        assert_eq!(selected.id, "hermes:default");
     }
 
     #[test]

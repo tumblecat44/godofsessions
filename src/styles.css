@@ -1456,6 +1456,146 @@ button:active:not(:disabled) {
   font-size: 7px;
 }
 
+.route-section {
+  max-width: 1500px;
+  margin: 24px auto 0;
+}
+
+.route-section > header h2 {
+  margin: 5px 0 0;
+  color: var(--ink-primary);
+  font-size: 18px;
+  font-weight: 570;
+  letter-spacing: -0.03em;
+}
+
+.route-section > header p {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 9px;
+}
+
+.route-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.route-card {
+  min-width: 0;
+  padding: 13px;
+  background: var(--console);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.route-card--unavailable {
+  opacity: 0.56;
+}
+
+.route-card--degraded {
+  border-color: rgba(228, 169, 74, 0.2);
+}
+
+.route-card > header,
+.candidate-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.route-card > header > svg,
+.candidate-route > svg {
+  color: var(--ink-muted);
+}
+
+.route-card > header .provider-mark-wrap > span:last-child {
+  color: var(--ink-secondary);
+  font-size: 9px;
+}
+
+.route-state {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.route-card--ready .route-state {
+  color: var(--signal-teal);
+}
+
+.route-card--degraded .route-state {
+  color: var(--signal-amber);
+}
+
+.route-card > strong {
+  margin-top: 13px;
+  display: block;
+  color: var(--ink-primary);
+  font-size: 11px;
+  font-weight: 590;
+}
+
+.route-card > p {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 8px;
+}
+
+.route-pool {
+  margin-top: 12px;
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--control-inset);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 5px;
+}
+
+.route-pool span {
+  color: var(--ink-muted);
+  font-size: 8px;
+}
+
+.route-pool b {
+  color: var(--signal-amber);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.route-capabilities {
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.route-capabilities span {
+  padding: 3px 5px;
+  color: var(--ink-tertiary);
+  background: var(--deck);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 4px;
+  font-size: 7px;
+}
+
+.route-card details {
+  margin-top: 9px;
+  color: var(--signal-amber);
+  font-size: 8px;
+}
+
+.route-card details p {
+  margin: 6px 0 0;
+  color: var(--ink-tertiary);
+  line-height: 1.45;
+}
+
 .candidate-stack {
   max-width: 1500px;
   margin: 16px auto 0;
@@ -1580,6 +1720,10 @@ button:active:not(:disabled) {
   font-weight: 580;
 }
 
+.candidate-route {
+  flex-wrap: wrap;
+}
+
 .candidate-provider > span,
 .candidate-provider > small {
   color: var(--ink-tertiary);
@@ -1613,6 +1757,18 @@ button:active:not(:disabled) {
   color: var(--ink-secondary);
   font-size: 10px;
   line-height: 1.5;
+}
+
+.candidate-reason div {
+  min-width: 0;
+}
+
+.candidate-reason small {
+  margin-top: 3px;
+  display: block;
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.45;
 }
 
 .candidate-details {
@@ -2518,6 +2674,10 @@ button:active:not(:disabled) {
     grid-template-columns: 1fr;
   }
 
+  .route-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .alternative-grid,
   .plan-footnotes {
     grid-template-columns: 1fr;
@@ -2614,6 +2774,10 @@ button:active:not(:disabled) {
 
   .candidate-provider {
     width: 100%;
+  }
+
+  .route-grid {
+    grid-template-columns: 1fr;
   }
 
   .candidate-details {

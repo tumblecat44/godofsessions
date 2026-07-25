@@ -163,6 +163,51 @@ pub struct ResourceBudget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum CapacityPool {
+    ClaudeSubscription,
+    CodexSubscription,
+    GrokSubscription,
+    CursorSubscription,
+    ApiCredits,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteCapability {
+    ResumeSession,
+    GoalLoop,
+    Mcp,
+    CrossSessionMemory,
+    NativeSandbox,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecutionRoute {
+    pub id: String,
+    pub surface: Provider,
+    pub model_provider: Option<Provider>,
+    pub model: Option<String>,
+    pub runtime: String,
+    pub capacity_pool: CapacityPool,
+    pub state: ResourceState,
+    pub configured: bool,
+    pub capabilities: Vec<RouteCapability>,
+    pub source_label: String,
+    pub message: Option<String>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecutionRouteInventory {
+    pub generated_at: String,
+    pub routes: Vec<ExecutionRoute>,
+    pub warnings: Vec<String>,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RecommendationConfidence {
     High,
     Medium,
@@ -176,6 +221,10 @@ pub struct OvernightCandidate {
     pub cwd: String,
     pub goal: String,
     pub provider: Provider,
+    pub execution_route_id: String,
+    pub execution_surface: Provider,
+    pub capacity_pool: CapacityPool,
+    pub route_reason: String,
     pub native_session_id: Option<String>,
     pub resume_existing: bool,
     pub score: f64,
@@ -203,6 +252,7 @@ pub struct OvernightPlan {
     pub sessions_considered: usize,
     pub projects_considered: usize,
     pub budgets: Vec<ResourceBudget>,
+    pub route_inventory: ExecutionRouteInventory,
     pub candidates: Vec<OvernightCandidate>,
     pub exclusions: Vec<ExcludedProject>,
     pub read_only: bool,
