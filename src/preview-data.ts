@@ -834,7 +834,7 @@ export const previewOvernightPlan: OvernightPlan = {
   projects_considered: 4,
   read_only: true,
   methodology:
-    "최근성·반복 활동·구체적 제목·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다.",
+    "먼저 정확한 실행 형태를 승인·시작할 수 있는 경로가 있는지 확인한 뒤 최근성·반복 활동·구체적 제목·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 실행 가능한 후보 안에서는 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다.",
   host_readiness: {
     observed_at: new Date().toISOString(),
     state: "needs_attention",
@@ -1053,7 +1053,7 @@ export const previewOvernightPlan: OvernightPlan = {
       ],
       source_session_ids: ["codex:co1", "claude:cl1", "grok:g1"],
       provider_reason:
-        "Codex에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 87% 남아 있습니다.",
+        "Codex에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 87% 남아 있습니다. 현재 승인 가능한 실행 경로도 확인했습니다.",
       capacity_ready_after_hours: 0,
       expected_outcome:
         "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고",
@@ -1089,7 +1089,7 @@ export const previewOvernightPlan: OvernightPlan = {
       ],
       source_session_ids: ["grok:g1", "codex:co2"],
       provider_reason:
-        "Hermes가 Grok 구독을 사용하면서 여러 세션의 조사 맥락을 새 goal로 묶을 수 있습니다.",
+        "Hermes가 Grok 구독을 사용하면서 여러 세션의 조사 맥락을 새 goal로 묶을 수 있습니다. 현재 승인 가능한 실행 경로도 확인했습니다.",
       capacity_ready_after_hours: 0,
       expected_outcome: "근거 링크가 포함된 경쟁 제품 비교와 남은 조사 질문",
       verification: ["모든 핵심 주장에 출처가 있을 것"],
@@ -1118,7 +1118,7 @@ export const previewOvernightPlan: OvernightPlan = {
       ],
       source_session_ids: ["claude:cl1", "codex:co3"],
       provider_reason:
-        "Claude의 현재 5시간 창은 소진됐지만 약 1시간 15분 뒤 초기화됩니다. 그 시각에 사용량을 다시 확인한 뒤 시작할 수 있습니다.",
+        "Claude의 현재 5시간 창은 소진됐지만 약 1시간 15분 뒤 초기화됩니다. 그 시각에 사용량을 다시 확인한 뒤 시작할 수 있습니다. 현재 승인 가능한 실행 경로도 확인했습니다.",
       capacity_ready_after_hours: 1.25,
       expected_outcome:
         "관련 화면의 회귀 수정, 테스트 결과, 사람이 확인할 남은 위험의 아침 보고",

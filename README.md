@@ -29,7 +29,7 @@ It is not:
 
 ## Current phase
 
-The writable-provider choice M39 desktop slice is working.
+The actionable-only recommendation M40 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
 only after an exact, expiring, one-time approval in the desktop app. The full
 night schedule is durable and safely recoverable under a plan-specific
@@ -108,6 +108,9 @@ Provider selection now treats that approval-capable route as a prerequisite
 whenever at least one runnable alternative exists. A full but unwritable Grok
 quota can no longer beat a smaller Codex budget whose existing task can
 actually be resumed, and a missing route is no longer mistaken for readiness.
+If no provider can execute a project through the exact required run shape, the
+project now appears only in the explained exclusions. The answer no longer
+presents a diagnostic, non-approvable route as tonight's best bet.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -151,6 +154,7 @@ actually be resumed, and a missing route is no longer mistaken for readiness.
 - [Bounded external-workspace observation M37](docs/overnight-m37.md)
 - [Billable-capacity identity M38](docs/overnight-m38.md)
 - [Writable-provider choice M39](docs/overnight-m39.md)
+- [Actionable-only recommendations M40](docs/overnight-m40.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)
 
 The app currently:

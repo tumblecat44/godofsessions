@@ -240,6 +240,25 @@ fn build_overnight_plan_inner(
         let resume_available = provider_session.is_some();
         let (route, resume_existing, execution_is_ready) =
             assess_execution_route(provider, resume_available, route_inventory);
+        debug_assert_eq!(execution_is_ready, provider_choice.execution_ready);
+        if route_inventory.is_some() && !execution_is_ready {
+            let reason = match route {
+                None => format!(
+                    "{} 모델로 이 프로젝트를 시작할 실행 경로를 찾지 못했습니다.",
+                    provider_display_name(provider)
+                ),
+                Some(route) if route.state != ResourceState::Ready => format!(
+                    "가장 적합한 {} 실행 경로가 현재 준비되지 않아 오늘 밤 안전하게 시작할 수 없습니다.",
+                    provider_display_name(route.surface)
+                ),
+                Some(route) => format!(
+                    "발견된 {} 실행 경로에는 이 세션 형태를 승인·시작할 어댑터가 아직 없습니다.",
+                    provider_display_name(route.surface)
+                ),
+            };
+            exclusions.push(ExcludedProject { project, reason });
+            continue;
+        }
         let (execution_route_id, execution_surface, capacity_pool, route_reason) =
             route_selection(provider, resume_existing, route);
         let project_score = (30.0 - latest_age_hours.min(24.0) * 1.25)
@@ -255,7 +274,6 @@ fn build_overnight_plan_inner(
         let budget_is_ready = budgets
             .iter()
             .any(|budget| budget.provider == provider && budget.state == ResourceState::Ready);
-        debug_assert_eq!(execution_is_ready, provider_choice.execution_ready);
         let confidence = if sessions.len() >= 2
             && latest.title.is_some()
             && latest.cwd.is_some()
@@ -292,12 +310,6 @@ fn build_overnight_plan_inner(
         }
         if !budget_is_ready {
             risks.push("현재 사용량을 확인하지 못해 공급자 선택 확신이 낮습니다.".to_owned());
-        }
-        if !execution_is_ready {
-            risks.push(
-                "선택된 실행 경로가 현재 승인 가능한 상태가 아니어서 이 계획만으로는 시작할 수 없습니다."
-                    .to_owned(),
-            );
         }
         if provider_choice.capacity_ready_after_hours > 0.0 {
             risks.push(
@@ -486,7 +498,7 @@ fn build_overnight_plan_inner(
         host_readiness,
         read_only: true,
         methodology:
-            "최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
+            "먼저 정확한 실행 형태를 승인·시작할 수 있는 경로가 있는지 확인한 뒤 최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 실행 가능한 후보 안에서는 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
                 .to_owned(),
     }
 }
@@ -1248,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_budget_cannot_hide_an_unwritable_selected_route() {
+    fn a_project_without_any_writable_route_is_excluded() {
         let snapshot = snapshot(vec![session(
             Provider::Grok,
             "grok-session",
@@ -1286,12 +1298,13 @@ mod tests {
                 .with_timezone(&Utc),
         );
 
-        assert_eq!(plan.candidates[0].confidence, RecommendationConfidence::Low);
-        assert!(plan.candidates[0]
-            .risks
+        assert!(plan.candidates.is_empty());
+        assert!(plan.run_drafts.is_empty());
+        assert!(plan
+            .exclusions
             .iter()
-            .any(|risk| risk.contains("승인 가능한 상태가 아니어서")));
-        assert!(!plan.run_drafts[0].dispatch_supported);
+            .any(|exclusion| exclusion.project == "alpha"
+                && exclusion.reason.contains("어댑터가 아직 없습니다")));
     }
 
     #[test]
