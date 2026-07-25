@@ -29,12 +29,12 @@ It is not:
 
 ## Current phase
 
-The deep-adapter M15 desktop slice is working. Recommendation and preflight
-remain read-only; a provider process can start only after an exact, expiring,
-one-time approval in the desktop app. Hermes state is recovered after an app
-restart, while Codex uses the provider rollout as its idempotency and recovery
-ledger. Their records appear in one Morning Review while provider completion
-remains separate from human verification.
+The one-approval portfolio M16 desktop slice is working. Recommendation and
+preflight remain read-only; a provider process can start only after an exact,
+expiring, one-time approval in the desktop app. Hermes state is recovered after
+an app restart, while Codex uses the provider rollout as its idempotency and
+recovery ledger. Their records appear in one Morning Review while provider
+completion remains separate from human verification.
 
 - [Connector feasibility](docs/connector-feasibility.md)
 - [First MVP](docs/mvp.md)
@@ -54,6 +54,7 @@ remains separate from human verification.
 - [Approval-gated Codex night turns M13](docs/overnight-m13.md)
 - [Unified provider-owned night history M14](docs/overnight-m14.md)
 - [Deep Codex adapter modules M15](docs/overnight-m15.md)
+- [One-approval night portfolio M16](docs/overnight-m16.md)
 
 The app currently:
 
@@ -82,6 +83,8 @@ The app currently:
   for every route
 - builds parallel lanes per subscription while keeping work inside each shared
   Capacity Pool sequential and within the sleep window
+- freezes the immediately runnable head of every independent lane into one
+  exact, expiring portfolio approval and returns itemized provider receipts
 - compiles Hermes candidates into a read-only Dispatch Preflight with an
   isolated board, exact argument-vector preview, stable idempotency key,
   bounded runtime, one worker, and expected receipt
@@ -117,12 +120,13 @@ The app currently:
 - holds inferred external actions behind a Human Gate
 - treats the operator's sleep duration as a maximum budget
 
-The Overnight screen never auto-dispatches. Eligible Hermes proposals and
-provenance-checked existing Codex threads have a start control, and the
-operator must review the effects and type the project-specific confirmation
-phrase. New Codex threads plus native Claude, Grok, Cursor, and OpenClaw
-dispatch remain disabled until their guardrail contracts are equally strong.
-The tools that created the sessions remain the source of truth.
+The Overnight screen never dispatches before explicit approval. Eligible
+Hermes proposals and provenance-checked existing Codex threads have individual
+start controls, while immediately runnable independent lanes can be accepted
+as one frozen portfolio. The operator must review the effects and type the
+exact confirmation phrase. New Codex threads plus native Claude, Grok, Cursor,
+and OpenClaw dispatch remain disabled until their guardrail contracts are
+equally strong. The tools that created the sessions remain the source of truth.
 
 ## Run locally
 

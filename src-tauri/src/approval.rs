@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::model::{
-    ApprovalChallenge, DispatchPreflight, DispatchPreflightState, NightRunDraft, Provider,
+    ApprovalChallenge, CapacityPool, DispatchPreflight, DispatchPreflightState, NightRunDraft,
+    NightSchedule, PortfolioApprovalChallenge, PortfolioApprovalItem, Provider,
 };
 
 const PROPOSAL_TTL_MINUTES: i64 = 30;
@@ -28,6 +30,22 @@ struct PendingApproval {
 }
 
 #[derive(Debug, Clone)]
+struct RegisteredPortfolioItem {
+    draft_id: String,
+    capacity_pool: CapacityPool,
+    time_budget_hours: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPortfolioApproval {
+    generation: u64,
+    draft_ids: Vec<String>,
+    idempotency_key: String,
+    confirmation_phrase: String,
+    expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ApprovedDispatch {
     pub draft: NightRunDraft,
     pub preflight: DispatchPreflight,
@@ -39,6 +57,9 @@ pub struct ApprovalRegistry {
     sequence: u64,
     proposals: HashMap<String, RegisteredProposal>,
     pending: HashMap<String, PendingApproval>,
+    portfolio_items: Vec<RegisteredPortfolioItem>,
+    deferred_count: usize,
+    pending_portfolios: HashMap<String, PendingPortfolioApproval>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -51,6 +72,8 @@ pub enum ApprovalError {
     ProposalExpired,
     #[error("실행할 수 없는 사전점검 상태입니다.")]
     NotReady,
+    #[error("한 번에 시작할 수 있는 야간 작업이 없습니다.")]
+    EmptyPortfolio,
     #[error("승인 요청을 찾지 못했습니다. 다시 검토해 주세요.")]
     MissingChallenge,
     #[error("승인 확인 시간이 만료되었습니다. 다시 승인해 주세요.")]
@@ -64,11 +87,15 @@ impl ApprovalRegistry {
         &mut self,
         drafts: &[NightRunDraft],
         preflights: &[DispatchPreflight],
+        schedule: &NightSchedule,
         now: DateTime<Utc>,
     ) {
         self.generation = self.generation.saturating_add(1);
         self.proposals.clear();
         self.pending.clear();
+        self.portfolio_items.clear();
+        self.deferred_count = 0;
+        self.pending_portfolios.clear();
         let expires_at = now + Duration::minutes(PROPOSAL_TTL_MINUTES);
         for preflight in preflights.iter().filter(|preflight| {
             preflight.state == DispatchPreflightState::ReadyForApproval
@@ -93,6 +120,32 @@ impl ApprovalRegistry {
                     expires_at,
                 },
             );
+        }
+
+        for lane in &schedule.lanes {
+            self.deferred_count = self
+                .deferred_count
+                .saturating_add(lane.slots.len().saturating_sub(1));
+            let Some(slot) = lane.slots.first() else {
+                continue;
+            };
+            if slot.starts_after_hours.abs() > f64::EPSILON {
+                self.deferred_count = self.deferred_count.saturating_add(1);
+                continue;
+            }
+            let Some(draft) = drafts.iter().find(|draft| {
+                draft.candidate_rank == slot.candidate_rank && draft.route_id == slot.route_id
+            }) else {
+                continue;
+            };
+            if !self.proposals.contains_key(&draft.id) {
+                continue;
+            }
+            self.portfolio_items.push(RegisteredPortfolioItem {
+                draft_id: draft.id.clone(),
+                capacity_pool: lane.capacity_pool,
+                time_budget_hours: slot.time_budget_hours,
+            });
         }
     }
 
@@ -218,14 +271,150 @@ impl ApprovalRegistry {
             })
     }
 
+    pub fn begin_portfolio(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> Result<PortfolioApprovalChallenge, ApprovalError> {
+        self.expire(now);
+        if self.portfolio_items.is_empty() {
+            return Err(ApprovalError::EmptyPortfolio);
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(format!("generation:{}\n", self.generation));
+        let mut items = Vec::with_capacity(self.portfolio_items.len());
+        for item in &self.portfolio_items {
+            let proposal = self
+                .proposals
+                .get(&item.draft_id)
+                .ok_or(ApprovalError::MissingProposal)?;
+            if proposal.expires_at <= now {
+                return Err(ApprovalError::ProposalExpired);
+            }
+            if proposal.preflight.state != DispatchPreflightState::ReadyForApproval
+                || !proposal.preflight.read_only
+                || proposal.preflight.execution_enabled
+            {
+                return Err(ApprovalError::NotReady);
+            }
+            hasher.update(item.draft_id.as_bytes());
+            hasher.update(b"\n");
+            hasher.update(proposal.preflight.idempotency_key.as_bytes());
+            hasher.update(b"\n");
+            hasher.update(format!("{:?}\n", item.capacity_pool).as_bytes());
+            items.push(PortfolioApprovalItem {
+                draft_id: item.draft_id.clone(),
+                idempotency_key: proposal.preflight.idempotency_key.clone(),
+                project: proposal.draft.project.clone(),
+                goal: proposal.draft.goal.clone(),
+                workspace: proposal.draft.workspace.clone(),
+                surface: proposal.preflight.surface,
+                capacity_pool: item.capacity_pool,
+                time_budget_hours: item.time_budget_hours,
+            });
+        }
+
+        let digest = format!("{:x}", hasher.finalize());
+        let idempotency_key = format!("gos-portfolio-{}", &digest[..20]);
+        self.sequence = self.sequence.saturating_add(1);
+        let id = format!(
+            "approval-portfolio-{}-{}-{}",
+            self.generation,
+            self.sequence,
+            &digest[..12]
+        );
+        let confirmation_phrase = format!("오늘 밤 {}개 시작 승인", items.len());
+        let expires_at = now + Duration::minutes(CHALLENGE_TTL_MINUTES);
+        self.pending_portfolios.insert(
+            id.clone(),
+            PendingPortfolioApproval {
+                generation: self.generation,
+                draft_ids: items.iter().map(|item| item.draft_id.clone()).collect(),
+                idempotency_key: idempotency_key.clone(),
+                confirmation_phrase: confirmation_phrase.clone(),
+                expires_at,
+            },
+        );
+
+        Ok(PortfolioApprovalChallenge {
+            id,
+            idempotency_key,
+            items,
+            deferred_count: self.deferred_count,
+            confirmation_phrase,
+            expires_at: expires_at.to_rfc3339(),
+            warning: concat!(
+                "확인하면 위에 고정된 각 구독 lane의 첫 작업만 시작합니다. ",
+                "프로젝트 파일과 연결된 구독이 사용될 수 있습니다. ",
+                "몇 시간 뒤 슬롯은 아직 자동 시작하지 않습니다."
+            )
+            .to_owned(),
+        })
+    }
+
+    pub fn consume_portfolio(
+        &mut self,
+        approval_id: &str,
+        idempotency_key: &str,
+        confirmation_phrase: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<ApprovedDispatch>, ApprovalError> {
+        let pending = self
+            .pending_portfolios
+            .get(approval_id)
+            .cloned()
+            .ok_or(ApprovalError::MissingChallenge)?;
+        if pending.expires_at <= now {
+            self.pending_portfolios.remove(approval_id);
+            return Err(ApprovalError::ChallengeExpired);
+        }
+        if pending.generation != self.generation {
+            self.pending_portfolios.remove(approval_id);
+            return Err(ApprovalError::MissingProposal);
+        }
+        if pending.idempotency_key != idempotency_key {
+            return Err(ApprovalError::FingerprintMismatch);
+        }
+        if pending.confirmation_phrase != confirmation_phrase {
+            return Err(ApprovalError::ConfirmationMismatch);
+        }
+
+        let mut approved = Vec::with_capacity(pending.draft_ids.len());
+        for draft_id in &pending.draft_ids {
+            let proposal = self
+                .proposals
+                .get(draft_id)
+                .cloned()
+                .ok_or(ApprovalError::MissingProposal)?;
+            if proposal.expires_at <= now {
+                return Err(ApprovalError::ProposalExpired);
+            }
+            approved.push(ApprovedDispatch {
+                draft: proposal.draft,
+                preflight: proposal.preflight,
+            });
+        }
+
+        self.pending_portfolios.remove(approval_id);
+        for draft_id in &pending.draft_ids {
+            self.pending
+                .retain(|_, item| item.draft_id != *draft_id);
+            self.proposals.remove(draft_id);
+        }
+        Ok(approved)
+    }
+
     pub fn cancel(&mut self, approval_id: &str) {
         self.pending.remove(approval_id);
+        self.pending_portfolios.remove(approval_id);
     }
 
     fn expire(&mut self, now: DateTime<Utc>) {
         self.proposals
             .retain(|_, proposal| proposal.expires_at > now);
         self.pending.retain(|_, pending| pending.expires_at > now);
+        self.pending_portfolios
+            .retain(|_, pending| pending.expires_at > now);
     }
 }
 
@@ -293,7 +482,26 @@ mod tests {
 
     fn registry(now: DateTime<Utc>) -> ApprovalRegistry {
         let mut registry = ApprovalRegistry::default();
-        registry.replace_plan(&[draft()], &[preflight()], now);
+        registry.replace_plan(
+            &[draft()],
+            &[preflight()],
+            &crate::model::NightSchedule {
+                lanes: vec![crate::model::NightScheduleLane {
+                    capacity_pool: crate::model::CapacityPool::ApiCredits,
+                    planned_hours: 2.0,
+                    slots: vec![crate::model::NightScheduleSlot {
+                        candidate_rank: 1,
+                        project: "alpha".to_owned(),
+                        route_id: "hermes:default".to_owned(),
+                        starts_after_hours: 0.0,
+                        time_budget_hours: 2.0,
+                    }],
+                }],
+                parallel: false,
+                methodology: "test".to_owned(),
+            },
+            now,
+        );
         registry
     }
 
@@ -334,7 +542,16 @@ mod tests {
         let challenge = registry
             .begin("night:1:alpha:hermes:default", "gos-night-exact", now)
             .expect("challenge");
-        registry.replace_plan(&[draft()], &[preflight()], now + Duration::seconds(1));
+        registry.replace_plan(
+            &[draft()],
+            &[preflight()],
+            &crate::model::NightSchedule {
+                lanes: vec![],
+                parallel: false,
+                methodology: "replacement".to_owned(),
+            },
+            now + Duration::seconds(1),
+        );
 
         assert!(matches!(
             registry.consume(
@@ -389,7 +606,16 @@ mod tests {
         let mut blocked = preflight();
         blocked.state = DispatchPreflightState::Blocked;
         let mut registry = ApprovalRegistry::default();
-        registry.replace_plan(&[draft()], &[blocked], now);
+        registry.replace_plan(
+            &[draft()],
+            &[blocked],
+            &crate::model::NightSchedule {
+                lanes: vec![],
+                parallel: false,
+                methodology: "test".to_owned(),
+            },
+            now,
+        );
 
         assert!(matches!(
             registry.begin("night:1:alpha:hermes:default", "gos-night-exact", now,),
@@ -403,11 +629,180 @@ mod tests {
         let mut unsupported = draft();
         unsupported.dispatch_supported = false;
         let mut registry = ApprovalRegistry::default();
-        registry.replace_plan(&[unsupported], &[preflight()], now);
+        registry.replace_plan(
+            &[unsupported],
+            &[preflight()],
+            &crate::model::NightSchedule {
+                lanes: vec![],
+                parallel: false,
+                methodology: "test".to_owned(),
+            },
+            now,
+        );
 
         assert!(matches!(
             registry.begin("night:1:alpha:hermes:default", "gos-night-exact", now,),
             Err(ApprovalError::MissingProposal)
+        ));
+    }
+
+    #[test]
+    fn portfolio_challenge_freezes_only_immediate_lane_heads() {
+        let now = Utc::now();
+        let mut second = draft();
+        second.id = "night:2:beta:codex:existing".to_owned();
+        second.candidate_rank = 2;
+        second.project = "beta".to_owned();
+        second.route_id = "codex:existing".to_owned();
+        let mut third = draft();
+        third.id = "night:3:gamma:hermes:default".to_owned();
+        third.candidate_rank = 3;
+        third.project = "gamma".to_owned();
+
+        let mut second_preflight = preflight();
+        second_preflight.draft_id = second.id.clone();
+        second_preflight.surface = Provider::Codex;
+        second_preflight.idempotency_key = "gos-codex-beta".to_owned();
+        let mut third_preflight = preflight();
+        third_preflight.draft_id = third.id.clone();
+        third_preflight.idempotency_key = "gos-night-gamma".to_owned();
+
+        let schedule = crate::model::NightSchedule {
+            lanes: vec![
+                crate::model::NightScheduleLane {
+                    capacity_pool: crate::model::CapacityPool::ApiCredits,
+                    planned_hours: 4.0,
+                    slots: vec![
+                        crate::model::NightScheduleSlot {
+                            candidate_rank: 1,
+                            project: "alpha".to_owned(),
+                            route_id: "hermes:default".to_owned(),
+                            starts_after_hours: 0.0,
+                            time_budget_hours: 2.0,
+                        },
+                        crate::model::NightScheduleSlot {
+                            candidate_rank: 3,
+                            project: "gamma".to_owned(),
+                            route_id: "hermes:default".to_owned(),
+                            starts_after_hours: 2.0,
+                            time_budget_hours: 2.0,
+                        },
+                    ],
+                },
+                crate::model::NightScheduleLane {
+                    capacity_pool: crate::model::CapacityPool::CodexSubscription,
+                    planned_hours: 2.0,
+                    slots: vec![crate::model::NightScheduleSlot {
+                        candidate_rank: 2,
+                        project: "beta".to_owned(),
+                        route_id: "codex:existing".to_owned(),
+                        starts_after_hours: 0.0,
+                        time_budget_hours: 2.0,
+                    }],
+                },
+            ],
+            parallel: true,
+            methodology: "test".to_owned(),
+        };
+        let mut registry = ApprovalRegistry::default();
+        registry.replace_plan(
+            &[draft(), second, third],
+            &[preflight(), second_preflight, third_preflight],
+            &schedule,
+            now,
+        );
+
+        let challenge = registry.begin_portfolio(now).expect("portfolio challenge");
+        assert_eq!(challenge.items.len(), 2);
+        assert_eq!(challenge.deferred_count, 1);
+        assert_eq!(challenge.items[0].project, "alpha");
+        assert_eq!(challenge.items[1].project, "beta");
+        assert_eq!(challenge.confirmation_phrase, "오늘 밤 2개 시작 승인");
+    }
+
+    #[test]
+    fn portfolio_approval_is_exact_and_consumed_once() {
+        let now = Utc::now();
+        let mut registry = registry(now);
+        let challenge = registry.begin_portfolio(now).expect("portfolio challenge");
+
+        assert!(matches!(
+            registry.consume_portfolio(
+                &challenge.id,
+                "gos-portfolio-changed",
+                &challenge.confirmation_phrase,
+                now,
+            ),
+            Err(ApprovalError::FingerprintMismatch)
+        ));
+
+        let approved = registry
+            .consume_portfolio(
+                &challenge.id,
+                &challenge.idempotency_key,
+                &challenge.confirmation_phrase,
+                now,
+            )
+            .expect("approved portfolio");
+        assert_eq!(approved.len(), 1);
+        assert!(matches!(
+            registry.consume_portfolio(
+                &challenge.id,
+                &challenge.idempotency_key,
+                &challenge.confirmation_phrase,
+                now,
+            ),
+            Err(ApprovalError::MissingChallenge)
+        ));
+    }
+
+    #[test]
+    fn portfolio_never_skips_a_blocked_lane_head() {
+        let now = Utc::now();
+        let mut second = draft();
+        second.id = "night:2:beta:hermes:default".to_owned();
+        second.candidate_rank = 2;
+        second.project = "beta".to_owned();
+        let mut blocked_head = preflight();
+        blocked_head.state = DispatchPreflightState::Blocked;
+        let mut ready_second = preflight();
+        ready_second.draft_id = second.id.clone();
+        ready_second.idempotency_key = "gos-night-beta".to_owned();
+        let schedule = crate::model::NightSchedule {
+            lanes: vec![crate::model::NightScheduleLane {
+                capacity_pool: crate::model::CapacityPool::ApiCredits,
+                planned_hours: 4.0,
+                slots: vec![
+                    crate::model::NightScheduleSlot {
+                        candidate_rank: 1,
+                        project: "alpha".to_owned(),
+                        route_id: "hermes:default".to_owned(),
+                        starts_after_hours: 0.0,
+                        time_budget_hours: 2.0,
+                    },
+                    crate::model::NightScheduleSlot {
+                        candidate_rank: 2,
+                        project: "beta".to_owned(),
+                        route_id: "hermes:default".to_owned(),
+                        starts_after_hours: 0.0,
+                        time_budget_hours: 2.0,
+                    },
+                ],
+            }],
+            parallel: false,
+            methodology: "test".to_owned(),
+        };
+        let mut registry = ApprovalRegistry::default();
+        registry.replace_plan(
+            &[draft(), second],
+            &[blocked_head, ready_second],
+            &schedule,
+            now,
+        );
+
+        assert!(matches!(
+            registry.begin_portfolio(now),
+            Err(ApprovalError::EmptyPortfolio)
         ));
     }
 }

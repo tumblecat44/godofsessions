@@ -36,6 +36,8 @@ import type {
   OvernightPlan,
   ExecutionRoute,
   NightRunDraft,
+  PortfolioApprovalChallenge,
+  PortfolioDispatchResult,
   ResourceBudget,
 } from "../types";
 import { ProviderMark } from "./ProviderMark";
@@ -833,11 +835,17 @@ export function OvernightView() {
   const [sleepHours, setSleepHours] = useState(7);
   const [state, setState] = useState<PlanState>({ kind: "idle" });
   const [approval, setApproval] = useState<ApprovalChallenge | null>(null);
+  const [portfolioApproval, setPortfolioApproval] =
+    useState<PortfolioApprovalChallenge | null>(null);
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [preparingDraftId, setPreparingDraftId] = useState<string | null>(null);
+  const [isPreparingPortfolio, setIsPreparingPortfolio] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
   const [receipts, setReceipts] = useState<Record<string, DispatchReceipt>>({});
+  const [portfolioDispatchMessage, setPortfolioDispatchMessage] = useState<
+    string | null
+  >(null);
   const [nightHistory, setNightHistory] = useState<NightRunHistory | null>(null);
 
   const loadNightHistory = useCallback(async () => {
@@ -869,11 +877,13 @@ export function OvernightView() {
   }, [loadNightHistory]);
 
   useEffect(() => {
-    if (!approval || isDispatching) return;
+    const activeApproval = portfolioApproval || approval;
+    if (!activeApproval || isDispatching) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      const approvalId = approval.id;
+      const approvalId = activeApproval.id;
       setApproval(null);
+      setPortfolioApproval(null);
       setConfirmationPhrase("");
       setApprovalError(null);
       if (isTauri()) {
@@ -884,7 +894,7 @@ export function OvernightView() {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [approval, isDispatching]);
+  }, [approval, portfolioApproval, isDispatching]);
 
   const generate = async () => {
     setApprovalError(null);
@@ -906,6 +916,28 @@ export function OvernightView() {
   };
 
   const plan = state.kind === "ready" ? state.plan : null;
+  const readyPortfolioPreflights = plan
+    ? plan.schedule.lanes.flatMap((lane) =>
+        lane.slots
+          .filter((slot) => slot.starts_after_hours === 0)
+          .map((slot) => {
+            const draft = plan.run_drafts.find(
+              (item) =>
+                item.candidate_rank === slot.candidate_rank &&
+                item.route_id === slot.route_id,
+            );
+            return plan.dispatch_preflights.find(
+              (preflight) =>
+                preflight.draft_id === draft?.id &&
+                preflight.state === "ready_for_approval",
+            );
+          })
+          .filter(
+            (preflight): preflight is DispatchPreflight =>
+              preflight !== undefined,
+          ),
+      )
+    : [];
   const approvalDraft = approval
     ? plan?.run_drafts.find((draft) => draft.id === approval.draft_id)
     : undefined;
@@ -967,9 +999,65 @@ export function OvernightView() {
     }
   };
 
+  const requestPortfolioApproval = async () => {
+    setIsPreparingPortfolio(true);
+    setApprovalError(null);
+    setPortfolioDispatchMessage(null);
+    try {
+      const challenge = isTauri()
+        ? await invoke<PortfolioApprovalChallenge>(
+            "prepare_portfolio_approval",
+          )
+        : {
+            id: "preview-portfolio",
+            idempotency_key: "gos-portfolio-preview",
+            items: readyPortfolioPreflights.map((preflight) => {
+              const draft = plan?.run_drafts.find(
+                (item) => item.id === preflight.draft_id,
+              );
+              const candidate = plan?.candidates.find(
+                (item) => item.rank === draft?.candidate_rank,
+              );
+              return {
+                draft_id: preflight.draft_id,
+                idempotency_key: preflight.idempotency_key,
+                project: draft?.project || "preview",
+                goal: draft?.goal || "미리보기 goal",
+                workspace: draft?.workspace || "",
+                surface: preflight.surface,
+                capacity_pool: candidate?.capacity_pool || "unknown",
+                time_budget_hours: draft?.time_budget_hours || 0,
+              };
+            }),
+            deferred_count:
+              plan?.schedule.lanes.reduce(
+                (count, lane) =>
+                  count +
+                  lane.slots.filter((slot) => slot.starts_after_hours > 0)
+                    .length,
+                0,
+              ) || 0,
+            confirmation_phrase: `오늘 밤 ${readyPortfolioPreflights.length}개 시작 승인`,
+            expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+            warning:
+              "확인하면 위에 고정된 각 구독 lane의 첫 작업만 시작합니다. 프로젝트 파일과 연결된 구독이 사용될 수 있습니다. 몇 시간 뒤 슬롯은 아직 자동 시작하지 않습니다.",
+          };
+      setApproval(null);
+      setPortfolioApproval(challenge);
+      setConfirmationPhrase("");
+    } catch (error) {
+      setApprovalError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsPreparingPortfolio(false);
+    }
+  };
+
   const cancelApproval = async () => {
-    const current = approval;
+    const current = portfolioApproval || approval;
     setApproval(null);
+    setPortfolioApproval(null);
     setConfirmationPhrase("");
     setApprovalError(null);
     if (current && isTauri()) {
@@ -980,7 +1068,11 @@ export function OvernightView() {
   };
 
   const confirmAndDispatch = async () => {
-    if (!approval || confirmationPhrase !== approval.confirmation_phrase) {
+    const currentApproval = portfolioApproval || approval;
+    if (
+      !currentApproval ||
+      confirmationPhrase !== currentApproval.confirmation_phrase
+    ) {
       setApprovalError("아래 확인 문구를 정확히 입력해 주세요.");
       return;
     }
@@ -991,6 +1083,38 @@ export function OvernightView() {
     setIsDispatching(true);
     setApprovalError(null);
     try {
+      if (portfolioApproval) {
+        const result = await invoke<PortfolioDispatchResult>(
+          "dispatch_approved_portfolio",
+          {
+            approvalId: portfolioApproval.id,
+            idempotencyKey: portfolioApproval.idempotency_key,
+            confirmationPhrase,
+          },
+        );
+        const successfulReceipts = result.outcomes.reduce<
+          Record<string, DispatchReceipt>
+        >((next, outcome) => {
+          if (outcome.receipt) next[outcome.draft_id] = outcome.receipt;
+          return next;
+        }, {});
+        setReceipts((current) => ({
+          ...current,
+          ...successfulReceipts,
+        }));
+        const failures = result.outcomes
+          .filter((outcome) => outcome.error)
+          .map((outcome) => `${outcome.project}: ${outcome.error}`);
+        setPortfolioDispatchMessage(result.message);
+        setPortfolioApproval(null);
+        setConfirmationPhrase("");
+        if (failures.length > 0) {
+          setApprovalError(failures.join(" · "));
+        }
+        void loadNightHistory();
+        return;
+      }
+      if (!approval) return;
       const receipt = await invoke<DispatchReceipt>(
         approvalPreflight?.surface === "codex"
           ? "dispatch_approved_codex"
@@ -1098,7 +1222,14 @@ export function OvernightView() {
         </button>
       </section>
 
-      {approvalError && !approval && (
+      {portfolioDispatchMessage && !portfolioApproval && !approval && (
+        <section className="portfolio-inline-result" role="status">
+          <Check size={14} />
+          <p>{portfolioDispatchMessage}</p>
+        </section>
+      )}
+
+      {approvalError && !approval && !portfolioApproval && (
         <section className="approval-inline-error" role="alert">
           <AlertTriangle size={14} />
           <p>{approvalError}</p>
@@ -1252,6 +1383,41 @@ export function OvernightView() {
                   </article>
                 ))}
               </div>
+              {readyPortfolioPreflights.length > 0 && (
+                <div className="portfolio-handoff">
+                  <div>
+                    <span>
+                      <ShieldCheck size={13} />
+                      승인 범위 고정됨
+                    </span>
+                    <strong>
+                      지금 {readyPortfolioPreflights.length}개 구독 lane을 한 번에
+                      시작
+                    </strong>
+                    <small>
+                      각 lane의 첫 작업만 포함합니다. 뒤 슬롯은 자동으로
+                      시작하지 않습니다.
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void requestPortfolioApproval()}
+                    disabled={isPreparingPortfolio || isDispatching}
+                  >
+                    {isPreparingPortfolio ? (
+                      <>
+                        <RefreshCw className="is-spinning" size={13} />
+                        계약 묶는 중
+                      </>
+                    ) : (
+                      <>
+                        <MoonStar size={13} />
+                        오늘 밤 한 번에 맡기기
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
               <p className="schedule-method">{plan.schedule.methodology}</p>
             </section>
           )}
@@ -1360,6 +1526,125 @@ export function OvernightView() {
             </div>
           </section>
         </>
+      )}
+
+      {portfolioApproval && (
+        <div className="approval-backdrop" role="presentation">
+          <section
+            className="approval-dialog portfolio-approval-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="portfolio-approval-title"
+          >
+            <header>
+              <span className="approval-mark">
+                <MoonStar size={17} />
+              </span>
+              <div>
+                <span className="eyebrow">ONE NIGHT · ONE APPROVAL</span>
+                <h2 id="portfolio-approval-title">
+                  이 밤 포트폴리오를 시작할까요?
+                </h2>
+              </div>
+            </header>
+
+            <div className="portfolio-approval-list">
+              {portfolioApproval.items.map((item, index) => (
+                <article key={item.draft_id}>
+                  <span className="portfolio-item-order">{index + 1}</span>
+                  <ProviderMark provider={item.surface} />
+                  <div>
+                    <strong>{item.project}</strong>
+                    <small>{item.goal}</small>
+                    <em title={item.workspace}>
+                      {capacityPoolLabels[item.capacity_pool]} · 최대{" "}
+                      {item.time_budget_hours}시간 · {compactPath(item.workspace)}
+                    </em>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="approval-effects">
+              <p>
+                <Check size={12} />
+                표시된 프로젝트·제공자·작업공간만 시작
+              </p>
+              <p>
+                <Check size={12} />
+                서로 다른 구독 lane은 독립적으로 실행
+              </p>
+              <p>
+                <AlertTriangle size={12} />
+                프로젝트 파일이 바뀌고 연결된 구독이 사용될 수 있음
+              </p>
+              {portfolioApproval.deferred_count > 0 && (
+                <p>
+                  <Clock3 size={12} />
+                  뒤 슬롯 {portfolioApproval.deferred_count}개는 이번 승인에서 제외
+                </p>
+              )}
+            </div>
+
+            <label className="approval-phrase">
+              <span>
+                실행하려면{" "}
+                <code>{portfolioApproval.confirmation_phrase}</code> 입력
+              </span>
+              <input
+                autoFocus
+                value={confirmationPhrase}
+                onChange={(event) => {
+                  setConfirmationPhrase(event.target.value);
+                  setApprovalError(null);
+                }}
+                disabled={isDispatching}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+
+            <p className="approval-warning">{portfolioApproval.warning}</p>
+            {approvalError && (
+              <p className="approval-error" role="alert">
+                {approvalError}
+              </p>
+            )}
+
+            <footer>
+              <button
+                className="approval-cancel"
+                type="button"
+                onClick={() => void cancelApproval()}
+                disabled={isDispatching}
+              >
+                취소
+              </button>
+              <button
+                className="approval-confirm"
+                type="button"
+                onClick={() => void confirmAndDispatch()}
+                disabled={
+                  isDispatching ||
+                  confirmationPhrase !==
+                    portfolioApproval.confirmation_phrase
+                }
+              >
+                {isDispatching ? (
+                  <>
+                    <RefreshCw className="is-spinning" size={13} />
+                    각 계약 재확인 중
+                  </>
+                ) : (
+                  <>
+                    <MoonStar size={13} />
+                    승인하고 {portfolioApproval.items.length}개 시작
+                  </>
+                )}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
 
       {approval && (

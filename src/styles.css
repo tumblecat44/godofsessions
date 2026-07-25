@@ -2215,6 +2215,69 @@ button:active:not(:disabled) {
   line-height: 1.5;
 }
 
+.portfolio-handoff {
+  margin-top: 10px;
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background:
+    linear-gradient(90deg, rgba(228, 169, 74, 0.08), transparent 58%),
+    var(--console);
+  border: 1px solid rgba(228, 169, 74, 0.24);
+  border-radius: var(--radius-control);
+}
+
+.portfolio-handoff > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.portfolio-handoff span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--signal-teal);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.portfolio-handoff strong {
+  color: var(--ink-primary);
+  font-size: 10px;
+  font-weight: 590;
+}
+
+.portfolio-handoff small {
+  color: var(--ink-muted);
+  font-size: 8px;
+}
+
+.portfolio-handoff button {
+  min-height: 34px;
+  padding: 0 13px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #16120a;
+  background: var(--signal-amber);
+  border: 1px solid rgba(255, 202, 108, 0.56);
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 680;
+}
+
+.portfolio-handoff button:disabled {
+  color: var(--ink-muted);
+  background: var(--control-inset);
+  border-color: var(--etched-edge);
+}
+
 .candidate-stack {
   max-width: 1500px;
   margin: 16px auto 0;
@@ -3062,6 +3125,75 @@ button:active:not(:disabled) {
   white-space: nowrap;
 }
 
+.portfolio-approval-dialog {
+  width: min(600px, 100%);
+}
+
+.portfolio-approval-list {
+  max-height: min(300px, 38vh);
+  margin: 16px 20px 0;
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.portfolio-approval-list article {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 19px 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  background: var(--deck);
+  border: 1px solid var(--etched-edge);
+  border-radius: var(--radius-control);
+}
+
+.portfolio-item-order {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.08);
+  border: 1px solid rgba(228, 169, 74, 0.2);
+  border-radius: 50%;
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+}
+
+.portfolio-approval-list article > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.portfolio-approval-list strong {
+  color: var(--ink-primary);
+  font-size: 10px;
+  font-weight: 590;
+}
+
+.portfolio-approval-list small {
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-size: 8px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-approval-list em {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .approval-effects {
   margin: 12px 20px 0;
   display: grid;
@@ -3148,6 +3280,25 @@ button:active:not(:disabled) {
   background: rgba(228, 169, 74, 0.06);
   border: 1px solid rgba(228, 169, 74, 0.16);
   border-radius: var(--radius-control);
+}
+
+.portfolio-inline-result {
+  max-width: 1500px;
+  margin: 10px auto 0;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--signal-teal);
+  background: rgba(75, 194, 167, 0.05);
+  border: 1px solid rgba(75, 194, 167, 0.16);
+  border-radius: var(--radius-control);
+}
+
+.portfolio-inline-result p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 8px;
 }
 
 .approval-inline-error p {
@@ -4122,6 +4273,15 @@ button:active:not(:disabled) {
 
   .schedule-slot small {
     grid-column: 3;
+  }
+
+  .portfolio-handoff {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .portfolio-handoff button {
+    width: 100%;
   }
 
   .candidate-details {

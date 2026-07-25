@@ -16,7 +16,8 @@ use std::{collections::HashMap, sync::Mutex};
 use chrono::Utc;
 use model::{
     ApprovalChallenge, DispatchReceipt, NightRunDetail, NightRunHistory, OvernightPlan, Provider,
-    Session, Snapshot, StatusConfidence, WorkspaceOverview,
+    PortfolioApprovalChallenge, PortfolioDispatchOutcome, PortfolioDispatchResult, Session,
+    Snapshot, StatusConfidence, WorkspaceOverview,
 };
 use tauri::State;
 
@@ -64,7 +65,12 @@ async fn generate_overnight_plan(
     approvals
         .lock()
         .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .replace_plan(&plan.run_drafts, &plan.dispatch_preflights, Utc::now());
+        .replace_plan(
+            &plan.run_drafts,
+            &plan.dispatch_preflights,
+            &plan.schedule,
+            Utc::now(),
+        );
     Ok(plan)
 }
 
@@ -78,6 +84,17 @@ fn prepare_dispatch_approval(
         .lock()
         .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
         .begin(&draft_id, &idempotency_key, Utc::now())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn prepare_portfolio_approval(
+    approvals: State<'_, ApprovalState>,
+) -> Result<PortfolioApprovalChallenge, String> {
+    approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .begin_portfolio(Utc::now())
         .map_err(|error| error.to_string())
 }
 
@@ -153,6 +170,89 @@ async fn dispatch_approved_codex(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn dispatch_approved_portfolio(
+    approval_id: String,
+    idempotency_key: String,
+    confirmation_phrase: String,
+    approvals: State<'_, ApprovalState>,
+) -> Result<PortfolioDispatchResult, String> {
+    let approved = approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
+        .consume_portfolio(
+            &approval_id,
+            &idempotency_key,
+            &confirmation_phrase,
+            Utc::now(),
+        )
+        .map_err(|error| error.to_string())?;
+    let result_approval_id = approval_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let budgets = usage::load_budgets();
+        let routes = execution_routes::load(&budgets, Utc::now());
+        let mut outcomes = Vec::with_capacity(approved.len());
+        for item in approved {
+            let draft_id = item.draft.id.clone();
+            let project = item.draft.project.clone();
+            let surface = item.preflight.surface;
+            let result = routes
+                .routes
+                .iter()
+                .find(|route| route.id == item.draft.route_id && route.surface == surface)
+                .ok_or_else(|| {
+                    format!(
+                        "승인한 {} 실행 경로를 더 이상 찾지 못했습니다.",
+                        surface.as_str()
+                    )
+                })
+                .and_then(|route| match surface {
+                    Provider::Hermes => dispatch::execute_approved(item, route),
+                    Provider::Codex => codex_dispatch::execute_approved(item, route),
+                    _ => Err(format!(
+                        "{} 실행 어댑터는 아직 승인 실행을 지원하지 않습니다.",
+                        surface.as_str()
+                    )),
+                });
+            outcomes.push(match result {
+                Ok(receipt) => PortfolioDispatchOutcome {
+                    draft_id,
+                    project,
+                    surface,
+                    receipt: Some(receipt),
+                    error: None,
+                },
+                Err(error) => PortfolioDispatchOutcome {
+                    draft_id,
+                    project,
+                    surface,
+                    receipt: None,
+                    error: Some(error),
+                },
+            });
+        }
+        let receipt_count = outcomes
+            .iter()
+            .filter(|outcome| outcome.receipt.is_some())
+            .count();
+        let error_count = outcomes.len().saturating_sub(receipt_count);
+        PortfolioDispatchResult {
+            started_at: Utc::now().to_rfc3339(),
+            approval_id: result_approval_id,
+            message: if error_count == 0 {
+                format!("{receipt_count}개 작업의 공급자 영수증을 모두 확보했습니다.")
+            } else {
+                format!(
+                    "{receipt_count}개는 영수증을 확보했고 {error_count}개는 시작 전에 막혔습니다."
+                )
+            },
+            outcomes,
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -286,9 +386,11 @@ pub fn run() {
             load_night_run_detail,
             generate_overnight_plan,
             prepare_dispatch_approval,
+            prepare_portfolio_approval,
             cancel_dispatch_approval,
             dispatch_approved_hermes,
-            dispatch_approved_codex
+            dispatch_approved_codex,
+            dispatch_approved_portfolio
         ])
         .run(tauri::generate_context!())
         .expect("error while running God of Sessions");

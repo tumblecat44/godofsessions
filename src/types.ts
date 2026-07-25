@@ -270,6 +270,27 @@ export interface ApprovalChallenge {
   warning: string;
 }
 
+export interface PortfolioApprovalItem {
+  draft_id: string;
+  idempotency_key: string;
+  project: string;
+  goal: string;
+  workspace: string;
+  surface: Provider;
+  capacity_pool: CapacityPool;
+  time_budget_hours: number;
+}
+
+export interface PortfolioApprovalChallenge {
+  id: string;
+  idempotency_key: string;
+  items: PortfolioApprovalItem[];
+  deferred_count: number;
+  confirmation_phrase: string;
+  expires_at: string;
+  warning: string;
+}
+
 export type DispatchReceiptState =
   | "started"
   | "completed"
@@ -293,6 +314,21 @@ export interface DispatchReceipt {
   turn_id: string | null;
   idempotency_key: string;
   receipt_source: string;
+  message: string;
+}
+
+export interface PortfolioDispatchOutcome {
+  draft_id: string;
+  project: string;
+  surface: Provider;
+  receipt: DispatchReceipt | null;
+  error: string | null;
+}
+
+export interface PortfolioDispatchResult {
+  started_at: string;
+  approval_id: string;
+  outcomes: PortfolioDispatchOutcome[];
   message: string;
 }
 

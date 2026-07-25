@@ -373,6 +373,29 @@ pub struct ApprovalChallenge {
     pub warning: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PortfolioApprovalItem {
+    pub draft_id: String,
+    pub idempotency_key: String,
+    pub project: String,
+    pub goal: String,
+    pub workspace: String,
+    pub surface: Provider,
+    pub capacity_pool: CapacityPool,
+    pub time_budget_hours: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PortfolioApprovalChallenge {
+    pub id: String,
+    pub idempotency_key: String,
+    pub items: Vec<PortfolioApprovalItem>,
+    pub deferred_count: usize,
+    pub confirmation_phrase: String,
+    pub expires_at: String,
+    pub warning: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchReceiptState {
@@ -400,6 +423,23 @@ pub struct DispatchReceipt {
     pub turn_id: Option<String>,
     pub idempotency_key: String,
     pub receipt_source: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PortfolioDispatchOutcome {
+    pub draft_id: String,
+    pub project: String,
+    pub surface: Provider,
+    pub receipt: Option<DispatchReceipt>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PortfolioDispatchResult {
+    pub started_at: String,
+    pub approval_id: String,
+    pub outcomes: Vec<PortfolioDispatchOutcome>,
     pub message: String,
 }
 
