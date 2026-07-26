@@ -235,6 +235,8 @@ export const previewWorkspaceOverview: WorkspaceOverview = {
     running_sessions: 2,
     quiet_sessions: 6,
     needs_you_items: 1,
+    unresolved_sessions: 0,
+    warning_count: 0,
     state: "attention",
     focus: {
       work_item_id: "hermes-kanban:default:t_send",

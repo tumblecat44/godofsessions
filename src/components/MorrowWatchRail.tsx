@@ -11,7 +11,7 @@ interface MorrowWatchRailProps {
 const focusLabels: Record<WorkItemState, { ko: string; en: string }> = {
   needs_me: { ko: "지금 확인", en: "NEEDS YOU" },
   review: { ko: "검토할 결과", en: "READY TO REVIEW" },
-  ready: { ko: "오늘 밤 후보", en: "READY FOR TONIGHT" },
+  ready: { ko: "다음 후보", en: "NEXT CANDIDATE" },
   running: { ko: "진행 중", en: "IN PROGRESS" },
   waiting: { ko: "대기 중", en: "WAITING" },
 };
@@ -23,11 +23,31 @@ export function MorrowWatchRail({
 }: MorrowWatchRailProps) {
   const ko = language === "ko";
   const focus = watch.focus;
-  const focusLabel = focus
-    ? focusLabels[focus.state][language]
-    : ko
-      ? "모든 세션 정상"
-      : "ALL CLEAR";
+  const degraded = watch.state === "degraded";
+  const gapSummary = [
+    watch.unresolved_sessions > 0
+      ? ko
+        ? `${watch.unresolved_sessions}개 주의·오류 세션이 작업으로 연결되지 않았습니다.`
+        : `${watch.unresolved_sessions} attention or error sessions are not represented by Work Items.`
+      : null,
+    watch.warning_count > 0
+      ? ko
+        ? `${watch.warning_count}개 컨텍스트 소스 경고가 있습니다.`
+        : `${watch.warning_count} context source warnings need review.`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const focusLabel = degraded
+    ? ko
+      ? "근거 확인 필요"
+      : "EVIDENCE GAP"
+    : focus
+      ? focusLabels[focus.state][language]
+      : ko
+        ? "모든 세션 정상"
+        : "ALL CLEAR";
+  const detail = focus?.human_gate_reason ?? (degraded ? gapSummary : null);
 
   return (
     <section
@@ -35,7 +55,11 @@ export function MorrowWatchRail({
       aria-label={ko ? "Morrow 세션 관제 상태" : "Morrow session watch"}
     >
       <div className="morrow-watch__identity">
-        <OperatorMark size={26} active={watch.state === "attention"} />
+        <OperatorMark
+          className="morrow-watch__mark"
+          size={26}
+          active={watch.state === "attention"}
+        />
         <span>
           <strong>MORROW WATCH</strong>
           <small>
@@ -75,12 +99,15 @@ export function MorrowWatchRail({
               <strong>{focus.project}</strong>
               <span>{focus.title}</span>
             </p>
-            {focus.human_gate_reason && (
-              <small title={focus.human_gate_reason}>
-                {focus.human_gate_reason}
-              </small>
-            )}
+            {detail && <small title={detail}>{detail}</small>}
           </>
+        ) : degraded ? (
+          <p>
+            <strong>
+              {ko ? "관제 근거를 확인해 주세요" : "Check watch evidence"}
+            </strong>
+            <span>{gapSummary}</span>
+          </p>
         ) : (
           <p>
             <strong>{ko ? "Morrow가 지켜보는 중" : "Morrow is on watch"}</strong>

@@ -56,8 +56,12 @@ Control Board Work Item rather than becoming another task system.
 
 - Say whether a number counts Sessions or Work Items.
 - Rank human attention before review, ready, and running work.
+- Never call the Watch clear while a Context Source warning or an unrepresented
+  error/attention Session remains. Show an evidence-gap state instead.
 - Name both Project and Work Item; expose the Human Gate reason when present.
 - The rail navigates to the Control Board and never dispatches work.
+- Keep generic Control Board `ready` neutral. Teal requires separately verified
+  route feasibility, not merely an idle, failed, or unknown Session.
 - Reflow the rail into two rows on narrow screens; do not turn counts into
   floating metric cards.
 

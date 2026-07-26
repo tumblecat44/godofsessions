@@ -852,6 +852,7 @@ pub struct ControlBoard {
 #[serde(rename_all = "snake_case")]
 pub enum MorrowWatchState {
     Attention,
+    Degraded,
     Review,
     Ready,
     Watching,
@@ -873,6 +874,8 @@ pub struct MorrowWatch {
     pub running_sessions: usize,
     pub quiet_sessions: usize,
     pub needs_you_items: usize,
+    pub unresolved_sessions: usize,
+    pub warning_count: usize,
     pub state: MorrowWatchState,
     pub focus: Option<MorrowWatchFocus>,
     pub read_only: bool,

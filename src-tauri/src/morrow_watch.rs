@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use crate::model::{
     ControlBoard, MorrowWatch, MorrowWatchFocus, MorrowWatchState, SessionStatus, Snapshot,
@@ -29,6 +30,24 @@ pub(crate) fn build(snapshot: &Snapshot, board: &ControlBoard) -> MorrowWatch {
         .iter()
         .filter(|item| item.state == WorkItemState::NeedsMe)
         .count();
+    let accounted_session_ids = board
+        .items
+        .iter()
+        .flat_map(|item| item.session_ids.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    let unresolved_sessions = observed
+        .iter()
+        .filter(|session| {
+            matches!(
+                session.status,
+                SessionStatus::Waiting
+                    | SessionStatus::NeedsInput
+                    | SessionStatus::Blocked
+                    | SessionStatus::Failed
+            ) && !accounted_session_ids.contains(session.id.as_str())
+        })
+        .count();
+    let warning_count = board.warnings.len();
     let focus = board
         .items
         .iter()
@@ -43,6 +62,7 @@ pub(crate) fn build(snapshot: &Snapshot, board: &ControlBoard) -> MorrowWatch {
         });
     let state = match focus.as_ref().map(|focus| focus.state) {
         Some(WorkItemState::NeedsMe) => MorrowWatchState::Attention,
+        _ if unresolved_sessions > 0 || warning_count > 0 => MorrowWatchState::Degraded,
         Some(WorkItemState::Review) => MorrowWatchState::Review,
         Some(WorkItemState::Ready) => MorrowWatchState::Ready,
         Some(WorkItemState::Running) => MorrowWatchState::Watching,
@@ -55,10 +75,12 @@ pub(crate) fn build(snapshot: &Snapshot, board: &ControlBoard) -> MorrowWatch {
         running_sessions,
         quiet_sessions,
         needs_you_items,
+        unresolved_sessions,
+        warning_count,
         state,
         focus,
         read_only: true,
-        methodology: "Counts non-archived provider sessions and ranks existing Control Board Work Items without mutating either source."
+        methodology: "Counts non-archived provider sessions, reports unresolved error or attention sessions and source warnings, and ranks existing Control Board Work Items without mutating either source."
             .to_owned(),
     }
 }
@@ -329,5 +351,32 @@ mod tests {
         assert_eq!(watch.state, crate::model::MorrowWatchState::Clear);
         assert!(watch.focus.is_none());
         assert_eq!(watch.quiet_sessions, 2);
+    }
+
+    #[test]
+    fn watch_degrades_when_an_error_session_has_no_work_item() {
+        let snapshot = snapshot(vec![session("failed", SessionStatus::Failed, false)]);
+
+        let watch = build(&snapshot, &board(vec![]));
+
+        assert_eq!(watch.state, crate::model::MorrowWatchState::Degraded);
+        assert_eq!(watch.unresolved_sessions, 1);
+        assert_eq!(watch.warning_count, 0);
+        assert!(watch.focus.is_none());
+    }
+
+    #[test]
+    fn watch_degrades_when_a_context_source_reports_a_warning() {
+        let snapshot = snapshot(vec![session("idle", SessionStatus::Idle, false)]);
+        let mut board = board(vec![]);
+        board
+            .warnings
+            .push("Cursor source could not be read".to_owned());
+
+        let watch = build(&snapshot, &board);
+
+        assert_eq!(watch.state, crate::model::MorrowWatchState::Degraded);
+        assert_eq!(watch.unresolved_sessions, 0);
+        assert_eq!(watch.warning_count, 1);
     }
 }

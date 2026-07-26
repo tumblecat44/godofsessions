@@ -7034,6 +7034,16 @@ button:active:not(:disabled) {
   gap: 9px;
 }
 
+.morrow-watch .morrow-watch__mark .operator-mark__signal,
+.morrow-watch .morrow-watch__mark .operator-mark__caret {
+  stroke: var(--ink-muted);
+}
+
+.morrow-watch--attention .morrow-watch__mark .operator-mark__signal,
+.morrow-watch--attention .morrow-watch__mark .operator-mark__caret {
+  stroke: var(--signal-amber);
+}
+
 .morrow-watch__identity > span {
   min-width: 0;
   display: flex;
@@ -7058,7 +7068,7 @@ button:active:not(:disabled) {
 .morrow-watch__identity small {
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: 6px;
+  font-size: 7px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -7096,7 +7106,7 @@ button:active:not(:disabled) {
 
 .morrow-watch__telemetry small {
   color: var(--ink-muted);
-  font-size: 5px;
+  font-size: 7px;
   letter-spacing: 0.045em;
   white-space: nowrap;
 }
@@ -7118,7 +7128,7 @@ button:active:not(:disabled) {
   align-items: center;
   gap: 6px;
   color: var(--ink-muted);
-  font-size: 6px;
+  font-size: 7px;
   font-weight: 650;
   letter-spacing: 0.07em;
 }
@@ -7138,14 +7148,6 @@ button:active:not(:disabled) {
 .morrow-watch--attention .morrow-watch__state i {
   background: var(--signal-amber);
   box-shadow: 0 0 8px rgba(231, 168, 77, 0.48);
-}
-
-.morrow-watch--ready .morrow-watch__state {
-  color: var(--signal-teal);
-}
-
-.morrow-watch--ready .morrow-watch__state i {
-  background: var(--signal-teal);
 }
 
 .morrow-watch__focus p {
@@ -7222,7 +7224,7 @@ button:active:not(:disabled) {
   padding: 26px 0 30px;
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(390px, 1.1fr);
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: 1fr auto;
   align-items: center;
   column-gap: 64px;
 }
@@ -7232,7 +7234,7 @@ button:active:not(:disabled) {
   aspect-ratio: 1;
   display: grid;
   place-items: center;
-  grid-row: 1 / span 3;
+  grid-row: 1 / span 2;
   justify-self: end;
   position: relative;
 }
@@ -7327,41 +7329,6 @@ button:active:not(:disabled) {
   color: var(--ink-secondary);
   font-size: 13px;
   font-weight: 570;
-}
-
-.operator-telemetry {
-  margin-top: 26px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--etched-edge-soft);
-  border-bottom: 1px solid var(--etched-edge-soft);
-}
-
-.operator-telemetry span {
-  padding: 11px 10px 10px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  color: var(--ink-muted);
-  border-right: 1px solid var(--etched-edge-soft);
-  font-family: "JetBrains Mono Variable", monospace;
-  font-size: 7px;
-  letter-spacing: 0.06em;
-}
-
-.operator-telemetry span + span {
-  padding-left: 12px;
-}
-
-.operator-telemetry span:last-child {
-  border-right: 0;
-}
-
-.operator-telemetry strong {
-  color: var(--ink-secondary);
-  font-size: 13px;
-  font-weight: 560;
-  letter-spacing: -0.02em;
 }
 
 .chat-suggestions {
@@ -8099,12 +8066,6 @@ button:active:not(:disabled) {
     display: none;
   }
 
-  .operator-telemetry {
-    width: 100%;
-    margin-top: 18px;
-    text-align: left;
-  }
-
   .chat-suggestions {
     width: 100%;
     margin-top: 12px;
@@ -8190,14 +8151,23 @@ button:active:not(:disabled) {
     gap: 8px;
   }
 
-  .morrow-watch__identity small,
-  .morrow-watch__focus > small {
+  .morrow-watch__identity small {
     display: none;
   }
 
   .morrow-watch__focus {
     grid-template-columns: 68px minmax(0, 1fr);
     column-gap: 6px;
+  }
+
+  .morrow-watch__focus > small {
+    margin-top: 5px;
+    grid-column: 1 / -1;
+    overflow: visible;
+    font-size: 8px;
+    line-height: 1.35;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .morrow-watch > button {
@@ -8214,10 +8184,6 @@ button:active:not(:disabled) {
 
   .operator-welcome h2 {
     font-size: 29px;
-  }
-
-  .operator-telemetry span {
-    font-size: 6px;
   }
 
   .chat-suggestions button {

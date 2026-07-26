@@ -701,6 +701,7 @@ export interface ControlBoard {
 
 export type MorrowWatchState =
   | "attention"
+  | "degraded"
   | "review"
   | "ready"
   | "watching"
@@ -719,6 +720,8 @@ export interface MorrowWatch {
   running_sessions: number;
   quiet_sessions: number;
   needs_you_items: number;
+  unresolved_sessions: number;
+  warning_count: number;
   state: MorrowWatchState;
   focus: MorrowWatchFocus | null;
   read_only: boolean;

@@ -65,7 +65,9 @@ Public promise:
    - non-archived sessions currently `running`;
    - Work Items in `needs_me`;
    - non-archived sessions that are neither active nor in an error or
-     attention state as quiet.
+     attention state as quiet;
+   - error or attention Sessions not represented by a Work Item;
+   - Context Source warnings that prevent an all-clear claim.
 2. The focus rule is deterministic:
    `needs_me` → `review` → `ready` → `running`.
 3. Inside the same state, an explicit lower numeric priority wins; remaining
@@ -75,7 +77,8 @@ Public promise:
 5. The strip distinguishes the abstractions in its labels: running and quiet
    are session counts; needs-you is a Work Item count.
 6. The only amber status lamp is the next item needing human attention. Teal
-   is reserved for verified readiness. Other status marks stay bone/gray.
+   is reserved for separately verified route readiness; generic Control Board
+   `ready` remains neutral. Other status marks stay bone/gray.
 7. The focus action navigates to the existing Control Board. It never dispatches
    work from chat.
 8. Korean and English copy expose the same facts and action.
@@ -103,16 +106,20 @@ Public promise:
   `running_conversation_rejects_configuration_change_without_mutation`, and
   `missing_conversation_configuration_returns_an_explicit_error` cover the
   local-store boundary.
-- The four `morrow_watch::tests` fixtures cover counts, focus state and priority
-  order, RFC 3339 instant order across timezones, and the clear state.
-- `npm run build` passes, and the full Rust suite passes with 167 tests passed,
+- The six `morrow_watch::tests` fixtures cover counts, focus state and priority
+  order, RFC 3339 instant order across timezones, the clear state, unrepresented
+  error Sessions, and Context Source warnings.
+- `npm run build` passes, and the full Rust suite passes with 169 tests passed,
   zero failed, and 13 live tests intentionally ignored.
-- In the debug macOS bundle, `Sol → Terra` produced the next-message notice,
+- Manual native verification on 2026-07-25 (not an automated CI artifact):
+  in the debug macOS bundle, `Sol → Terra` produced the next-message notice,
   survived a Control Board round trip, and survived a full app restart. Watch
   showed three running Sessions and two needs-you Work Items while the Control
   Board independently showed two Human Gate items.
-- A real native turn disabled both selectors during streaming. The final lock
+- In the same manual run, a real native turn disabled both selectors during
+  streaming. The final lock
   copy and disabled state were also asserted in the rendered UI:
   `모델 설정 잠김 — 답변을 생성하는 동안에는 바꿀 수 없습니다.`
-- Visual renders at 900 px and 620 px kept the Watch focus, telemetry, chat
-  content, and composer readable without horizontal clipping.
+- Manual visual renders at 900 px and 620 px kept the Watch focus, exact Human
+  Gate reason, telemetry, chat content, and composer readable without
+  horizontal clipping.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import {
   ArrowRight,
@@ -304,29 +304,31 @@ export function ChatView({
   const currentProvider =
     providers.find((option) => option.provider === provider) ??
     unavailableProviders.find((option) => option.provider === provider)!;
+  const configuredModel = models.find((option) => option.id === model);
   const selectedModel =
-    models.find((option) => option.id === model) ??
+    configuredModel ??
     models.find((option) => option.is_default) ??
     models[0];
   const efforts = selectedModel?.supported_efforts ?? [];
+  const modelOptionsReady =
+    modelsProvider === provider && models.length > 0;
   const modelReady = Boolean(
-    modelsProvider === provider && selectedModel && model,
+    modelOptionsReady &&
+      configuredModel &&
+      (configuredModel.supported_efforts.length === 0
+        ? effort === null
+        : effort && configuredModel.supported_efforts.includes(effort)),
   );
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId,
   );
   const activeTurnRunning = activeSession?.status === "running";
   const configurationLocked = sending || Boolean(activeTurnRunning);
-  const activeSessions = useMemo(
-    () => overview.snapshot.sessions.filter((session) => !session.archived).length,
-    [overview],
-  );
-  const humanTurns = useMemo(
-    () =>
-      overview.control_board.items.filter((item) => item.human_gate !== null)
-        .length,
-    [overview],
-  );
+  const activeSessionIdRef = useRef(activeSessionId);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   const loadConversation = useCallback(
     async (sessionId: string) => {
@@ -559,12 +561,14 @@ export function ChatView({
     nextEffort: string | null,
     successMessage?: string,
   ) {
+    if (savingConfiguration || configurationLocked) return;
     const previousModel = model;
     const previousEffort = effort;
+    const targetSessionId = activeSessionId;
     setModel(nextModel);
     setEffort(nextEffort);
 
-    if (!isTauri() || !activeSessionId) {
+    if (!isTauri() || !targetSessionId) {
       rememberModel(nextModel, nextEffort);
       setConfigNotice({
         kind: successMessage ? "info" : "success",
@@ -586,7 +590,7 @@ export function ChatView({
       const updated = await invoke<OperatorChatSession>(
         "update_operator_chat_configuration",
         {
-          sessionId: activeSessionId,
+          sessionId: targetSessionId,
           model: nextModel,
           effort: nextEffort,
         },
@@ -595,36 +599,40 @@ export function ChatView({
         updated,
         ...current.filter((session) => session.id !== updated.id),
       ]);
-      setModel(updated.model);
-      setEffort(updated.effort);
       rememberModel(updated.model, updated.effort);
-      setConfigNotice({
-        kind: successMessage ? "info" : "success",
-        message:
-          successMessage ??
-          configurationMessage(updated.model, updated.effort, false),
-      });
+      if (activeSessionIdRef.current === targetSessionId) {
+        setModel(updated.model);
+        setEffort(updated.effort);
+        setConfigNotice({
+          kind: successMessage ? "info" : "success",
+          message:
+            successMessage ??
+            configurationMessage(updated.model, updated.effort, false),
+        });
+      }
     } catch (error) {
-      setModel(previousModel);
-      setEffort(previousEffort);
-      setConfigNotice({
-        kind: "error",
-        message:
-          typeof error === "string"
-            ? error
-            : error instanceof Error
-              ? error.message
-              : ko
-                ? "대화 모델 설정을 저장하지 못했습니다."
-                : "The conversation model settings could not be saved.",
-      });
+      if (activeSessionIdRef.current === targetSessionId) {
+        setModel(previousModel);
+        setEffort(previousEffort);
+        setConfigNotice({
+          kind: "error",
+          message:
+            typeof error === "string"
+              ? error
+              : error instanceof Error
+                ? error.message
+                : ko
+                  ? "대화 모델 설정을 저장하지 못했습니다."
+                  : "The conversation model settings could not be saved.",
+        });
+      }
     } finally {
       setSavingConfiguration(false);
     }
   }
 
   function startNewConversation() {
-    if (sending) return;
+    if (sending || savingConfiguration) return;
     setActiveSessionId(null);
     localStorage.removeItem(ACTIVE_CHAT_KEY);
     setEntries([]);
@@ -782,6 +790,7 @@ export function ChatView({
     if (
       !content ||
       sending ||
+      savingConfiguration ||
       activeTurnRunning ||
       !currentProvider.available ||
       !modelReady
@@ -873,7 +882,7 @@ export function ChatView({
           <button
             type="button"
             onClick={startNewConversation}
-            disabled={sending}
+            disabled={sending || savingConfiguration}
             aria-label={ko ? "새 대화" : "New conversation"}
           >
             <Plus size={14} />
@@ -883,7 +892,7 @@ export function ChatView({
           type="button"
           className={`chat-history__new ${activeSessionId === null ? "is-active" : ""}`}
           onClick={startNewConversation}
-          disabled={sending}
+          disabled={sending || savingConfiguration}
         >
           <MessageSquare size={14} />
           {ko ? "새 대화" : "New conversation"}
@@ -894,7 +903,7 @@ export function ChatView({
               type="button"
               className={session.id === activeSessionId ? "is-active" : ""}
               key={session.id}
-              disabled={sending || loadingSession}
+              disabled={sending || savingConfiguration || loadingSession}
               onClick={() => void loadConversation(session.id)}
             >
               <span>
@@ -982,24 +991,13 @@ export function ChatView({
                   </span>
                 </p>
               </div>
-              <div className="operator-telemetry">
-                <span>
-                  <strong>{activeSessions}</strong>ACTIVE SESSIONS
-                </span>
-                <span>
-                  <strong>{overview.context_index.projects.length}</strong>TODAY
-                  CONTEXTS
-                </span>
-                <span>
-                  <strong>{humanTurns}</strong>HUMAN TURNS
-                </span>
-              </div>
               <div className="chat-suggestions">
                 {suggestions[preferences.language].map((suggestion) => (
                   <button
                     type="button"
                     key={suggestion}
                     onClick={() => void sendMessage(suggestion)}
+                    disabled={sending || savingConfiguration || !modelReady}
                   >
                     <Sparkles size={13} />
                     {suggestion}
@@ -1191,7 +1189,7 @@ export function ChatView({
               </button>
             </div>
           )}
-          {currentProvider.available && !modelReady && (
+          {currentProvider.available && !modelOptionsReady && (
             <div className="chat-provider-needed">
               <Settings2 size={14} />
               <span>
@@ -1250,6 +1248,7 @@ export function ChatView({
               disabled={
                 !draft.trim() ||
                 sending ||
+                savingConfiguration ||
                 activeTurnRunning ||
                 !modelReady ||
                 !currentProvider.available
