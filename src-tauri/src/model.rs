@@ -850,6 +850,37 @@ pub struct ControlBoard {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum MorrowWatchState {
+    Attention,
+    Review,
+    Ready,
+    Watching,
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MorrowWatchFocus {
+    pub work_item_id: String,
+    pub state: WorkItemState,
+    pub project: String,
+    pub title: String,
+    pub human_gate_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MorrowWatch {
+    pub observed_sessions: usize,
+    pub running_sessions: usize,
+    pub quiet_sessions: usize,
+    pub needs_you_items: usize,
+    pub state: MorrowWatchState,
+    pub focus: Option<MorrowWatchFocus>,
+    pub read_only: bool,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContextRole {
     User,
     Assistant,
@@ -890,6 +921,7 @@ pub struct WorkspaceOverview {
     pub snapshot: Snapshot,
     pub control_board: ControlBoard,
     pub context_index: ContextIndex,
+    pub morrow_watch: MorrowWatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

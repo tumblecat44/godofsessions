@@ -10,6 +10,9 @@ flow.
 The interface should feel like one competent operator is keeping watch — never
 like a generic analytics dashboard or a playful chatbot.
 
+Public promise: **Every session. One clear next move.** /
+**흩어진 모든 세션에서, 지금 할 일 하나.**
+
 ## Visual world
 
 - **Physical metaphor:** an ink-metal night console with bone-paper reports.
@@ -44,6 +47,19 @@ Any mutation must cross the existing preview and approval surface.
 - `--signal-red` `#d67869`: blocked, destructive, or failed.
 
 Amber is a status lamp, not decoration. Teal means verified readiness.
+
+## Morrow Watch
+
+The chat's compact Watch rail is the signature control-plane pattern. It may
+show session telemetry, but it must resolve that telemetry into one existing
+Control Board Work Item rather than becoming another task system.
+
+- Say whether a number counts Sessions or Work Items.
+- Rank human attention before review, ready, and running work.
+- Name both Project and Work Item; expose the Human Gate reason when present.
+- The rail navigates to the Control Board and never dispatches work.
+- Reflow the rail into two rows on narrow screens; do not turn counts into
+  floating metric cards.
 
 ## Depth and surfaces
 

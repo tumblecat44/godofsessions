@@ -230,6 +230,24 @@ export const previewControlBoard: ControlBoard = {
 export const previewWorkspaceOverview: WorkspaceOverview = {
   snapshot: previewSnapshot,
   control_board: previewControlBoard,
+  morrow_watch: {
+    observed_sessions: 12,
+    running_sessions: 2,
+    quiet_sessions: 6,
+    needs_you_items: 1,
+    state: "attention",
+    focus: {
+      work_item_id: "hermes-kanban:default:t_send",
+      state: "needs_me",
+      project: "default",
+      title: "설문 폼을 멘토에게 보내기",
+      human_gate_reason:
+        "외부 전송·배포·삭제·결제 가능성이 있어 unattended 실행 전에 확인해야 합니다.",
+    },
+    read_only: true,
+    methodology:
+      "Preview of non-archived session counts and the existing Control Board focus.",
+  },
   context_index: {
     generated_at: new Date().toISOString(),
     window_hours: 24,

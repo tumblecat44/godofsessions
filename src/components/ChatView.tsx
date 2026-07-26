@@ -30,6 +30,7 @@ import type {
   WorkspaceOverview,
   WorkspaceView,
 } from "../types";
+import { MorrowWatchRail } from "./MorrowWatchRail";
 import { OperatorMark } from "./OperatorMark";
 
 const ACTIVE_CHAT_KEY = "morrow.active-chat.v1";
@@ -50,6 +51,11 @@ interface ConversationEntry {
   suggestedView?: WorkspaceView | null;
   reasoning?: string;
   error?: boolean;
+}
+
+interface ChatConfigNotice {
+  kind: "saving" | "success" | "info" | "error";
+  message: string;
 }
 
 const previewProviders: ChatProviderOption[] = [
@@ -258,12 +264,18 @@ export function ChatView({
   const [providers, setProviders] = useState<ChatProviderOption[]>(() =>
     isTauri() ? unavailableProviders : previewProviders,
   );
+  const [checkingProviders, setCheckingProviders] = useState(false);
   const [provider, setProvider] = useState<ChatProvider>(
     preferences.default_chat_provider,
   );
   const [models, setModels] = useState<ChatModelOption[]>(() =>
     isTauri() ? [] : previewModels[preferences.default_chat_provider],
   );
+  const [modelsProvider, setModelsProvider] = useState<ChatProvider | null>(
+    isTauri() ? null : preferences.default_chat_provider,
+  );
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelRefreshNonce, setModelRefreshNonce] = useState(0);
   const [model, setModel] = useState<string | null>(
     preferences.default_chat_models[preferences.default_chat_provider] ?? null,
   );
@@ -277,6 +289,10 @@ export function ChatView({
   const [sending, setSending] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
   const [chatStorageError, setChatStorageError] = useState<string | null>(null);
+  const [savingConfiguration, setSavingConfiguration] = useState(false);
+  const [configNotice, setConfigNotice] = useState<ChatConfigNotice | null>(
+    null,
+  );
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [overnightMode, setOvernightMode] = useState(false);
   const [sleepHours, setSleepHours] = useState(
@@ -293,11 +309,14 @@ export function ChatView({
     models.find((option) => option.is_default) ??
     models[0];
   const efforts = selectedModel?.supported_efforts ?? [];
-  const modelReady = Boolean(selectedModel && model);
+  const modelReady = Boolean(
+    modelsProvider === provider && selectedModel && model,
+  );
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId,
   );
   const activeTurnRunning = activeSession?.status === "running";
+  const configurationLocked = sending || Boolean(activeTurnRunning);
   const activeSessions = useMemo(
     () => overview.snapshot.sessions.filter((session) => !session.archived).length,
     [overview],
@@ -324,6 +343,7 @@ export function ChatView({
         setModel(conversation.session.model);
         setEffort(conversation.session.effort);
         setEntries(entriesFromConversation(conversation));
+        setConfigNotice(null);
         setChatStorageError(null);
       } catch (error) {
         setChatStorageError(
@@ -354,11 +374,26 @@ export function ChatView({
     }
   }, [loadConversation]);
 
+  async function refreshProviderOptions() {
+    if (!isTauri()) {
+      setProviders(previewProviders);
+      return;
+    }
+    setCheckingProviders(true);
+    try {
+      setProviders(
+        await invoke<ChatProviderOption[]>("load_chat_providers"),
+      );
+    } catch {
+      setProviders(unavailableProviders);
+    } finally {
+      setCheckingProviders(false);
+    }
+  }
+
   useEffect(() => {
     if (!isTauri()) return;
-    void invoke<ChatProviderOption[]>("load_chat_providers")
-      .then(setProviders)
-      .catch(() => setProviders(unavailableProviders));
+    void refreshProviderOptions();
     void refreshSessions().catch((error) => {
       setChatStorageError(
         typeof error === "string"
@@ -375,34 +410,85 @@ export function ChatView({
     const fallback = previewModels[provider];
     if (!isTauri()) {
       setModels(fallback);
+      setModelsProvider(provider);
+      setLoadingModels(false);
+      return;
+    }
+    if (!currentProvider.available) {
+      setModels([]);
+      setModelsProvider(null);
+      setLoadingModels(false);
       return;
     }
     setModels([]);
+    setModelsProvider(null);
+    setLoadingModels(true);
     invoke<ChatModelOption[]>("load_chat_models", { provider })
       .then((options) => {
-        if (!cancelled) setModels(options);
+        if (!cancelled) {
+          setModels(options);
+          setModelsProvider(provider);
+          setLoadingModels(false);
+        }
       })
       .catch(() => {
         if (!cancelled) {
           setModels([]);
-          setModel(null);
-          setEffort(null);
+          setModelsProvider(null);
+          setLoadingModels(false);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [provider]);
+  }, [currentProvider.available, modelRefreshNonce, provider]);
 
   useEffect(() => {
-    if (!selectedModel) return;
-    if (!model || !models.some((option) => option.id === model)) {
-      setModel(selectedModel.id);
-    }
-    if (!effort || !selectedModel.supported_efforts.includes(effort)) {
-      setEffort(selectedModel.default_effort ?? selectedModel.supported_efforts[0] ?? null);
-    }
-  }, [effort, model, models, selectedModel]);
+    if (
+      modelsProvider !== provider ||
+      !selectedModel ||
+      savingConfiguration
+    )
+      return;
+    const storedModelUnavailable = Boolean(
+      model && !models.some((option) => option.id === model),
+    );
+    const nextModel = storedModelUnavailable || !model ? selectedModel.id : model;
+    const nextModelOption =
+      models.find((option) => option.id === nextModel) ?? selectedModel;
+    const storedEffortUnavailable = Boolean(
+      effort && !nextModelOption.supported_efforts.includes(effort),
+    );
+    const nextEffort =
+      storedEffortUnavailable || !effort
+        ? nextModelOption.default_effort ??
+          nextModelOption.supported_efforts[0] ??
+          null
+        : effort;
+    if (nextModel === model && nextEffort === effort) return;
+
+    const unavailableValue = storedModelUnavailable ? model : effort;
+    const reason = storedModelUnavailable
+      ? ko
+        ? `이전에 사용하던 ${unavailableValue} 모델은 더 이상 선택할 수 없어 ${nextModelOption.display_name}(으)로 바꿨습니다.`
+        : `${unavailableValue} is no longer available. This conversation now uses ${nextModelOption.display_name}.`
+      : storedEffortUnavailable
+        ? ko
+          ? `이전에 사용하던 ${unavailableValue} effort를 지원하지 않아 ${nextEffort ?? "기본값"}(으)로 바꿨습니다.`
+          : `${unavailableValue} effort is not supported. This conversation now uses ${nextEffort ?? "the provider default"}.`
+        : undefined;
+    void changeConfiguration(nextModel, nextEffort, reason);
+  }, [
+    activeSessionId,
+    effort,
+    ko,
+    model,
+    models,
+    modelsProvider,
+    provider,
+    savingConfiguration,
+    selectedModel,
+  ]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -446,6 +532,97 @@ export function ChatView({
     });
   }
 
+  function configurationMessage(
+    nextModel: string | null,
+    nextEffort: string | null,
+    newConversation: boolean,
+  ) {
+    const displayName =
+      models.find((option) => option.id === nextModel)?.display_name ??
+      nextModel ??
+      (ko ? "공급자 기본 모델" : "the provider default");
+    const selection = nextEffort
+      ? `${displayName} · ${nextEffort}`
+      : displayName;
+    if (newConversation) {
+      return ko
+        ? `새 대화의 기본값을 ${selection}(으)로 저장했습니다.`
+        : `New conversations will use ${selection}.`;
+    }
+    return ko
+      ? `다음 메시지부터 ${selection}을 사용합니다.`
+      : `The next message will use ${selection}.`;
+  }
+
+  async function changeConfiguration(
+    nextModel: string | null,
+    nextEffort: string | null,
+    successMessage?: string,
+  ) {
+    const previousModel = model;
+    const previousEffort = effort;
+    setModel(nextModel);
+    setEffort(nextEffort);
+
+    if (!isTauri() || !activeSessionId) {
+      rememberModel(nextModel, nextEffort);
+      setConfigNotice({
+        kind: successMessage ? "info" : "success",
+        message:
+          successMessage ??
+          configurationMessage(nextModel, nextEffort, true),
+      });
+      return;
+    }
+
+    setSavingConfiguration(true);
+    setConfigNotice({
+      kind: "saving",
+      message: ko
+        ? "현재 대화의 모델 설정을 저장하는 중입니다."
+        : "Saving this conversation's model settings.",
+    });
+    try {
+      const updated = await invoke<OperatorChatSession>(
+        "update_operator_chat_configuration",
+        {
+          sessionId: activeSessionId,
+          model: nextModel,
+          effort: nextEffort,
+        },
+      );
+      setSessions((current) => [
+        updated,
+        ...current.filter((session) => session.id !== updated.id),
+      ]);
+      setModel(updated.model);
+      setEffort(updated.effort);
+      rememberModel(updated.model, updated.effort);
+      setConfigNotice({
+        kind: successMessage ? "info" : "success",
+        message:
+          successMessage ??
+          configurationMessage(updated.model, updated.effort, false),
+      });
+    } catch (error) {
+      setModel(previousModel);
+      setEffort(previousEffort);
+      setConfigNotice({
+        kind: "error",
+        message:
+          typeof error === "string"
+            ? error
+            : error instanceof Error
+              ? error.message
+              : ko
+                ? "대화 모델 설정을 저장하지 못했습니다."
+                : "The conversation model settings could not be saved.",
+      });
+    } finally {
+      setSavingConfiguration(false);
+    }
+  }
+
   function startNewConversation() {
     if (sending) return;
     setActiveSessionId(null);
@@ -455,6 +632,7 @@ export function ChatView({
     setProvider(nextProvider);
     setModel(preferences.default_chat_models[nextProvider] ?? null);
     setEffort(preferences.default_chat_efforts[nextProvider] ?? null);
+    setConfigNotice(null);
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
@@ -470,6 +648,13 @@ export function ChatView({
     }
     if (event.event === "turn_started") {
       const streamId = `stream:${event.turn_id}`;
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === event.session_id
+            ? { ...session, status: "running" }
+            : session,
+        ),
+      );
       setEntries((current) =>
         current.some((entry) => entry.id === streamId)
           ? current
@@ -751,6 +936,12 @@ export function ChatView({
           </div>
         </header>
 
+        <MorrowWatchRail
+          watch={overview.morrow_watch}
+          language={preferences.language}
+          onOpenBoard={() => onNavigate("board")}
+        />
+
         <div className="chat-scroll" ref={scrollRef}>
           {entries.length === 0 ? (
             <section className="operator-welcome">
@@ -779,9 +970,16 @@ export function ChatView({
                   )}
                 </h2>
                 <p>
-                  {ko
-                    ? "편하게 질문하거나, 흩어진 세션과 오늘의 문맥을 함께 읽어 달라고 하세요."
-                    : "Ask anything, or have Morrow inspect fragmented sessions and today's context."}
+                  <strong>
+                    {ko
+                      ? "흩어진 모든 세션에서, 지금 할 일 하나."
+                      : "Every session. One clear next move."}
+                  </strong>
+                  <span>
+                    {ko
+                      ? "편하게 질문하거나, 흩어진 세션과 오늘의 문맥을 함께 읽어 달라고 하세요."
+                      : "Ask anything, or have Morrow inspect fragmented sessions and today's context."}
+                  </span>
                 </p>
               </div>
               <div className="operator-telemetry">
@@ -903,6 +1101,49 @@ export function ChatView({
         </div>
 
         <footer className="chat-dock">
+          {(configurationLocked || configNotice) && (
+            <div
+              id="chat-config-status"
+              className={`chat-config-status ${
+                configurationLocked
+                  ? "is-locked"
+                  : `is-${configNotice?.kind ?? "info"}`
+              }`}
+              role={configNotice?.kind === "error" ? "alert" : "status"}
+              aria-live={configNotice?.kind === "error" ? "assertive" : "polite"}
+            >
+              <OperatorMark
+                size={18}
+                active={savingConfiguration || configurationLocked}
+              />
+              <span>
+                <strong>
+                  {configurationLocked
+                    ? ko
+                      ? "모델 설정 잠김"
+                      : "Model settings locked"
+                    : configNotice?.kind === "saving"
+                      ? ko
+                        ? "설정 저장 중"
+                        : "Saving settings"
+                      : configNotice?.kind === "error"
+                        ? ko
+                          ? "모델 설정을 바꾸지 못했습니다"
+                          : "Model settings were not changed"
+                        : ko
+                          ? "모델 설정"
+                          : "Model settings"}
+                </strong>
+                <small>
+                  {configurationLocked
+                    ? ko
+                      ? "답변을 생성하는 동안에는 바꿀 수 없습니다. 완료된 뒤 다시 시도해 주세요."
+                      : "You can change the model after the current response finishes."
+                    : configNotice?.message}
+                </small>
+              </span>
+            </div>
+          )}
           {chatStorageError && (
             <div className="chat-provider-needed">
               <Settings2 size={14} />
@@ -919,16 +1160,34 @@ export function ChatView({
               <Settings2 size={14} />
               <span>
                 <strong>
-                  {ko ? "구독 연결이 필요합니다" : "Subscription connection needed"}
+                  {checkingProviders
+                    ? ko
+                      ? "구독 상태를 확인하고 있습니다"
+                      : "Checking subscription status"
+                    : ko
+                      ? "구독 연결이 필요합니다"
+                      : "Subscription connection needed"}
                 </strong>
                 <small>
-                  {ko
-                    ? "설정에서 공식 로그인을 연결하세요."
-                    : "Connect the official login in Settings."}
+                  {checkingProviders
+                    ? ko
+                      ? "설치된 공급자의 로그인 상태와 모델을 불러오는 중입니다."
+                      : "Loading the installed provider login and model availability."
+                    : currentProvider.message}
                 </small>
               </span>
-              <button type="button" onClick={() => onNavigate("settings")}>
-                {ko ? "설정" : "Settings"}
+              <button
+                type="button"
+                onClick={() => void refreshProviderOptions()}
+                disabled={checkingProviders}
+              >
+                {checkingProviders
+                  ? ko
+                    ? "확인 중"
+                    : "Checking"
+                  : ko
+                    ? "다시 확인"
+                    : "Check again"}
               </button>
             </div>
           )}
@@ -937,16 +1196,32 @@ export function ChatView({
               <Settings2 size={14} />
               <span>
                 <strong>
-                  {ko
-                    ? "모델 목록을 확인하지 못했습니다"
-                    : "Model availability could not be verified"}
+                  {loadingModels
+                    ? ko
+                      ? "사용 가능한 모델을 확인하고 있습니다"
+                      : "Checking available models"
+                    : ko
+                      ? "모델 목록을 확인하지 못했습니다"
+                      : "Model availability could not be verified"}
                 </strong>
                 <small>
-                  {ko
-                    ? "연결 상태를 확인한 뒤 다시 열어 주세요."
-                    : "Check the provider connection, then reopen this view."}
+                  {loadingModels
+                    ? ko
+                      ? "현재 구독에서 선택할 수 있는 모델과 effort를 불러오는 중입니다."
+                      : "Loading models and effort levels available to this subscription."
+                    : ko
+                      ? "연결 상태를 확인한 뒤 다시 시도해 주세요."
+                      : "Check the provider connection, then try again."}
                 </small>
               </span>
+              {!loadingModels && (
+                <button
+                  type="button"
+                  onClick={() => setModelRefreshNonce((value) => value + 1)}
+                >
+                  {ko ? "다시 확인" : "Check again"}
+                </button>
+              )}
             </div>
           )}
           <div className="chat-composer">
@@ -1021,6 +1296,7 @@ export function ChatView({
                             ...preferences,
                             default_chat_provider: option.provider,
                           });
+                          setConfigNotice(null);
                           setProviderMenuOpen(false);
                         }}
                       >
@@ -1045,12 +1321,27 @@ export function ChatView({
                       option?.default_effort ??
                       option?.supported_efforts[0] ??
                       null;
-                    setModel(next);
-                    setEffort(nextEffort);
-                    rememberModel(next, nextEffort);
+                    void changeConfiguration(next, nextEffort);
                   }}
+                  aria-describedby={
+                    configurationLocked || configNotice
+                      ? "chat-config-status"
+                      : undefined
+                  }
+                  title={
+                    configurationLocked
+                      ? ko
+                        ? "답변이 끝난 뒤 모델을 변경할 수 있습니다."
+                        : "Change the model after this response finishes."
+                      : undefined
+                  }
                   disabled={
-                    sending || activeTurnRunning || models.length === 0
+                    sending ||
+                    activeTurnRunning ||
+                    savingConfiguration ||
+                    loadingModels ||
+                    modelsProvider !== provider ||
+                    models.length === 0
                   }
                 >
                   {models.map((option) => (
@@ -1066,11 +1357,27 @@ export function ChatView({
                   value={effort ?? ""}
                   onChange={(event) => {
                     const next = event.target.value;
-                    setEffort(next);
-                    rememberModel(model, next);
+                    void changeConfiguration(model, next);
                   }}
+                  aria-describedby={
+                    configurationLocked || configNotice
+                      ? "chat-config-status"
+                      : undefined
+                  }
+                  title={
+                    configurationLocked
+                      ? ko
+                        ? "답변이 끝난 뒤 effort를 변경할 수 있습니다."
+                        : "Change reasoning effort after this response finishes."
+                      : undefined
+                  }
                   disabled={
-                    sending || activeTurnRunning || efforts.length === 0
+                    sending ||
+                    activeTurnRunning ||
+                    savingConfiguration ||
+                    loadingModels ||
+                    modelsProvider !== provider ||
+                    efforts.length === 0
                   }
                 >
                   {efforts.map((option) => (

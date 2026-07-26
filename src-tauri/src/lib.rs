@@ -9,6 +9,7 @@ mod dispatch;
 mod execution_routes;
 mod host_readiness;
 mod model;
+mod morrow_watch;
 mod night_contract;
 mod night_coordinator;
 mod operator_chat;
@@ -151,6 +152,21 @@ async fn load_operator_chat_session(
     tauri::async_runtime::spawn_blocking(move || store.load_conversation(&session_id))
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn update_operator_chat_configuration(
+    session_id: String,
+    model: Option<String>,
+    effort: Option<String>,
+    store: State<'_, OperatorChatState>,
+) -> Result<OperatorChatSession, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.update_configuration(&session_id, model.as_deref(), effort.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -449,10 +465,12 @@ pub(crate) fn build_workspace_overview() -> WorkspaceOverview {
     let mut control_board = control_board::build_control_board(&snapshot, hermes_load.tasks, now);
     control_board.warnings.extend(snapshot.warnings.clone());
     control_board.warnings.extend(hermes_load.warnings);
+    let morrow_watch = morrow_watch::build(&snapshot, &control_board);
     WorkspaceOverview {
         snapshot,
         control_board,
         context_index,
+        morrow_watch,
     }
 }
 
@@ -597,6 +615,7 @@ pub fn run() {
             load_chat_models,
             load_operator_chat_sessions,
             load_operator_chat_session,
+            update_operator_chat_configuration,
             load_provider_connections,
             start_provider_login,
             poll_provider_login,

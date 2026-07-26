@@ -699,6 +699,32 @@ export interface ControlBoard {
   methodology: string;
 }
 
+export type MorrowWatchState =
+  | "attention"
+  | "review"
+  | "ready"
+  | "watching"
+  | "clear";
+
+export interface MorrowWatchFocus {
+  work_item_id: string;
+  state: WorkItemState;
+  project: string;
+  title: string;
+  human_gate_reason: string | null;
+}
+
+export interface MorrowWatch {
+  observed_sessions: number;
+  running_sessions: number;
+  quiet_sessions: number;
+  needs_you_items: number;
+  state: MorrowWatchState;
+  focus: MorrowWatchFocus | null;
+  read_only: boolean;
+  methodology: string;
+}
+
 export type ContextRole = "user" | "assistant";
 
 export interface ContextExcerpt {
@@ -732,6 +758,7 @@ export interface WorkspaceOverview {
   snapshot: Snapshot;
   control_board: ControlBoard;
   context_index: ContextIndex;
+  morrow_watch: MorrowWatch;
 }
 
 export type ChatProvider = "codex_subscription" | "claude_subscription";

@@ -234,6 +234,44 @@ impl ChatStore {
             .ok_or_else(|| "저장된 대화를 찾지 못했습니다.".to_owned())
     }
 
+    pub(crate) fn update_configuration(
+        &self,
+        session_id: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<OperatorChatSession, String> {
+        let connection = self.connect()?;
+        let changed = connection
+            .execute(
+                r#"
+                UPDATE operator_chat_sessions
+                SET model = ?2, effort = ?3, updated_at = ?4
+                WHERE id = ?1 AND status <> 'running'
+                "#,
+                params![session_id, model, effort, Utc::now().to_rfc3339()],
+            )
+            .map_err(|error| format!("대화 모델 설정을 저장하지 못했습니다: {error}"))?;
+        if changed == 0 {
+            let status = connection
+                .query_row(
+                    "SELECT status FROM operator_chat_sessions WHERE id = ?1",
+                    [session_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| format!("대화 상태를 확인하지 못했습니다: {error}"))?;
+            return match status.as_deref() {
+                Some("running") => Err(
+                    "답변을 생성하는 동안에는 모델을 바꿀 수 없습니다. 완료된 뒤 다시 시도해 주세요."
+                        .to_owned(),
+                ),
+                Some(_) => Err("대화 모델 설정을 갱신하지 못했습니다.".to_owned()),
+                None => Err("저장된 대화를 찾지 못했습니다.".to_owned()),
+            };
+        }
+        self.load_session(session_id)
+    }
+
     pub(crate) fn append_message(
         &self,
         session_id: &str,
@@ -564,6 +602,57 @@ mod tests {
         assert_eq!(conversation.messages[1].tools.len(), 1);
         assert_eq!(conversation.session.message_count, 2);
         assert_eq!(reopened.list_sessions().unwrap()[0].id, session.id);
+    }
+
+    #[test]
+    fn conversation_configuration_survives_store_reopen() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("operator-chat.sqlite3");
+        let store = ChatStore::open(path.clone()).unwrap();
+        let session = store.create_session(&request("모델을 바꿀 대화")).unwrap();
+
+        let updated = store
+            .update_configuration(&session.id, Some("gpt-5.6-terra"), Some("medium"))
+            .unwrap();
+        assert_eq!(updated.model.as_deref(), Some("gpt-5.6-terra"));
+        assert_eq!(updated.effort.as_deref(), Some("medium"));
+        drop(store);
+
+        let reopened = ChatStore::open(path).unwrap();
+        let restored = reopened.load_conversation(&session.id).unwrap();
+        assert_eq!(restored.session.model.as_deref(), Some("gpt-5.6-terra"));
+        assert_eq!(restored.session.effort.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn running_conversation_rejects_configuration_change_without_mutation() {
+        let directory = tempdir().unwrap();
+        let store = ChatStore::open(directory.path().join("chat.sqlite3")).unwrap();
+        let turn = request("실행 중인 대화");
+        let session = store.create_session(&turn).unwrap();
+        store.prepare_turn(&session.id, &turn).unwrap();
+
+        let error = store
+            .update_configuration(&session.id, Some("gpt-5.6-terra"), Some("medium"))
+            .unwrap_err();
+        assert!(error.contains("답변"));
+        let restored = store.load_session(&session.id).unwrap();
+        assert_eq!(restored.model.as_deref(), Some("gpt-5.3-codex"));
+        assert_eq!(restored.effort.as_deref(), Some("high"));
+        assert_eq!(restored.status, "running");
+    }
+
+    #[test]
+    fn missing_conversation_configuration_returns_an_explicit_error() {
+        let directory = tempdir().unwrap();
+        let store = ChatStore::open(directory.path().join("chat.sqlite3")).unwrap();
+
+        let error = store
+            .update_configuration("chat-does-not-exist", Some("gpt-5.6-terra"), Some("medium"))
+            .unwrap_err();
+
+        assert_eq!(error, "저장된 대화를 찾지 못했습니다.");
+        assert!(store.list_sessions().unwrap().is_empty());
     }
 
     #[test]
