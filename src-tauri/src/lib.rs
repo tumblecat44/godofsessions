@@ -465,7 +465,7 @@ pub(crate) fn build_workspace_overview() -> WorkspaceOverview {
     let mut control_board = control_board::build_control_board(&snapshot, hermes_load.tasks, now);
     control_board.warnings.extend(snapshot.warnings.clone());
     control_board.warnings.extend(hermes_load.warnings);
-    let morrow_watch = morrow_watch::build(&snapshot, &control_board);
+    let morrow_watch = morrow_watch::build(&snapshot, &control_board, &context_index.warnings);
     WorkspaceOverview {
         snapshot,
         control_board,

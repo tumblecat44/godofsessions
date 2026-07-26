@@ -482,6 +482,7 @@ export function ChatView({
     void changeConfiguration(nextModel, nextEffort, reason);
   }, [
     activeSessionId,
+    configurationLocked,
     effort,
     ko,
     model,

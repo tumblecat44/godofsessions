@@ -6,7 +6,11 @@ use crate::model::{
     WorkItem, WorkItemState,
 };
 
-pub(crate) fn build(snapshot: &Snapshot, board: &ControlBoard) -> MorrowWatch {
+pub(crate) fn build(
+    snapshot: &Snapshot,
+    board: &ControlBoard,
+    context_warnings: &[String],
+) -> MorrowWatch {
     let observed = snapshot
         .sessions
         .iter()
@@ -47,7 +51,13 @@ pub(crate) fn build(snapshot: &Snapshot, board: &ControlBoard) -> MorrowWatch {
             ) && !accounted_session_ids.contains(session.id.as_str())
         })
         .count();
-    let warning_count = board.warnings.len();
+    let warning_count = board
+        .warnings
+        .iter()
+        .chain(context_warnings)
+        .map(String::as_str)
+        .collect::<HashSet<_>>()
+        .len();
     let focus = board
         .items
         .iter()
@@ -230,7 +240,7 @@ mod tests {
             ),
         ]);
 
-        let watch = build(&snapshot, &board);
+        let watch = build(&snapshot, &board, &[]);
 
         assert_eq!(watch.observed_sessions, 4);
         assert_eq!(watch.running_sessions, 1);
@@ -294,7 +304,7 @@ mod tests {
             ),
         ]);
 
-        let watch = build(&snapshot, &board);
+        let watch = build(&snapshot, &board, &[]);
         let focus = watch.focus.expect("review should become the focus");
 
         assert_eq!(focus.work_item_id, "review-priority-one-new");
@@ -321,7 +331,7 @@ mod tests {
             ),
         ]);
 
-        let watch = build(&snapshot, &board);
+        let watch = build(&snapshot, &board, &[]);
 
         assert_eq!(
             watch
@@ -346,7 +356,7 @@ mod tests {
             "2026-07-25T02:00:00Z",
         )]);
 
-        let watch = build(&snapshot, &board);
+        let watch = build(&snapshot, &board, &[]);
 
         assert_eq!(watch.state, crate::model::MorrowWatchState::Clear);
         assert!(watch.focus.is_none());
@@ -357,7 +367,7 @@ mod tests {
     fn watch_degrades_when_an_error_session_has_no_work_item() {
         let snapshot = snapshot(vec![session("failed", SessionStatus::Failed, false)]);
 
-        let watch = build(&snapshot, &board(vec![]));
+        let watch = build(&snapshot, &board(vec![]), &[]);
 
         assert_eq!(watch.state, crate::model::MorrowWatchState::Degraded);
         assert_eq!(watch.unresolved_sessions, 1);
@@ -366,14 +376,12 @@ mod tests {
     }
 
     #[test]
-    fn watch_degrades_when_a_context_source_reports_a_warning() {
+    fn watch_degrades_when_the_context_index_reports_a_warning() {
         let snapshot = snapshot(vec![session("idle", SessionStatus::Idle, false)]);
-        let mut board = board(vec![]);
-        board
-            .warnings
-            .push("Cursor source could not be read".to_owned());
+        let board = board(vec![]);
+        let context_warnings = vec!["Cursor source could not be read".to_owned()];
 
-        let watch = build(&snapshot, &board);
+        let watch = build(&snapshot, &board, &context_warnings);
 
         assert_eq!(watch.state, crate::model::MorrowWatchState::Degraded);
         assert_eq!(watch.unresolved_sessions, 0);
