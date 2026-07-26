@@ -1,0 +1,25 @@
+{
+  "name": "god-of-sessions-promo-video",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "still": "remotion still src/index.ts GodOfSessionsLaunch out/preview.png --frame=450",
+    "render": "remotion render src/index.ts GodOfSessionsLaunch out/god-of-sessions-x-launch.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
+    "render:proof": "remotion render src/index.ts GodOfSessionsProof out/god-of-sessions-launch-proof.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
+    "poster:proof": "remotion still src/index.ts GodOfSessionsProof out/god-of-sessions-launch-proof-poster.png --frame=472",
+    "frames": "remotion still src/index.ts GodOfSessionsLaunch out/frame-000.png --frame=0 && remotion still src/index.ts GodOfSessionsLaunch out/frame-120.png --frame=120 && remotion still src/index.ts GodOfSessionsLaunch out/frame-360.png --frame=360 && remotion still src/index.ts GodOfSessionsLaunch out/frame-600.png --frame=600 && remotion still src/index.ts GodOfSessionsLaunch out/frame-840.png --frame=840"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.499",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.499"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "typescript": "^5.7.2"
+  }
+}

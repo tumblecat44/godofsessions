@@ -231,8 +231,8 @@ function previewAnswer(
     content:
       overnight && candidate
         ? ko
-          ? `오늘 밤 ${sleepHours ?? 7}시간 기준으로는 **${candidate.project}**가 가장 효율적입니다.\n\n${candidate.goal}`
-          : `For a ${sleepHours ?? 7}-hour window, **${candidate.project}** has the highest expected return.\n\n${candidate.goal}`
+          ? `**안전한 실행 2개 · 확인 필요 1개**\n\n오늘 밤 ${sleepHours ?? 7}시간 기준 첫 번째는 **${candidate.project}**입니다. ${candidate.goal}\n\n실행 경로와 권한을 고정한 계획을 검토한 뒤 한 번 승인하세요.`
+          : `**2 safe runs · 1 needs you**\n\nFor a ${sleepHours ?? 7}-hour window, **${candidate.project}** ranks first. Continue the highest-value verified slice in its existing project context.\n\nReview the frozen route, permissions, and time budget before one bedtime approval.`
         : ko
           ? "현재 로컬 관제 문맥을 읽었습니다. 찾고 싶은 프로젝트나 세션을 말해 주세요."
           : "I read the current local operator context. Name a project or session to inspect.",

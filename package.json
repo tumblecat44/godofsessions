@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "landing:dev": "vite --config landing/vite.config.ts",
+    "landing:build": "vite build --config landing/vite.config.ts",
+    "landing:preview": "vite preview --config landing/vite.config.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "check": "npm run build && cargo test --manifest-path src-tauri/Cargo.toml"
