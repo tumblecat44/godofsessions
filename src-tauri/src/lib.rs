@@ -1,4 +1,5 @@
 mod approval;
+mod chat;
 mod claude_dispatch;
 mod codex_dispatch;
 mod connectors;
@@ -10,24 +11,30 @@ mod host_readiness;
 mod model;
 mod night_contract;
 mod night_coordinator;
+mod operator_chat;
+mod provider_auth;
 mod recommendation;
 mod time_utils;
 mod usage;
 mod workspace_identity;
 
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 
 use chrono::Utc;
 use model::{
-    ApprovalChallenge, CapacityPool, DispatchReceipt, ExecutionRouteInventory, MorningBrief,
-    NightPlanHistory, NightPlanResumeChallenge, NightRunDetail, NightRunHistory, OvernightPlan,
-    PortfolioApprovalChallenge, PortfolioDispatchResult, Provider, Session, Snapshot,
-    StatusConfidence, WorkspaceOverview,
+    ApprovalChallenge, CapacityPool, ChatEvent, ChatModelOption, ChatProvider, ChatProviderOption,
+    ChatTurnRequest, DispatchReceipt, ExecutionRouteInventory, MorningBrief, NightPlanHistory,
+    NightPlanResumeChallenge, NightRunDetail, NightRunHistory, OperatorChatConversation,
+    OperatorChatSession, OvernightPlan, PortfolioApprovalChallenge, PortfolioDispatchResult,
+    Provider, ProviderConnection, ProviderLoginResult, Session, Snapshot, StatusConfidence,
+    WorkspaceOverview,
 };
-use tauri::State;
+use tauri::{ipc::Channel, State};
 
 type ApprovalState = Mutex<approval::ApprovalRegistry>;
 type RecoveryState = Mutex<night_coordinator::RecoveryRegistry>;
+type ProviderAuthState = Mutex<provider_auth::ProviderAuthRegistry>;
+type OperatorChatState = Result<operator_chat::ChatStore, String>;
 
 pub fn run_codex_night_worker() {
     codex_dispatch::run_night_worker_from_stdin();
@@ -53,29 +60,10 @@ async fn generate_overnight_plan(
     sleep_hours: f64,
     approvals: State<'_, ApprovalState>,
 ) -> Result<OvernightPlan, String> {
-    let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
-    let plan = tauri::async_runtime::spawn_blocking(move || -> Result<OvernightPlan, String> {
-        let budgets_thread = std::thread::spawn(usage::load_budgets);
-        let snapshot = build_snapshot();
-        let now = Utc::now();
-        let context = context_brief::build_context_index(&snapshot, now);
-        let budgets = budgets_thread
-            .join()
-            .map_err(|_| "구독 사용량 증거를 모으지 못했습니다.".to_owned())?;
-        let routes = execution_routes::load(&budgets, now);
-        let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
-            &snapshot,
-            budgets,
-            &context,
-            &routes,
-            sleep_hours,
-            now,
-        );
-        plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
-        Ok(plan)
-    })
-    .await
-    .map_err(|error| error.to_string())??;
+    let plan =
+        tauri::async_runtime::spawn_blocking(move || build_overnight_plan_read_only(sleep_hours))
+            .await
+            .map_err(|error| error.to_string())??;
     approvals
         .lock()
         .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
@@ -87,6 +75,98 @@ async fn generate_overnight_plan(
             Utc::now(),
         );
     Ok(plan)
+}
+
+#[tauri::command]
+async fn load_chat_providers() -> Result<Vec<ChatProviderOption>, String> {
+    tauri::async_runtime::spawn_blocking(chat::provider_options)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn load_provider_connections() -> Result<Vec<ProviderConnection>, String> {
+    tauri::async_runtime::spawn_blocking(provider_auth::connections)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn start_provider_login(
+    provider: ChatProvider,
+    provider_auth: State<'_, ProviderAuthState>,
+) -> Result<ProviderLoginResult, String> {
+    let mut registry = provider_auth
+        .lock()
+        .map_err(|_| "Provider login state could not be locked.".to_owned())?;
+    provider_auth::start_login(provider, &mut registry)
+}
+
+#[tauri::command]
+fn poll_provider_login(
+    provider: ChatProvider,
+    provider_auth: State<'_, ProviderAuthState>,
+) -> Result<ProviderLoginResult, String> {
+    let mut registry = provider_auth
+        .lock()
+        .map_err(|_| "Provider login state could not be locked.".to_owned())?;
+    Ok(provider_auth::poll_login(provider, &mut registry))
+}
+
+#[tauri::command]
+fn cancel_provider_login(
+    provider: ChatProvider,
+    provider_auth: State<'_, ProviderAuthState>,
+) -> Result<(), String> {
+    let mut registry = provider_auth
+        .lock()
+        .map_err(|_| "Provider login state could not be locked.".to_owned())?;
+    provider_auth::cancel_login(provider, &mut registry);
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_chat_models(provider: ChatProvider) -> Result<Vec<ChatModelOption>, String> {
+    tauri::async_runtime::spawn_blocking(move || chat::model_options(provider))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn load_operator_chat_sessions(
+    store: State<'_, OperatorChatState>,
+) -> Result<Vec<OperatorChatSession>, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?.clone();
+    tauri::async_runtime::spawn_blocking(move || store.list_sessions())
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn load_operator_chat_session(
+    session_id: String,
+    store: State<'_, OperatorChatState>,
+) -> Result<OperatorChatConversation, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?.clone();
+    tauri::async_runtime::spawn_blocking(move || store.load_conversation(&session_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn send_chat_message(
+    request: ChatTurnRequest,
+    on_event: Channel<ChatEvent>,
+    store: State<'_, OperatorChatState>,
+) -> Result<OperatorChatSession, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        chat::respond_persisted(&store, request, |event| {
+            let _ = on_event.send(event);
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -358,7 +438,7 @@ async fn load_night_run_detail(
     .map_err(|error| error.to_string())?
 }
 
-fn build_workspace_overview() -> WorkspaceOverview {
+pub(crate) fn build_workspace_overview() -> WorkspaceOverview {
     let now = Utc::now();
     let mut snapshot = build_snapshot();
     let context_index = context_brief::build_context_index(&snapshot, now);
@@ -374,6 +454,28 @@ fn build_workspace_overview() -> WorkspaceOverview {
         control_board,
         context_index,
     }
+}
+
+pub(crate) fn build_overnight_plan_read_only(sleep_hours: f64) -> Result<OvernightPlan, String> {
+    let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
+    let budgets_thread = std::thread::spawn(usage::load_budgets);
+    let snapshot = build_snapshot();
+    let now = Utc::now();
+    let context = context_brief::build_context_index(&snapshot, now);
+    let budgets = budgets_thread
+        .join()
+        .map_err(|_| "구독 사용량 증거를 모으지 못했습니다.".to_owned())?;
+    let routes = execution_routes::load(&budgets, now);
+    let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
+        &snapshot,
+        budgets,
+        &context,
+        &routes,
+        sleep_hours,
+        now,
+    );
+    plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
+    Ok(plan)
 }
 
 fn load_exact_route_inventory(route_id: &str) -> ExecutionRouteInventory {
@@ -482,12 +584,24 @@ fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let chat_store = operator_chat::ChatStore::open(operator_chat_database_path());
     tauri::Builder::default()
         .manage(ApprovalState::default())
         .manage(RecoveryState::default())
+        .manage(ProviderAuthState::default())
+        .manage(chat_store)
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             load_workspace_overview,
+            load_chat_providers,
+            load_chat_models,
+            load_operator_chat_sessions,
+            load_operator_chat_session,
+            load_provider_connections,
+            start_provider_login,
+            poll_provider_login,
+            cancel_provider_login,
+            send_chat_message,
             load_night_run_history,
             load_night_plan_history,
             load_morning_brief,
@@ -509,6 +623,14 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running God of Sessions");
+}
+
+fn operator_chat_database_path() -> PathBuf {
+    dirs::data_local_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("god-of-sessions")
+        .join("operator-chat.sqlite3")
 }
 
 #[cfg(test)]

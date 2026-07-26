@@ -8,6 +8,12 @@ OpenClaw. It discovers sessions created in those tools, normalizes their
 metadata, shows which work needs attention, and recommends which project and
 execution route offer the best explainable overnight bet.
 
+The default surface is now a conversation with **Morrow**, the app's original
+night-shift session operator. Morrow can inspect current local sessions,
+today's bounded project context, subscription capacity, and the overnight
+planner through explicit read-only tools. Any execution still moves into the
+existing review and approval surface.
+
 ## Product boundary
 
 God of Sessions is:
@@ -15,6 +21,7 @@ God of Sessions is:
 - a session inbox
 - a live activity and attention dashboard
 - a cross-agent task and session graph
+- a tool-calling conversation over the local control plane
 - a read-only overnight portfolio planner with reviewable Run Drafts
 - an approval-gated control surface for proven provider routes
 - local-only by default
@@ -23,7 +30,7 @@ It is not:
 
 - another coding agent
 - another IDE
-- another chat client
+- a general-purpose chat client detached from session evidence
 - a replacement session format
 - an autonomous supervisor that acts without operator approval
 
@@ -31,6 +38,23 @@ The canonical distinction between Project, Session, Work Item, Run, Execution
 Route, Capacity Pool, and Night Portfolio lives in [CONTEXT.md](CONTEXT.md).
 
 ## Current phase
+
+The Morrow operator chat slice is working. Codex subscription chat runs through
+the ChatGPT app's bundled Codex app-server with three read-only dynamic tools:
+workspace inspection, session search, and overnight recommendation. Claude
+subscription chat runs through Claude Code and receives the same bounded
+control-plane evidence. The chat cannot dispatch work; overnight requests
+handoff to the existing approval-gated planner. The character's segmented
+control ring, ink-and-bone palette, and amber/teal state language now form a
+shared visual system across startup, navigation, chat tool traces, and handoff.
+Ordinary conversation is no longer forced into a sleep window; the configured
+duration is attached only when Overnight mode is active or the request clearly
+asks for overnight work. A new bilingual first-run tour connects the user's
+existing Codex and Claude subscriptions through the providers' official browser
+login flows, verifies the resulting login without importing token values, and
+teaches the inspect/recommend/approve boundary with interactive product
+captures. The same live connection checks, English/Korean preference, default
+conversation route, and overnight duration are available in Settings.
 
 The answer-first executor identity M45 desktop slice is working.
 Recommendation and preflight remain read-only; a provider process can start
@@ -182,6 +206,8 @@ worker after approval.
 - [Stable recommendation refresh M43](docs/overnight-m43.md)
 - [Executor-bound Hermes routes M44](docs/overnight-m44.md)
 - [Answer-first executor identity M45](docs/overnight-m45.md)
+- [Morrow operator chat M46](docs/operator-chat-m46.md)
+- [Provider authentication and onboarding research](docs/research/provider-auth-onboarding-2026-07-25.md)
 - [Overnight build report](docs/overnight-build-report-2026-07-24.md)
 - [Direct Grok dispatch gate](docs/grok-direct-dispatch-gate-2026-07-24.md)
 - [Hermes Desktop and Codex runtime research](docs/research/hermes-desktop-codex-runtime-2026-07-24.md)

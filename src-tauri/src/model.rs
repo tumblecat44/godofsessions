@@ -892,6 +892,192 @@ pub struct WorkspaceOverview {
     pub context_index: ContextIndex,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatProvider {
+    CodexSubscription,
+    ClaudeSubscription,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatRequest {
+    pub provider: ChatProvider,
+    pub messages: Vec<ChatMessage>,
+    pub sleep_hours: Option<f64>,
+    pub language: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatProviderOption {
+    pub provider: ChatProvider,
+    pub label: String,
+    pub route_label: String,
+    pub available: bool,
+    pub authenticated: bool,
+    pub plan: Option<String>,
+    pub tool_mode: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderConnection {
+    pub provider: ChatProvider,
+    pub installed: bool,
+    pub authenticated: bool,
+    pub auth_method: Option<String>,
+    pub plan: Option<String>,
+    pub route_label: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderLoginState {
+    Waiting,
+    Connected,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderLoginResult {
+    pub provider: ChatProvider,
+    pub state: ProviderLoginState,
+    pub message: String,
+    pub fallback_command: String,
+    pub connection: Option<ProviderConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatToolTrace {
+    pub tool: String,
+    pub label: String,
+    pub summary: String,
+    pub success: bool,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatReply {
+    pub provider: ChatProvider,
+    pub route_label: String,
+    pub content: String,
+    pub tools: Vec<ChatToolTrace>,
+    pub suggested_view: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatTurnRequest {
+    pub session_id: Option<String>,
+    pub provider: ChatProvider,
+    pub content: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub sleep_hours: Option<f64>,
+    pub language: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatModelOption {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub is_default: bool,
+    pub default_effort: Option<String>,
+    pub supported_efforts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorChatSession {
+    pub id: String,
+    pub title: String,
+    pub provider: ChatProvider,
+    pub native_session_id: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_error: Option<String>,
+    pub message_count: u32,
+    pub last_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorChatMessage {
+    pub id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub route_label: Option<String>,
+    pub tools: Vec<ChatToolTrace>,
+    pub suggested_view: Option<String>,
+    pub created_at: String,
+    pub sequence: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorChatConversation {
+    pub session: OperatorChatSession,
+    pub messages: Vec<OperatorChatMessage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum ChatEvent {
+    SessionCreated {
+        session: OperatorChatSession,
+    },
+    TurnStarted {
+        session_id: String,
+        turn_id: String,
+        route_label: String,
+    },
+    AssistantDelta {
+        session_id: String,
+        turn_id: String,
+        delta: String,
+    },
+    ReasoningDelta {
+        session_id: String,
+        turn_id: String,
+        delta: String,
+    },
+    ToolStarted {
+        session_id: String,
+        turn_id: String,
+        tool: String,
+        label: String,
+    },
+    ToolCompleted {
+        session_id: String,
+        turn_id: String,
+        trace: ChatToolTrace,
+    },
+    MessageCompleted {
+        session_id: String,
+        turn_id: String,
+        message: OperatorChatMessage,
+    },
+    TurnCompleted {
+        session_id: String,
+        turn_id: String,
+        session: OperatorChatSession,
+    },
+    Failed {
+        session_id: String,
+        turn_id: Option<String>,
+        message: String,
+    },
+}
+
 #[derive(Debug)]
 pub struct ConnectorOutput {
     pub provider: Provider,

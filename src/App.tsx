@@ -9,13 +9,19 @@ import {
   X,
 } from "lucide-react";
 import { ControlBoardView } from "./components/ControlBoardView";
+import { ChatView } from "./components/ChatView";
+import { Onboarding } from "./components/Onboarding";
+import { OperatorMark } from "./components/OperatorMark";
 import { SessionSection } from "./components/SessionSection";
 import { Sidebar } from "./components/Sidebar";
+import { SettingsView } from "./components/SettingsView";
 import { OvernightView } from "./components/OvernightView";
 import { fallbackTitle, relativeTime } from "./lib/format";
+import { loadPreferences, savePreferences } from "./lib/preferences";
 import { previewWorkspaceOverview } from "./preview-data";
 import type {
   Provider,
+  AppPreferences,
   Session,
   SessionStatus,
   WorkspaceOverview,
@@ -60,13 +66,22 @@ function sectionForStatus(status: SessionStatus): SectionKey {
 
 function App() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [preferences, setPreferences] =
+    useState<AppPreferences>(loadPreferences);
+  const [replayingOnboarding, setReplayingOnboarding] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<Provider | "all">(
     "all",
   );
   const [query, setQuery] = useState("");
-  const [activeView, setActiveView] = useState<WorkspaceView>("board");
+  const [activeView, setActiveView] = useState<WorkspaceView>("chat");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const ko = preferences.language === "ko";
+
+  const updatePreferences = useCallback((next: AppPreferences) => {
+    setPreferences(next);
+    savePreferences(next);
+  }, []);
 
   const load = useCallback(async () => {
     setIsRefreshing(true);
@@ -129,9 +144,15 @@ function App() {
   if (state.kind === "loading") {
     return (
       <main className="startup-state">
-        <span className="startup-orbit" aria-hidden="true" />
-        <p>로컬 관제판을 구성하는 중</p>
-        <small>공급자 원본은 읽기 전용으로 유지합니다</small>
+        <OperatorMark size={42} active />
+        <p>
+          {ko ? "Morrow가 관제실을 여는 중" : "Morrow is opening the watch room"}
+        </p>
+        <small>
+          {ko
+            ? "세션 원본은 읽기 전용으로 유지합니다"
+            : "Provider source data stays read-only"}
+        </small>
       </main>
     );
   }
@@ -140,12 +161,31 @@ function App() {
     return (
       <main className="startup-state startup-state--error">
         <AlertTriangle size={22} />
-        <p>로컬 관제판을 불러오지 못했습니다</p>
+        <p>
+          {ko
+            ? "로컬 관제판을 불러오지 못했습니다"
+            : "The local watch room could not be loaded"}
+        </p>
         <small>{state.message}</small>
         <button type="button" onClick={() => void load()}>
-          다시 시도
+          {ko ? "다시 시도" : "Try again"}
         </button>
       </main>
+    );
+  }
+
+  if (!preferences.onboarding_complete || replayingOnboarding) {
+    return (
+      <Onboarding
+        overview={state.overview}
+        preferences={preferences}
+        onChange={updatePreferences}
+        onComplete={() => {
+          updatePreferences({ ...preferences, onboarding_complete: true });
+          setReplayingOnboarding(false);
+          setActiveView("chat");
+        }}
+      />
     );
   }
 
@@ -160,9 +200,17 @@ function App() {
         privacyNote={state.overview.snapshot.privacy_note}
         activeView={activeView}
         onSelectView={setActiveView}
+        language={preferences.language}
       />
 
-      {activeView === "board" ? (
+      {activeView === "chat" ? (
+        <ChatView
+          overview={state.overview}
+          onNavigate={setActiveView}
+          preferences={preferences}
+          onPreferencesChange={updatePreferences}
+        />
+      ) : activeView === "board" ? (
         <ControlBoardView
           board={state.overview.control_board}
           contextIndex={state.overview.context_index}
@@ -171,15 +219,24 @@ function App() {
         />
       ) : activeView === "overnight" ? (
         <OvernightView />
+      ) : activeView === "settings" ? (
+        <SettingsView
+          preferences={preferences}
+          onChange={updatePreferences}
+          onReplayOnboarding={() => setReplayingOnboarding(true)}
+        />
       ) : (
         <main className="workspace">
           <header className="workspace-header">
             <div className="header-copy">
               <span className="kicker">ATTENTION INBOX</span>
-              <h1>지금 어디를 보면 되나요?</h1>
+              <h1>
+                {ko ? "지금 어디를 보면 되나요?" : "Where do you need to look?"}
+              </h1>
               <p>
-                흩어진 로컬 에이전트 세션에서 사람의 판단이 필요한 순간만
-                끌어올립니다.
+                {ko
+                  ? "흩어진 로컬 에이전트 세션에서 사람의 판단이 필요한 순간만 끌어올립니다."
+                  : "Bring forward only the moments that need human judgment across fragmented local agent sessions."}
               </p>
             </div>
 
@@ -189,15 +246,19 @@ function App() {
                 <input
                   ref={searchInputRef}
                   type="search"
-                  aria-label="세션 검색"
-                  placeholder="제목, 프로젝트, 브랜치 검색"
+                  aria-label={ko ? "세션 검색" : "Search sessions"}
+                  placeholder={
+                    ko
+                      ? "제목, 프로젝트, 브랜치 검색"
+                      : "Search title, project, or branch"
+                  }
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
                 {query ? (
                   <button
                     type="button"
-                    aria-label="검색 지우기"
+                    aria-label={ko ? "검색 지우기" : "Clear search"}
                     onClick={() => setQuery("")}
                   >
                     <X size={14} />
@@ -213,7 +274,7 @@ function App() {
                 type="button"
                 onClick={() => void load()}
                 disabled={isRefreshing}
-                aria-label="세션 새로고침"
+                aria-label={ko ? "세션 새로고침" : "Refresh sessions"}
               >
                 <RefreshCw
                   size={16}
@@ -226,12 +287,12 @@ function App() {
           <div className="index-line">
             <span>
               <i className="index-pulse" />
-              로컬 인덱스 ·{" "}
-              {relativeTime(state.overview.snapshot.generated_at)} 갱신
+              {ko ? "로컬 인덱스" : "LOCAL INDEX"} ·{" "}
+              {relativeTime(state.overview.snapshot.generated_at)}
             </span>
             <span>
               <ShieldCheck size={14} />
-              읽기 전용
+              {ko ? "읽기 전용" : "READ ONLY"}
             </span>
           </div>
 
@@ -239,7 +300,8 @@ function App() {
             <details className="warning-strip">
               <summary>
                 <AlertTriangle size={14} />
-                제한된 커넥터 {state.overview.snapshot.warnings.length}개
+                {ko ? "제한된 커넥터" : "Limited connectors"}{" "}
+                {state.overview.snapshot.warnings.length}
               </summary>
               <ul>
                 {state.overview.snapshot.warnings.map((warning) => (
@@ -253,7 +315,11 @@ function App() {
             <SessionSection
               eyebrow="HUMAN TURN"
               title="Needs me"
-              description="결정, 승인, 읽지 않은 결과가 기다리고 있습니다."
+              description={
+                ko
+                  ? "결정, 승인, 읽지 않은 결과가 기다리고 있습니다."
+                  : "Decisions, approvals, and unread results are waiting."
+              }
               sessions={needsMe}
               total={needsMe.length}
               tone="attention"
@@ -262,7 +328,11 @@ function App() {
             <SessionSection
               eyebrow="LIVE ACTIVITY"
               title="Running"
-              description="최근 활동이 관측되거나 도구가 작업 중이라고 보고했습니다."
+              description={
+                ko
+                  ? "최근 활동이 관측되거나 도구가 작업 중이라고 보고했습니다."
+                  : "Recent activity was observed or a provider reports active work."
+              }
               sessions={running}
               total={running.length}
               tone="live"
@@ -273,7 +343,11 @@ function App() {
           <SessionSection
             eyebrow="LOCAL MEMORY"
             title="Recently finished"
-            description="막 끝났거나 잠시 멈춘 세션입니다. 원래 도구의 기록이 진실의 원본입니다."
+            description={
+              ko
+                ? "막 끝났거나 잠시 멈춘 세션입니다. 원래 도구의 기록이 진실의 원본입니다."
+                : "Recently finished or paused sessions. The provider ledger remains authoritative."
+            }
             sessions={recent}
             total={recent.length}
             tone="recent"

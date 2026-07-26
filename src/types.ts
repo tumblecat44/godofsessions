@@ -6,7 +6,23 @@ export type Provider =
   | "hermes"
   | "openclaw";
 
-export type WorkspaceView = "board" | "overnight" | "inbox";
+export type WorkspaceView =
+  | "chat"
+  | "board"
+  | "overnight"
+  | "inbox"
+  | "settings";
+
+export type AppLanguage = "en" | "ko";
+
+export interface AppPreferences {
+  language: AppLanguage;
+  default_chat_provider: ChatProvider;
+  default_chat_models: Partial<Record<ChatProvider, string>>;
+  default_chat_efforts: Partial<Record<ChatProvider, string>>;
+  default_overnight_hours: number;
+  onboarding_complete: boolean;
+}
 
 export type NativeKind =
   | "interactive"
@@ -716,4 +732,158 @@ export interface WorkspaceOverview {
   snapshot: Snapshot;
   control_board: ControlBoard;
   context_index: ContextIndex;
+}
+
+export type ChatProvider = "codex_subscription" | "claude_subscription";
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatRequest {
+  session_id: string | null;
+  provider: ChatProvider;
+  content: string;
+  model: string | null;
+  effort: string | null;
+  sleep_hours: number | null;
+  language: AppLanguage;
+}
+
+export interface ChatProviderOption {
+  provider: ChatProvider;
+  label: string;
+  route_label: string;
+  available: boolean;
+  authenticated: boolean;
+  plan: string | null;
+  tool_mode: string;
+  message: string;
+}
+
+export interface ProviderConnection {
+  provider: ChatProvider;
+  installed: boolean;
+  authenticated: boolean;
+  auth_method: string | null;
+  plan: string | null;
+  route_label: string;
+  message: string;
+}
+
+export type ProviderLoginState = "waiting" | "connected" | "error";
+
+export interface ProviderLoginResult {
+  provider: ChatProvider;
+  state: ProviderLoginState;
+  message: string;
+  fallback_command: string;
+  connection: ProviderConnection | null;
+}
+
+export interface ChatToolTrace {
+  tool: string;
+  label: string;
+  summary: string;
+  success: boolean;
+}
+
+export interface ChatModelOption {
+  id: string;
+  display_name: string;
+  description: string;
+  is_default: boolean;
+  default_effort: string | null;
+  supported_efforts: string[];
+}
+
+export interface OperatorChatSession {
+  id: string;
+  title: string;
+  provider: ChatProvider;
+  native_session_id: string | null;
+  model: string | null;
+  effort: string | null;
+  status: "idle" | "running" | "failed" | string;
+  created_at: string;
+  updated_at: string;
+  last_error: string | null;
+  message_count: number;
+  last_message: string | null;
+}
+
+export interface OperatorChatMessage extends ChatMessage {
+  id: string;
+  session_id: string;
+  route_label: string | null;
+  tools: ChatToolTrace[];
+  suggested_view: WorkspaceView | null;
+  created_at: string;
+  sequence: number;
+}
+
+export interface OperatorChatConversation {
+  session: OperatorChatSession;
+  messages: OperatorChatMessage[];
+}
+
+export type ChatEvent =
+  | { event: "session_created"; session: OperatorChatSession }
+  | {
+      event: "turn_started";
+      session_id: string;
+      turn_id: string;
+      route_label: string;
+    }
+  | {
+      event: "assistant_delta";
+      session_id: string;
+      turn_id: string;
+      delta: string;
+    }
+  | {
+      event: "reasoning_delta";
+      session_id: string;
+      turn_id: string;
+      delta: string;
+    }
+  | {
+      event: "tool_started";
+      session_id: string;
+      turn_id: string;
+      tool: string;
+      label: string;
+    }
+  | {
+      event: "tool_completed";
+      session_id: string;
+      turn_id: string;
+      trace: ChatToolTrace;
+    }
+  | {
+      event: "message_completed";
+      session_id: string;
+      turn_id: string;
+      message: OperatorChatMessage;
+    }
+  | {
+      event: "turn_completed";
+      session_id: string;
+      turn_id: string;
+      session: OperatorChatSession;
+    }
+  | {
+      event: "failed";
+      session_id: string;
+      turn_id: string | null;
+      message: string;
+    };
+
+export interface ChatReply {
+  provider: ChatProvider;
+  route_label: string;
+  content: string;
+  tools: ChatToolTrace[];
+  suggested_view: WorkspaceView | null;
 }
