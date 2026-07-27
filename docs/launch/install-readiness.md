@@ -11,23 +11,26 @@ public Mac download yet.
 ## Artifact
 
 - App:
-  `src-tauri/target/release/bundle/macos/God of Sessions.app`
+  `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/God of Sessions.app`
 - DMG:
-  `src-tauri/target/release/bundle/dmg/God of Sessions_0.1.0_aarch64.dmg`
+  `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/God of Sessions_0.1.0_aarch64.dmg`
+- Staged landing download:
+  `landing/public/downloads/God-of-Sessions_0.1.0_aarch64.dmg`
 - Architecture: Apple Silicon (`aarch64`)
-- DMG size: 6,135,403 bytes
+- DMG size: 6,144,937 bytes
 - SHA-256:
-  `9da0df36e675f860f7ff60882ba0dac865cdb19ad241e4ee72268fa2e6e86181`
+  `3c56434ac1936ec671328c01ebc6a5b49c9d00cb2344bd96a5e830150f45c378`
 
 ## What passed
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Release app build | Pass | Tauri release app produced successfully |
+| Release app build | Pass | Final English-surface commits were rebuilt for the `aarch64-apple-darwin` target |
 | Developer ID app signature | Pass | Deep/strict `codesign` verification passed; hardened runtime is enabled |
 | Developer ID DMG signature | Pass | DMG signature is valid and satisfies its designated requirement |
 | DMG contents | Pass | Contains `God of Sessions.app` and an `/Applications` link |
-| Launch from mounted DMG | Pass | Release bundle opened and found the local source inventory |
+| Staged download identity | Pass | Landing DMG is byte-identical to the verified release DMG |
+| Launch from mounted DMG | Pass | Final signed release process stayed healthy during a mounted-DMG smoke launch |
 | Codex subscription check | Pass | ChatGPT OAuth and official Codex app-server reported connected |
 | Claude subscription check | Pass | Claude.ai Max and official Claude Code CLI reported connected |
 | Session discovery | Pass | Release launch discovered all six configured sources; the tested machine showed 703 normalized sessions |
