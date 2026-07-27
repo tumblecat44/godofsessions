@@ -5,158 +5,280 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="God of Sessions decides what needs you now and what can move safely overnight across your local AI coding sessions."
+      content="Stop being the queue. God of Sessions turns fragmented local AI coding sessions into one clear next move and one approval-gated overnight plan."
     />
-    <meta name="theme-color" content="#0d1728" />
-    <meta property="og:title" content="God of Sessions — Stop babysitting AI sessions." />
+    <meta name="theme-color" content="#0a101b" />
+    <meta property="og:title" content="God of Sessions — Stop being the queue." />
     <meta
       property="og:description"
-      content="One bedtime approval. Provider receipts and workspace evidence by morning."
+      content="Every session. One clear next move. One bedtime approval, provider evidence by morning."
     />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://sessions.vibejason.com/" />
     <meta property="og:image" content="/og-launch.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="God of Sessions — Stop being the queue." />
+    <meta
+      name="twitter:description"
+      content="Every session. One clear next move. One bedtime approval, provider evidence by morning."
+    />
+    <meta name="twitter:image" content="/og-launch.png" />
+    <link rel="canonical" href="https://sessions.vibejason.com/" />
+    <link
+      rel="preload"
+      href="/instrument-sans.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <link rel="icon" href="/app-icon.png" />
-    <title>God of Sessions — One bedtime approval</title>
+    <title>God of Sessions — Stop being the queue</title>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+
     <header class="site-header">
       <a class="brand" href="#" aria-label="God of Sessions home">
-        <img src="/app-icon.png" alt="" width="30" height="30" />
-        <span>God of Sessions</span>
+        <img src="/app-icon.png" alt="" width="32" height="32" />
+        <span>
+          <strong>God of Sessions</strong>
+          <small>Morrow · night control</small>
+        </span>
       </a>
       <nav aria-label="Primary">
-        <a href="#how">How it works</a>
-        <a href="#support">Support</a>
-        <a href="#install">Private alpha</a>
+        <a href="#proof" data-copy="navProof">Proof</a>
+        <a href="#system" data-copy="navSystem">How it works</a>
+        <a href="#support" data-copy="navSupport">Support</a>
       </nav>
-      <button class="language-toggle" type="button" aria-label="한국어로 보기">
-        <span class="is-active" data-language-label="en">EN</span>
-        <span aria-hidden="true">/</span>
-        <span data-language-label="ko">한국어</span>
-      </button>
+      <div class="header-actions">
+        <button class="language-toggle" type="button" aria-label="한국어로 보기">
+          <span class="is-active" data-language-label="en">EN</span>
+          <span aria-hidden="true">/</span>
+          <span data-language-label="ko">한국어</span>
+        </button>
+        <a class="header-cta" href="#install" data-copy="headerCta">
+          Private alpha <span aria-hidden="true">↘</span>
+        </a>
+      </div>
     </header>
 
     <main id="main">
       <section class="hero" aria-labelledby="hero-title">
-        <p class="eyebrow" data-copy="heroEyebrow">LOCAL AI SESSION CONTROL PLANE</p>
-        <h1 id="hero-title" data-copy="heroTitle">Stop babysitting<br />AI sessions.</h1>
-        <p class="hero-promise" data-copy="heroPromise">
-          One bedtime approval.<br class="mobile-break" />
-          <strong>Verified work by morning.</strong>
-        </p>
-        <p class="hero-support" data-copy="heroSupport">
-          Morrow finds what needs you now—and what can safely move overnight
-          across Codex, Claude Code, Grok, Cursor, Hermes, and OpenClaw.
-        </p>
-        <div class="hero-actions">
-          <a class="button button--primary" href="#install" data-copy="primaryCta">
-            Review the private alpha
-          </a>
-          <a class="button button--quiet" href="#proof" data-copy="secondaryCta">
-            Watch the 22-second proof
-          </a>
+        <div class="hero-copy">
+          <p class="eyebrow" data-copy="heroEyebrow">
+            THE NIGHT WATCH FOR YOUR AI SESSIONS
+          </p>
+          <h1 id="hero-title" data-copy="heroTitle">
+            STOP BEING<br />
+            <em>THE QUEUE.</em>
+          </h1>
+          <p class="hero-promise" data-copy="heroPromise">
+            Every session. <strong>One clear next move.</strong>
+          </p>
+          <p class="hero-support" data-copy="heroSupport">
+            God of Sessions sees the work scattered across Codex, Claude Code,
+            Grok, Cursor, Hermes, and OpenClaw—then tells you what needs you now
+            and what can move safely while you sleep.
+          </p>
+          <div class="hero-actions">
+            <a class="button button--primary" href="#proof" data-copy="primaryCta">
+              Watch the 22-second proof
+            </a>
+            <a class="button button--line" href="#install" data-copy="secondaryCta">
+              Review the private alpha
+            </a>
+          </div>
+          <p class="hero-trust" data-copy="heroTrust">
+            Local-first on macOS · read-only planning · nothing runs without approval
+          </p>
         </div>
-        <p class="hero-trust" data-copy="heroTrust">
-          macOS · local-first control plane · no work starts without approval
-        </p>
+
+        <aside class="signal-board" aria-label="Demonstration session signal map">
+          <div class="signal-board__top">
+            <span>MORROW WATCH</span>
+            <i><b></b> DEMO FLOW</i>
+          </div>
+          <div class="orbit-map" aria-hidden="true">
+            <span class="orbit orbit--one"></span>
+            <span class="orbit orbit--two"></span>
+            <span class="source-node source-node--codex">CX</span>
+            <span class="source-node source-node--claude">CL</span>
+            <span class="source-node source-node--grok">GK</span>
+            <span class="source-node source-node--cursor">CR</span>
+            <span class="source-node source-node--hermes">HM</span>
+            <span class="source-node source-node--openclaw">OC</span>
+            <span class="morrow-core">
+              <img src="/app-icon.png" alt="" width="62" height="62" />
+              <small>ONE CLEAR<br />NEXT MOVE</small>
+            </span>
+          </div>
+          <ol class="signal-ledger">
+            <li>
+              <span>01</span>
+              <p data-copy="signalOne">Needs you before sleep</p>
+              <strong>1</strong>
+            </li>
+            <li>
+              <span>02</span>
+              <p data-copy="signalTwo">Safe runs for tonight</p>
+              <strong>2</strong>
+            </li>
+            <li>
+              <span>03</span>
+              <p data-copy="signalThree">Morning review items</p>
+              <strong>3</strong>
+            </li>
+          </ol>
+        </aside>
+
+        <div class="provider-rail" aria-label="Supported session sources">
+          <span>CODEX</span>
+          <i></i>
+          <span>CLAUDE CODE</span>
+          <i></i>
+          <span>GROK</span>
+          <i></i>
+          <span>CURSOR</span>
+          <i></i>
+          <span>HERMES</span>
+          <i></i>
+          <span>OPENCLAW</span>
+        </div>
       </section>
 
       <section class="proof" id="proof" aria-labelledby="proof-title">
-        <div class="proof-heading">
-          <div>
-            <p class="eyebrow" data-copy="proofEyebrow">THE ACTUAL PRODUCT FLOW</p>
-            <h2 id="proof-title" data-copy="proofTitle">
-              One question before sleep.<br />Evidence when you return.
-            </h2>
-          </div>
+        <div class="proof-intro">
+          <p class="eyebrow" data-copy="proofEyebrow">THE ACTUAL PRODUCT · 22 SECONDS</p>
+          <h2 id="proof-title" data-copy="proofTitle">
+            One question before sleep.<br />
+            <em>Evidence when you return.</em>
+          </h2>
           <p data-copy="proofNote">
-            Real God of Sessions UI. Any bundled fixture in the cut is marked
-            “Demo data.”
+            No concept UI. This cut uses the real English product surface and
+            clearly marks bundled fixture data.
           </p>
         </div>
-        <div class="demo-window">
-          <div class="demo-chrome" aria-hidden="true">
-            <span></span><span></span><span></span>
+
+        <div class="proof-stage">
+          <div class="proof-stage__chrome" aria-hidden="true">
+            <div><span></span><span></span><span></span></div>
             <p>God of Sessions · Morrow Watch</p>
-            <i>22 sec</i>
+            <i>REAL APP UI · DEMO DATA</i>
           </div>
-          <video
-            class="demo-video"
-            autoplay
-            muted
-            loop
-            playsinline
-            preload="metadata"
-            poster="/proof-poster.jpg"
-            aria-label="God of Sessions product demonstration"
-          >
-            <source src="/god-of-sessions-launch-proof.mp4" type="video/mp4" />
-          </video>
-          <div class="demo-fallback">
-            <img src="/proof-poster.jpg" alt="God of Sessions showing a ranked overnight plan" />
-            <p data-copy="videoFallback">
-              Your browser did not load the product cut.
+          <div class="proof-media">
+            <video
+              class="demo-video"
+              autoplay
+              muted
+              loop
+              controls
+              playsinline
+              preload="metadata"
+              poster="/proof-poster.jpg"
+              aria-label="God of Sessions product demonstration"
+            >
+              <source src="/god-of-sessions-launch-proof.mp4" type="video/mp4" />
               <a href="/god-of-sessions-launch-proof.mp4">Open the MP4.</a>
-            </p>
+            </video>
+            <div class="demo-fallback">
+              <img
+                src="/proof-poster.jpg"
+                alt="God of Sessions ranking an overnight plan in the real product interface"
+                width="1920"
+                height="1080"
+                decoding="async"
+              />
+              <p data-copy="videoFallback">
+                The product cut could not load.
+                <a href="/god-of-sessions-launch-proof.mp4">Open the MP4.</a>
+              </p>
+            </div>
           </div>
         </div>
-        <ol class="proof-legend" aria-label="Demonstrated workflow">
-          <li><span>01</span><strong data-copy="legendOne">Find what needs you</strong></li>
-          <li><span>02</span><strong data-copy="legendTwo">Approve the exact night</strong></li>
-          <li><span>03</span><strong data-copy="legendThree">Review provider evidence</strong></li>
-        </ol>
+
+        <div class="proof-controls">
+          <p data-copy="proofControlLabel">JUMP TO THE DECISION</p>
+          <div role="group" aria-label="Product demo chapters">
+            <button type="button" data-video-time="2" aria-pressed="true">
+              <span>01</span><strong data-copy="chapterOne">Find what needs you</strong>
+            </button>
+            <button type="button" data-video-time="5">
+              <span>02</span><strong data-copy="chapterTwo">Rank the safe work</strong>
+            </button>
+            <button type="button" data-video-time="11.9">
+              <span>03</span><strong data-copy="chapterThree">Approve one exact night</strong>
+            </button>
+            <button type="button" data-video-time="14.6">
+              <span>04</span><strong data-copy="chapterFour">Review morning evidence</strong>
+            </button>
+          </div>
+        </div>
       </section>
 
-      <section class="workflow" id="how" aria-labelledby="workflow-title">
-        <div class="section-intro">
-          <p class="eyebrow" data-copy="workflowEyebrow">THE BEDTIME BRIEFING</p>
-          <h2 id="workflow-title" data-copy="workflowTitle">
-            Many sessions collapse into<br />one bounded decision.
-          </h2>
+      <section class="thesis" aria-labelledby="thesis-title">
+        <p class="eyebrow" data-copy="thesisEyebrow">THE REAL BOTTLENECK</p>
+        <h2 id="thesis-title" data-copy="thesisTitle">
+          Your agents did not stop.<br />
+          <em>Your attention fragmented.</em>
+        </h2>
+        <div class="thesis-grid">
+          <p data-copy="thesisBody">
+            The hard part is no longer starting another agent. It is remembering
+            which project matters, which subscription still has room, which run
+            is safe, and which decision only you can make.
+          </p>
+          <blockquote data-copy="thesisQuote">
+            God of Sessions turns that operator tax into one bedtime briefing.
+          </blockquote>
         </div>
-        <div class="workflow-list">
-          <article>
-            <span>01</span>
+      </section>
+
+      <section class="decision-system" id="system" aria-labelledby="system-title">
+        <header class="section-heading">
+          <p class="eyebrow" data-copy="systemEyebrow">FROM SESSION NOISE TO A NIGHT CONTRACT</p>
+          <h2 id="system-title" data-copy="systemTitle">
+            Three states.<br />
+            No mystery.
+          </h2>
+        </header>
+
+        <div class="decision-list">
+          <article class="decision decision--amber">
+            <div class="decision-number">01</div>
             <div>
-              <h3 data-copy="stepOneTitle">See the one thing waiting on you.</h3>
-              <p data-copy="stepOneBody">
-                Morrow Watch lifts human gates, unread results, and blocked work
-                above the background noise—without rewriting provider history.
+              <span data-copy="decisionOneEyebrow">NEEDS YOU</span>
+              <h3 data-copy="decisionOneTitle">Human gates rise above the noise.</h3>
+              <p data-copy="decisionOneBody">
+                Morrow Watch groups provider sessions by project and surfaces
+                decisions, unread results, conflicts, and external actions first.
               </p>
             </div>
-            <code>1 NEEDS YOU</code>
+            <code>READ ONLY</code>
           </article>
-          <article>
-            <span>02</span>
+          <article class="decision decision--teal">
+            <div class="decision-number">02</div>
             <div>
-              <h3 data-copy="stepTwoTitle">Ask what should move tonight.</h3>
-              <p data-copy="stepTwoBody">
-                Morrow compares bounded project context, available subscription
-                windows, safe routes, worktree collisions, and the time before
-                wake-up.
+              <span data-copy="decisionTwoEyebrow">SAFE TONIGHT</span>
+              <h3 data-copy="decisionTwoTitle">Context, capacity, and routes become one plan.</h3>
+              <p data-copy="decisionTwoBody">
+                Morrow ranks bounded project context against subscription windows,
+                resumable sessions, worktree collisions, sandbox policy, and your
+                wake deadline.
               </p>
             </div>
-            <code>2 SAFE RUNS</code>
+            <code>ONE APPROVAL</code>
           </article>
-          <article>
-            <span>03</span>
+          <article class="decision decision--paper">
+            <div class="decision-number">03</div>
             <div>
-              <h3 data-copy="stepThreeTitle">Approve the exact plan once.</h3>
-              <p data-copy="stepThreeBody">
-                The route, workspace, capacity pool, permission policy, maximum
-                runtime, and wake deadline are frozen before anything starts.
-              </p>
-            </div>
-            <code>APPROVAL GATED</code>
-          </article>
-          <article>
-            <span>04</span>
-            <div>
-              <h3 data-copy="stepFourTitle">Wake up to evidence, not open tabs.</h3>
-              <p data-copy="stepFourBody">
-                Morning Review joins the plan to provider receipts and bounded
-                workspace observations. You still decide whether the work is
-                correct.
+              <span data-copy="decisionThreeEyebrow">MORNING EVIDENCE</span>
+              <h3 data-copy="decisionThreeTitle">Wake up to receipts, not open tabs.</h3>
+              <p data-copy="decisionThreeBody">
+                Morning Review reconnects each exact night contract to provider
+                lifecycle evidence and bounded workspace observations. You still
+                decide whether the work is correct.
               </p>
             </div>
             <code>RECEIPT + DIFF</code>
@@ -164,45 +286,48 @@
         </div>
       </section>
 
-      <section class="trust" aria-labelledby="trust-title">
-        <div class="trust-statement">
-          <p class="eyebrow" data-copy="trustEyebrow">QUIET BY DESIGN</p>
-          <h2 id="trust-title" data-copy="trustTitle">
-            Morrow can recommend.<br />Only you can authorize.
+      <section class="boundary" aria-labelledby="boundary-title">
+        <div class="boundary-copy">
+          <p class="eyebrow" data-copy="boundaryEyebrow">QUIET BY DESIGN</p>
+          <h2 id="boundary-title" data-copy="boundaryTitle">
+            Morrow can recommend.<br />
+            <em>Only you can authorize.</em>
           </h2>
+          <p data-copy="boundaryBody">
+            Planning and preflight stay read-only. The route, workspace,
+            capacity pool, permission policy, time budget, and wake deadline are
+            frozen before anything starts.
+          </p>
         </div>
-        <dl>
-          <div>
-            <dt data-copy="trustLocalTitle">Local control plane</dt>
-            <dd data-copy="trustLocalBody">
-              Session indexes, plans, and receipts stay on your Mac. Model
-              prompts still follow the provider route you select.
-            </dd>
+        <div class="approval-spec" aria-label="Exact approval boundary">
+          <div class="approval-spec__top">
+            <span>ONE NIGHT · ONE APPROVAL</span>
+            <i>EXACT BOUNDARY</i>
           </div>
-          <div>
-            <dt data-copy="trustApprovalTitle">Exact approval boundary</dt>
-            <dd data-copy="trustApprovalBody">
-              Planning and preflight are read-only. A changed route, workspace,
-              budget, or schedule requires a new approval.
-            </dd>
-          </div>
-          <div>
-            <dt data-copy="trustEvidenceTitle">Provider-owned evidence</dt>
-            <dd data-copy="trustEvidenceBody">
-              Completion comes from exact Codex, Claude, or Hermes identities—
-              never from a dashboard saying “success.”
-            </dd>
-          </div>
-        </dl>
+          <dl>
+            <div><dt data-copy="specRoute">Route</dt><dd>Codex app-server</dd></div>
+            <div><dt data-copy="specWorkspace">Workspace</dt><dd>godofsessions</dd></div>
+            <div><dt data-copy="specPermission">Permission</dt><dd>workspace-write</dd></div>
+            <div><dt data-copy="specNetwork">Network</dt><dd>off</dd></div>
+            <div><dt data-copy="specBudget">Maximum</dt><dd>3h 30m</dd></div>
+            <div><dt data-copy="specDeadline">Wake deadline</dt><dd>07:30</dd></div>
+          </dl>
+          <p data-copy="specFooter">Change one field → approve again.</p>
+        </div>
       </section>
 
       <section class="support" id="support" aria-labelledby="support-title">
-        <div class="section-intro">
+        <header class="section-heading">
           <p class="eyebrow" data-copy="supportEyebrow">HONEST SUPPORT LEVELS</p>
           <h2 id="support-title" data-copy="supportTitle">
-            Observing a session is not<br />the same as running it.
+            Seeing a session is not<br />
+            the same as running it.
           </h2>
-        </div>
+          <p data-copy="supportIntro">
+            God of Sessions says exactly which evidence it can read, which
+            capacity it can verify, and which routes are safe enough to approve.
+          </p>
+        </header>
         <div class="support-table" role="table" aria-label="Provider support">
           <div class="support-row support-row--head" role="row">
             <span role="columnheader" data-copy="providerColumn">Provider</span>
@@ -211,46 +336,57 @@
             <span role="columnheader" data-copy="runColumn">Approved run</span>
           </div>
           <div class="support-row" role="row">
-            <strong role="cell">Codex</strong><span class="yes" role="cell">Yes</span><span class="yes" role="cell">Yes</span><span class="yes" role="cell">Yes</span>
+            <strong role="cell">Codex</strong><span class="yes" role="cell" data-copy="yes">Yes</span><span class="yes" role="cell" data-copy="yes">Yes</span><span class="yes" role="cell" data-copy="yes">Yes</span>
           </div>
           <div class="support-row" role="row">
-            <strong role="cell">Claude Code</strong><span class="yes" role="cell">Yes</span><span class="yes" role="cell">Yes</span><span class="yes" role="cell">Yes</span>
+            <strong role="cell">Claude Code</strong><span class="yes" role="cell" data-copy="yes">Yes</span><span class="yes" role="cell" data-copy="yes">Yes</span><span class="yes" role="cell" data-copy="yes">Yes</span>
           </div>
           <div class="support-row" role="row">
-            <strong role="cell">Hermes</strong><span class="yes" role="cell">Yes</span><span class="route" role="cell">By route</span><span class="yes" role="cell">Yes</span>
+            <strong role="cell">Hermes</strong><span class="yes" role="cell" data-copy="yes">Yes</span><span class="route" role="cell" data-copy="byRoute">By route</span><span class="yes" role="cell" data-copy="yes">Yes</span>
           </div>
           <div class="support-row" role="row">
-            <strong role="cell">Grok Build</strong><span class="yes" role="cell">Yes</span><span class="yes" role="cell">Yes</span><span class="route" role="cell">Via Hermes</span>
+            <strong role="cell">Grok Build</strong><span class="yes" role="cell" data-copy="yes">Yes</span><span class="yes" role="cell" data-copy="yes">Yes</span><span class="route" role="cell" data-copy="viaHermes">Via Hermes</span>
           </div>
           <div class="support-row" role="row">
-            <strong role="cell">Cursor</strong><span class="route" role="cell">Metadata</span><span role="cell">—</span><span role="cell">Not yet</span>
+            <strong role="cell">Cursor</strong><span class="route" role="cell" data-copy="metadata">Metadata</span><span role="cell">—</span><span role="cell" data-copy="notYet">Not yet</span>
           </div>
           <div class="support-row" role="row">
-            <strong role="cell">OpenClaw</strong><span class="yes" role="cell">Yes</span><span class="route" role="cell">Adapter</span><span role="cell">Not yet</span>
+            <strong role="cell">OpenClaw</strong><span class="yes" role="cell" data-copy="yes">Yes</span><span class="route" role="cell" data-copy="adapter">Adapter</span><span role="cell" data-copy="notYet">Not yet</span>
           </div>
         </div>
         <p class="support-footnote" data-copy="supportFootnote">
-          Direct Grok, Cursor, and OpenClaw write paths stay disabled until
-          God of Sessions can show exactly what was authorized and return a
-          run record you can revisit.
+          Direct Grok, Cursor, and OpenClaw write paths stay disabled until the
+          exact authorization boundary and a durable run record can be proven.
         </p>
       </section>
 
       <section class="install" id="install" aria-labelledby="install-title">
-        <img class="install-morrow" src="/morrow-morning.png" alt="" />
+        <div class="install-visual">
+          <span class="install-orbit install-orbit--one"></span>
+          <span class="install-orbit install-orbit--two"></span>
+          <img
+            src="/morrow-morning.webp"
+            alt=""
+            width="1672"
+            height="941"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
         <div class="install-copy">
           <p class="eyebrow" data-copy="installEyebrow">PRIVATE ALPHA · APPLE SILICON MAC</p>
           <h2 id="install-title" data-copy="installTitle">
-            Put Morrow on<br />the night shift.
+            Put Morrow on<br />
+            <em>the night shift.</em>
           </h2>
           <p data-copy="installBody">
-            The alpha is functional, but the public Mac build is not yet
-            notarized. Download only if you are comfortable testing an early
-            local developer tool and reviewing the unnotarized-build warning.
+            The product works, but the public Mac build is not notarized yet.
+            Download only if you are comfortable testing an early local
+            developer tool and reviewing the unnotarized-build warning.
           </p>
           <div class="install-actions">
             <a
-              class="button button--primary"
+              class="button button--paper"
               href="/downloads/God-of-Sessions_0.1.0_aarch64.dmg"
               download
               data-download-link
@@ -259,50 +395,54 @@
               Download private alpha
             </a>
             <a class="text-link" href="#install-notes" data-copy="installNotesCta">
-              Read install notes
+              Read install notes ↓
             </a>
           </div>
           <p class="artifact-state" data-artifact-state data-copy="artifactPending">
-            Local artifact pending final overnight verification.
+            Local artifact pending final verification.
           </p>
         </div>
       </section>
 
       <section class="install-notes" id="install-notes" aria-labelledby="notes-title">
-        <h2 id="notes-title" data-copy="notesTitle">Before you install</h2>
+        <div>
+          <p class="eyebrow">INSTALL BOUNDARY</p>
+          <h2 id="notes-title" data-copy="notesTitle">Before you install</h2>
+        </div>
         <ol>
           <li data-copy="noteOne">
-            This build is Developer ID signed, but it is not a public-launch
-            artifact until Apple notarization and a clean Gatekeeper check are complete.
+            Developer ID signed, but not a public-launch artifact until Apple
+            notarization and a clean Gatekeeper check are complete.
           </li>
           <li data-copy="noteTwo">
-            If you are not already signed in, “Connect subscription” opens the
-            official Codex or Claude login. Morrow checks connection state,
-            never the token value.
+            “Connect subscription” opens the official Codex or Claude login.
+            Morrow checks connection state, never the token value.
           </li>
           <li data-copy="noteThree">
-            Source session stores are opened read-only. Work begins only after
-            the separate exact approval screen.
+            Provider session stores open read-only. Work starts only after the
+            separate exact approval screen.
           </li>
         </ol>
       </section>
 
       <section class="faq" aria-labelledby="faq-title">
-        <p class="eyebrow">FAQ</p>
-        <h2 id="faq-title" data-copy="faqTitle">Short answers before bedtime.</h2>
+        <header class="section-heading">
+          <p class="eyebrow">FAQ</p>
+          <h2 id="faq-title" data-copy="faqTitle">Short answers before bedtime.</h2>
+        </header>
         <div class="faq-list">
           <details>
             <summary data-copy="faqOneQuestion">Is this another coding agent?</summary>
             <p data-copy="faqOneAnswer">
               No. It reads and coordinates the agents you already use. Codex,
-              Claude Code, and Hermes still own the actual execution and receipt.
+              Claude Code, and Hermes still own execution and provider receipts.
             </p>
           </details>
           <details>
             <summary data-copy="faqTwoQuestion">Does it act without asking?</summary>
             <p data-copy="faqTwoAnswer">
               No. Recommendations and preflight are read-only. The frozen night
-              portfolio requires an exact, expiring approval.
+              plan requires an exact, expiring approval.
             </p>
           </details>
           <details>
@@ -326,11 +466,12 @@
     <footer>
       <div class="brand">
         <img src="/app-icon.png" alt="" width="28" height="28" />
-        <span>God of Sessions</span>
+        <span><strong>God of Sessions</strong><small>Morrow · night control</small></span>
       </div>
       <p data-copy="footerCopy">Every session. One clear next move.</p>
       <p>© 2026 Vibe Jason</p>
     </footer>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

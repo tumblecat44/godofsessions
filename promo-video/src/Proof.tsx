@@ -67,7 +67,7 @@ function Hook() {
       style={{ opacity: sceneOpacity(frame, duration) }}
     >
       <Img
-        src={staticFile("proof/app-watch.png")}
+        src={staticFile("proof/app-watch-en.png")}
         className="proof-hook__image"
         style={{ transform: `scale(${1.05 + frame * 0.0007})` }}
       />
@@ -163,7 +163,7 @@ function ApprovalScene() {
       style={{ opacity: sceneOpacity(frame, duration) }}
     >
       <Img
-        src={staticFile("proof/app-approval.png")}
+        src={staticFile("proof/app-approval-en.png")}
         className="proof-approval__image"
         style={{
           transform: `scale(${0.94 + modal * 0.06})`,
@@ -241,7 +241,7 @@ export function Proof() {
       </Sequence>
       <Sequence from={60} durationInFrames={102} premountFor={20}>
         <AppScene
-          src="proof/app-watch.png"
+          src="proof/app-watch-en.png"
           duration={102}
           kicker="MORROW WATCH"
           title="Six sources. One thing needs you."
@@ -251,7 +251,7 @@ export function Proof() {
       </Sequence>
       <Sequence from={150} durationInFrames={116} premountFor={20}>
         <AppScene
-          src="proof/app-answer.png"
+          src="proof/app-answer-en.png"
           duration={116}
           kicker="ASK ONCE"
           title="What should move tonight?"
@@ -261,7 +261,7 @@ export function Proof() {
       </Sequence>
       <Sequence from={254} durationInFrames={114} premountFor={20}>
         <AppScene
-          src="proof/app-plan.png"
+          src="proof/app-plan-en.png"
           duration={114}
           kicker="REVIEW THE PLAN"
           title="Exact route. Exact time. Exact evidence."
@@ -274,7 +274,7 @@ export function Proof() {
       </Sequence>
       <Sequence from={438} durationInFrames={112} premountFor={20}>
         <AppScene
-          src="proof/app-morning.png"
+          src="proof/app-morning-en.png"
           duration={112}
           kicker="MORNING REVIEW"
           title="Wake up to evidence, not open tabs."

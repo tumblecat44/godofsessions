@@ -8,11 +8,13 @@ Two silent-first Remotion cuts: the original 32-second brand film and a
 - `out/god-of-sessions-x-launch.mp4`
 - `out/god-of-sessions-launch-proof.mp4`
 - `out/god-of-sessions-launch-proof-poster.png`
+- `out/god-of-sessions-launch-proof-contact-sheet-en.jpg`
 - Both are 1920×1080, 30 fps, H.264, and designed to communicate without audio
 
-The proof cut labels every current-app capture as `REAL APP UI · DEMO DATA`.
-It should be the first public product demonstration because it shows the
-actual Morrow Watch → recommendation → approval → Morning Review path. The
+The proof cut uses the English product surface throughout and labels every
+current-app capture as `REAL APP UI · DEMO DATA`. It should be the first
+public product demonstration because it shows the actual Morrow Watch →
+question → ranked recommendation → exact approval → Morning Review path. The
 longer film remains the brand/story asset.
 
 ## Brand-film story
