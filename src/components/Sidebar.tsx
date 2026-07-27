@@ -118,7 +118,7 @@ export function Sidebar({
         >
           <span className="all-sources-mark">ALL</span>
           <span>{ko ? "모든 세션" : "All sessions"}</span>
-          <strong>{compactNumber(total)}</strong>
+          <strong>{compactNumber(total, language)}</strong>
         </button>
         {providers.map((provider) => (
           <button
@@ -140,7 +140,7 @@ export function Sidebar({
           >
             <ProviderMark provider={provider.provider} />
             <span>{providerNames[provider.provider]}</span>
-            <strong>{compactNumber(provider.session_count)}</strong>
+            <strong>{compactNumber(provider.session_count, language)}</strong>
             <i
               className={`source-state source-state--${provider.state}`}
               aria-label={

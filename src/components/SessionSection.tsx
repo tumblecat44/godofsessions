@@ -1,4 +1,4 @@
-import type { Session } from "../types";
+import type { AppLanguage, Session } from "../types";
 import { SessionRow } from "./SessionRow";
 
 interface SessionSectionProps {
@@ -9,13 +9,8 @@ interface SessionSectionProps {
   total: number;
   tone: "attention" | "live" | "recent";
   limit?: number;
+  language: AppLanguage;
 }
-
-const emptyCopy = {
-  attention: "지금 바로 확인할 신호가 없습니다.",
-  live: "현재 작업 중으로 관측된 세션이 없습니다.",
-  recent: "조건에 맞는 최근 세션이 없습니다.",
-};
 
 export function SessionSection({
   eyebrow,
@@ -25,7 +20,20 @@ export function SessionSection({
   total,
   tone,
   limit = 8,
+  language,
 }: SessionSectionProps) {
+  const ko = language === "ko";
+  const emptyCopy = {
+    attention: ko
+      ? "지금 바로 확인할 신호가 없습니다."
+      : "Nothing needs your attention right now.",
+    live: ko
+      ? "현재 작업 중으로 관측된 세션이 없습니다."
+      : "No sessions are currently observed as running.",
+    recent: ko
+      ? "조건에 맞는 최근 세션이 없습니다."
+      : "No recent sessions match these filters.",
+  };
   const visible = sessions.slice(0, limit);
 
   return (
@@ -51,6 +59,7 @@ export function SessionSection({
               key={session.id}
               session={session}
               emphasis={tone === "recent" ? "standard" : tone}
+              language={language}
             />
           ))
         ) : (

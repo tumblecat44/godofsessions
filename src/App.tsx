@@ -18,6 +18,7 @@ import { SettingsView } from "./components/SettingsView";
 import { OvernightView } from "./components/OvernightView";
 import { fallbackTitle, relativeTime } from "./lib/format";
 import { loadPreferences, savePreferences } from "./lib/preferences";
+import { localizePreviewFixture } from "./lib/preview-localization";
 import { previewWorkspaceOverview } from "./preview-data";
 import type {
   Provider,
@@ -88,7 +89,10 @@ function App() {
     try {
       const overview = isTauri()
         ? await invoke<WorkspaceOverview>("load_workspace_overview")
-        : previewWorkspaceOverview;
+        : localizePreviewFixture(
+            previewWorkspaceOverview,
+            preferences.language,
+          );
       setState({ kind: "ready", overview });
     } catch (error) {
       setState({
@@ -101,7 +105,7 @@ function App() {
     } finally {
       setIsRefreshing(false);
     }
-  }, []);
+  }, [preferences.language]);
 
   useEffect(() => {
     void load();
@@ -216,9 +220,10 @@ function App() {
           contextIndex={state.overview.context_index}
           isRefreshing={isRefreshing}
           onRefresh={() => void load()}
+          language={preferences.language}
         />
       ) : activeView === "overnight" ? (
-        <OvernightView />
+        <OvernightView language={preferences.language} />
       ) : activeView === "settings" ? (
         <SettingsView
           preferences={preferences}
@@ -288,7 +293,10 @@ function App() {
             <span>
               <i className="index-pulse" />
               {ko ? "로컬 인덱스" : "LOCAL INDEX"} ·{" "}
-              {relativeTime(state.overview.snapshot.generated_at)}
+              {relativeTime(
+                state.overview.snapshot.generated_at,
+                preferences.language,
+              )}
             </span>
             <span>
               <ShieldCheck size={14} />
@@ -324,6 +332,7 @@ function App() {
               total={needsMe.length}
               tone="attention"
               limit={6}
+              language={preferences.language}
             />
             <SessionSection
               eyebrow="LIVE ACTIVITY"
@@ -337,6 +346,7 @@ function App() {
               total={running.length}
               tone="live"
               limit={6}
+              language={preferences.language}
             />
           </div>
 
@@ -352,6 +362,7 @@ function App() {
             total={recent.length}
             tone="recent"
             limit={12}
+            language={preferences.language}
           />
         </main>
       )}

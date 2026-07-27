@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { compactPath, providerNames, relativeTime } from "../lib/format";
 import type {
+  AppLanguage,
   ControlBoard,
   ContextIndex,
   HumanGateKind,
@@ -26,65 +27,79 @@ interface ControlBoardViewProps {
   contextIndex: ContextIndex;
   isRefreshing: boolean;
   onRefresh: () => void;
+  language: AppLanguage;
 }
 
-const lanes: Array<{
+type BoardLane = {
   state: WorkItemState;
   eyebrow: string;
   title: string;
   description: string;
-}> = [
-  {
-    state: "needs_me",
-    eyebrow: "HUMAN GATE",
-    title: "사람 확인",
-    description: "결정·권한·외부 작업",
-  },
-  {
-    state: "ready",
-    eyebrow: "NIGHT QUEUE",
-    title: "오늘 밤 준비됨",
-    description: "안전하게 이어갈 후보",
-  },
-  {
-    state: "waiting",
-    eyebrow: "PROVIDER GATE",
-    title: "대기 중",
-    description: "시간·의존성 해제 전",
-  },
-  {
-    state: "running",
-    eyebrow: "LIVE RUNS",
-    title: "진행 중",
-    description: "현재 공급자가 수행 중",
-  },
-  {
-    state: "review",
-    eyebrow: "MORNING REVIEW",
-    title: "검토 대기",
-    description: "끝난 결과를 확인할 차례",
-  },
-];
-
-const gateLabels: Record<HumanGateKind, string> = {
-  decision: "판단 필요",
-  external_action: "외부 작업",
-  capability: "권한·기능 필요",
-  conflict: "동시 실행 충돌",
 };
 
-const sourceLabels: Record<WorkItemOrigin, string> = {
-  inferred_session: "세션에서 추론",
-  hermes_kanban: "Hermes Kanban",
-};
+function boardCopy(language: AppLanguage) {
+  const ko = language === "ko";
+  const lanes: BoardLane[] = [
+    {
+      state: "needs_me",
+      eyebrow: "HUMAN GATE",
+      title: ko ? "사람 확인" : "Needs you",
+      description: ko ? "결정·권한·외부 작업" : "Decisions · access · external actions",
+    },
+    {
+      state: "ready",
+      eyebrow: "NIGHT QUEUE",
+      title: ko ? "오늘 밤 준비됨" : "Safe tonight",
+      description: ko ? "안전하게 이어갈 후보" : "Candidates with a safe route",
+    },
+    {
+      state: "waiting",
+      eyebrow: "PROVIDER GATE",
+      title: ko ? "대기 중" : "Waiting",
+      description: ko ? "시간·의존성 해제 전" : "Blocked by time or dependencies",
+    },
+    {
+      state: "running",
+      eyebrow: "LIVE RUNS",
+      title: ko ? "진행 중" : "Running",
+      description: ko ? "현재 공급자가 수행 중" : "Active in a provider",
+    },
+    {
+      state: "review",
+      eyebrow: "MORNING REVIEW",
+      title: ko ? "검토 대기" : "Review",
+      description: ko ? "끝난 결과를 확인할 차례" : "Completed results awaiting you",
+    },
+  ];
+  const gates: Record<HumanGateKind, string> = {
+    decision: ko ? "판단 필요" : "Decision needed",
+    external_action: ko ? "외부 작업" : "External action",
+    capability: ko ? "권한·기능 필요" : "Access or capability",
+    conflict: ko ? "동시 실행 충돌" : "Concurrent-run conflict",
+  };
+  const sources: Record<WorkItemOrigin, string> = {
+    inferred_session: ko ? "세션에서 추론" : "Inferred from sessions",
+    hermes_kanban: "Hermes Kanban",
+  };
+  return { ko, lanes, gates, sources };
+}
 
-function ProjectMemory({ brief }: { brief: ProjectContextBrief }) {
+function ProjectMemory({
+  brief,
+  language,
+}: {
+  brief: ProjectContextBrief;
+  language: AppLanguage;
+}) {
+  const ko = language === "ko";
   return (
     <details className="project-memory">
       <summary>
         <span>
           <Database size={12} />
-          오늘의 대화 {brief.excerpt_count}개
+          {ko
+            ? `오늘의 대화 ${brief.excerpt_count}개`
+            : `${brief.excerpt_count} conversation excerpts today`}
         </span>
         <small>
           {brief.providers.map((provider) => providerNames[provider]).join(" · ")}
@@ -97,14 +112,16 @@ function ProjectMemory({ brief }: { brief: ProjectContextBrief }) {
             key={`${excerpt.session_id}:${excerpt.timestamp ?? index}:${index}`}
             className={`memory-excerpt memory-excerpt--${excerpt.role}`}
           >
-            <span>{excerpt.role === "user" ? "나" : "AI"}</span>
+            <span>{excerpt.role === "user" ? (ko ? "나" : "You") : "AI"}</span>
             <p>{excerpt.text}</p>
             <small>{providerNames[excerpt.provider]}</small>
           </li>
         ))}
       </ol>
       <footer>
-        임시 발췌 · 시스템 지시, 도구 기록, 내부 추론 제외
+        {ko
+          ? "임시 발췌 · 시스템 지시, 도구 기록, 내부 추론 제외"
+          : "Ephemeral excerpts · system instructions, tool logs, and hidden reasoning excluded"}
       </footer>
     </details>
   );
@@ -113,10 +130,13 @@ function ProjectMemory({ brief }: { brief: ProjectContextBrief }) {
 function WorkCard({
   item,
   contextBrief,
+  language,
 }: {
   item: WorkItem;
   contextBrief: ProjectContextBrief | null;
+  language: AppLanguage;
 }) {
+  const { ko, lanes, gates, sources } = boardCopy(language);
   return (
     <article className={`work-card work-card--${item.state}`}>
       <div className="provenance-rail">
@@ -126,7 +146,7 @@ function WorkCard({
           <span className="all-sources-mark">ALL</span>
         )}
         <i aria-hidden="true" />
-        <span>{sourceLabels[item.origin]}</span>
+        <span>{sources[item.origin]}</span>
         <ArrowRight size={11} aria-hidden="true" />
         <strong>
           {lanes.find((lane) => lane.state === item.state)?.title}
@@ -137,7 +157,7 @@ function WorkCard({
         <span>{item.project}</span>
         <h3>{item.title}</h3>
         {item.workspace && (
-          <p title={item.workspace}>{compactPath(item.workspace)}</p>
+          <p title={item.workspace}>{compactPath(item.workspace, language)}</p>
         )}
       </div>
 
@@ -152,7 +172,7 @@ function WorkCard({
         <div className="human-gate-note">
           <AlertTriangle size={13} />
           <span>
-            <strong>{gateLabels[item.human_gate]}</strong>
+            <strong>{gates[item.human_gate]}</strong>
             {item.human_gate_reason}
           </span>
         </div>
@@ -161,7 +181,9 @@ function WorkCard({
       <details className="work-card-evidence">
         <summary>
           <Database size={12} />
-          근거 {item.evidence.length}개 · 세션 {item.session_ids.length}개
+          {ko
+            ? `근거 ${item.evidence.length}개 · 세션 ${item.session_ids.length}개`
+            : `${item.evidence.length} evidence · ${item.session_ids.length} sessions`}
         </summary>
         <ul>
           {item.evidence.map((evidence) => (
@@ -177,10 +199,18 @@ function WorkCard({
         )}
       </details>
 
-      {contextBrief && <ProjectMemory brief={contextBrief} />}
+      {contextBrief && (
+        <ProjectMemory brief={contextBrief} language={language} />
+      )}
 
       <footer>
-        <span>{item.updated_at ? relativeTime(item.updated_at) : "시각 불명"}</span>
+        <span>
+          {item.updated_at
+            ? relativeTime(item.updated_at, language)
+            : ko
+              ? "시각 불명"
+              : "Time unknown"}
+        </span>
         {item.model_override && <span>{item.model_override}</span>}
       </footer>
     </article>
@@ -192,7 +222,9 @@ export function ControlBoardView({
   contextIndex,
   isRefreshing,
   onRefresh,
+  language,
 }: ControlBoardViewProps) {
+  const { ko, lanes } = boardCopy(language);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<WorkItemOrigin | "all">("all");
   const briefFor = (item: WorkItem) =>
@@ -236,18 +268,19 @@ export function ControlBoardView({
       <header className="workspace-header board-header">
         <div className="header-copy">
           <span className="kicker">CONTROL BOARD</span>
-          <h1>작업은 어디에 걸려 있나요?</h1>
+          <h1>{ko ? "작업은 어디에 걸려 있나요?" : "Where is work waiting?"}</h1>
           <p>
-            공급자별 세션을 프로젝트 작업으로 묶고, 지금 사람에게 필요한 것과
-            밤새 맡길 수 있는 것을 분리합니다.
+            {ko
+              ? "공급자별 세션을 프로젝트 작업으로 묶고, 지금 사람에게 필요한 것과 밤새 맡길 수 있는 것을 분리합니다."
+              : "Turn provider sessions into project work, then separate what needs you now from what can move safely overnight."}
           </p>
         </div>
         <div className="board-header-actions">
           <span className="read-only-seal board-read-only">
             <ShieldCheck size={15} />
             <span>
-              <strong>원본 상태 보존</strong>
-              <small>드래그·수정·실행 없음</small>
+              <strong>{ko ? "원본 상태 보존" : "SOURCE STATE PRESERVED"}</strong>
+              <small>{ko ? "드래그·수정·실행 없음" : "No edits, drags, or runs"}</small>
             </span>
           </span>
           <button
@@ -255,7 +288,7 @@ export function ControlBoardView({
             type="button"
             onClick={onRefresh}
             disabled={isRefreshing}
-            aria-label="작업 관제판 새로고침"
+            aria-label={ko ? "작업 관제판 새로고침" : "Refresh control board"}
           >
             <RefreshCw
               size={16}
@@ -265,35 +298,38 @@ export function ControlBoardView({
         </div>
       </header>
 
-      <section className="board-pulse" aria-label="작업 상태 요약">
+      <section
+        className="board-pulse"
+        aria-label={ko ? "작업 상태 요약" : "Work status summary"}
+      >
         <div>
-          <span>사람 확인</span>
+          <span>{ko ? "사람 확인" : "NEEDS YOU"}</span>
           <strong>{count("needs_me")}</strong>
-          <small>잠들기 전에 볼 것</small>
+          <small>{ko ? "잠들기 전에 볼 것" : "Before you sleep"}</small>
         </div>
         <i aria-hidden="true" />
         <div className="board-pulse-primary">
-          <span>오늘 밤 준비됨</span>
+          <span>{ko ? "오늘 밤 준비됨" : "SAFE TONIGHT"}</span>
           <strong>{count("ready")}</strong>
-          <small>추천 엔진의 후보 풀</small>
+          <small>{ko ? "추천 엔진의 후보 풀" : "Candidate pool"}</small>
         </div>
         <i aria-hidden="true" />
         <div>
-          <span>대기 중</span>
+          <span>{ko ? "대기 중" : "WAITING"}</span>
           <strong>{count("waiting")}</strong>
-          <small>아직 실행 불가</small>
+          <small>{ko ? "아직 실행 불가" : "Not ready to run"}</small>
         </div>
         <i aria-hidden="true" />
         <div>
-          <span>진행 중</span>
+          <span>{ko ? "진행 중" : "RUNNING"}</span>
           <strong>{count("running")}</strong>
-          <small>중복 실행 금지</small>
+          <small>{ko ? "중복 실행 금지" : "No duplicate runs"}</small>
         </div>
         <i aria-hidden="true" />
         <div>
-          <span>검토 대기</span>
+          <span>{ko ? "검토 대기" : "REVIEW"}</span>
           <strong>{count("review")}</strong>
-          <small>아침에 확인할 결과</small>
+          <small>{ko ? "아침에 확인할 결과" : "Morning evidence"}</small>
         </div>
       </section>
 
@@ -304,17 +340,20 @@ export function ControlBoardView({
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="작업, 프로젝트, 담당자 검색"
-            aria-label="작업 검색"
+            placeholder={ko ? "작업, 프로젝트, 담당자 검색" : "Search work, project, or owner"}
+            aria-label={ko ? "작업 검색" : "Search work"}
           />
         </label>
-        <div className="board-source-filter" aria-label="작업 근거 필터">
+        <div
+          className="board-source-filter"
+          aria-label={ko ? "작업 근거 필터" : "Evidence source filter"}
+        >
           <ListFilter size={14} />
           {(
             [
-              ["all", "모든 근거"],
-              ["inferred_session", "세션 추론"],
-              ["hermes_kanban", "Hermes 작업"],
+              ["all", ko ? "모든 근거" : "All evidence"],
+              ["inferred_session", ko ? "세션 추론" : "Session inference"],
+              ["hermes_kanban", ko ? "Hermes 작업" : "Hermes work"],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -328,7 +367,9 @@ export function ControlBoardView({
           ))}
         </div>
         <span className="board-updated">
-          {relativeTime(board.generated_at)} 갱신
+          {ko
+            ? `${relativeTime(board.generated_at, language)} 갱신`
+            : `Updated ${relativeTime(board.generated_at, language)}`}
         </span>
       </section>
 
@@ -336,7 +377,9 @@ export function ControlBoardView({
         <details className="warning-strip board-warning">
           <summary>
             <AlertTriangle size={14} />
-            근거 제한 {board.warnings.length}개
+            {ko
+              ? `근거 제한 ${board.warnings.length}개`
+              : `${board.warnings.length} evidence limitations`}
           </summary>
           <ul>
             {board.warnings.map((warning) => (
@@ -350,7 +393,9 @@ export function ControlBoardView({
         <details className="warning-strip board-warning context-warning">
           <summary>
             <Database size={14} />
-            대화 문맥 제한 {contextIndex.warnings.length}개
+            {ko
+              ? `대화 문맥 제한 ${contextIndex.warnings.length}개`
+              : `${contextIndex.warnings.length} context limitations`}
           </summary>
           <ul>
             {contextIndex.warnings.map((warning) => (
@@ -360,7 +405,10 @@ export function ControlBoardView({
         </details>
       )}
 
-      <section className="control-board" aria-label="작업 관제판">
+      <section
+        className="control-board"
+        aria-label={ko ? "작업 관제판" : "Control board"}
+      >
         {lanes.map((lane) => {
           const items = filtered.filter((item) => item.state === lane.state);
           return (
@@ -381,13 +429,14 @@ export function ControlBoardView({
                   <WorkCard
                     item={item}
                     contextBrief={briefFor(item)}
+                    language={language}
                     key={item.id}
                   />
                 ))}
                 {items.length === 0 && (
                   <div className="board-lane-empty">
                     <LockKeyhole size={15} />
-                    <span>현재 작업 없음</span>
+                    <span>{ko ? "현재 작업 없음" : "No work here"}</span>
                   </div>
                 )}
               </div>
