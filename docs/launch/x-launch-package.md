@@ -9,17 +9,17 @@ unless the P0 release checks clear before then.
 
 ## Primary English post
 
-Your AI agents kept running.
+Your agents didn't stop.
+Your attention fragmented.
 
-You became the queue.
+Stop being the queue.
 
-God of Sessions is a local control plane for Codex, Claude Code, Grok, Cursor,
-Hermes, and OpenClaw. Morrow finds what needs you now, ranks what can move
-safely overnight, and asks for one exact approval.
+God of Sessions finds what needs you now, ranks what can move safely
+overnight, and freezes one exact approval.
 
-Wake up to provider receipts and workspace evidence—not open tabs.
+Every session. One clear next move.
 
-Private alpha for Apple Silicon Mac:
+Private alpha:
 https://sessions.vibejason.com
 
 ## First reply
@@ -50,9 +50,10 @@ God of Sessions는 기존 세션을 한 앱으로 “옮기는” 제품이 아�
 
 ## Behind-the-scenes reply
 
-The launch proof is a 22-second Remotion cut made from the current desktop
-build. Every fixture-backed app frame is labeled `REAL APP UI · DEMO DATA`;
-the longer 32-second brand film is preserved separately.
+The launch proof is a silent 22-second Remotion cut made entirely from the
+current English desktop product surface. Every fixture-backed app frame is
+labeled `REAL APP UI · DEMO DATA`; the longer 32-second brand film is
+preserved separately.
 
 The visual direction was inspired by the public Claude Opus 5 code-video post,
 then rebuilt around God of Sessions' actual control-plane sequence rather than
@@ -65,7 +66,9 @@ claiming a generic “all agents in one app” story.
 - Proof poster / X thumbnail:
   `promo-video/out/god-of-sessions-launch-proof-poster.png`
 - Contact sheet:
-  `promo-video/out/god-of-sessions-launch-proof-contact-sheet.jpg`
+  `promo-video/out/god-of-sessions-launch-proof-contact-sheet-en.jpg`
+- Landing social card:
+  `landing/public/og-launch.png`
 - Original brand film:
   `promo-video/out/god-of-sessions-x-launch.mp4`
 

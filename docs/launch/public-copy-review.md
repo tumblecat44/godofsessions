@@ -1,119 +1,70 @@
-# Public Copy Review — launch surfaces
+# Public copy review — launch surfaces
 
-**Mode:** audit+fix  
 **Scope:** `landing/index.html`, `landing/src/main.ts`, `landing/README.md`,
-`docs/launch/x-launch-package.md`  
-**Audience:** developers already using multiple local coding agents  
+`docs/launch/x-launch-package.md`
+
+**Audience:** developers already using several local coding agents
+
 **Date:** 2026-07-26
 
-## Counts
+**Result:** pass for private alpha; public-download claims remain blocked
 
-| P0 | P1 | P2 | Pass (reviewed) |
-| ---: | ---: | ---: | ---: |
-| 0 | 3 | 0 | 54 |
+## Copy contract
 
-### Narrative
+| Layer | Launch copy | Job |
+| --- | --- | --- |
+| Hook | **Stop being the queue.** | Names the operator bottleneck in a repeatable phrase |
+| Product promise | **Every session. One clear next move.** | Describes the stable value beyond the overnight use case |
+| Install outcome | **One bedtime approval. Verified work by morning.** | Gives a concrete reason to install |
+| Mechanism | Morrow finds what needs you now and what can safely move overnight. | Explains how the outcome happens |
 
-| N-P0 | N-P1 | N-P2 |
-| ---: | ---: | ---: |
-| 0 | 0 | 0 |
-
-## Post-fix status
-
-| Unresolved P0 | Unresolved P1 | Blocked | Deferred |
-| ---: | ---: | ---: | ---: |
-| 0 | 0 | 0 | 0 |
-
-**Surfaces scanned:** landing hero, proof, workflow, trust, support matrix,
-install, install notes, FAQ, metadata, landing developer README, and the drafted
-X package.  
-**Controls reviewed:** header anchors, language toggle, two hero CTAs, install
-download and notes CTAs, and four FAQ disclosures.
-
-## Findings and applied rewrites
-
-### P1-001 — Hero CTA implied an immediate download
-
-- **Surface:** landing hero
-- **Current:** `Get the private alpha`
-- **User question:** What happens when I press this?
-- **Issue:** The link scrolls to a signed-but-unnotarized install review; it
-  does not immediately download the DMG.
-- **Applied:** `Review the private alpha` /
-  `프라이빗 알파 설치 확인`
-- **Result:** pre-click expectation now matches the install section.
-
-### P1-002 — Support note exposed a security implementation phrase
-
-- **Surface:** support matrix footnote
-- **Current:** permission and receipt contracts must `fail closed`
-- **User question:** Why can I not run these providers yet?
-- **Issue:** “Fail closed” names an engineering policy, not the condition the
-  user will be able to verify.
-- **Applied:** direct execution stays off until the product can show exactly
-  what was authorized and return a run record the user can revisit.
-- **Result:** the limitation is expressed as predictable control and evidence.
-
-### P1-003 — Install note predicted login screens unconditionally
-
-- **Surface:** pre-install notes
-- **Current:** first run opens Codex and Claude browser logins
-- **User question:** What will happen after install?
-- **Issue:** already-connected users see verified status instead; unconnected
-  users open one official flow by pressing `Connect subscription`.
-- **Applied:** the note now states the exact conditional action and what
-  Morrow checks.
-- **Result:** the install promise matches the tested onboarding path.
+“Verified work” means verified provider provenance and bounded workspace
+evidence. It never means that the product proves the code is correct.
 
 ## Narrative architecture
 
-### Cluster map in display order
-
-| # | Section | Job |
+| # | Section | User question answered |
 | ---: | --- | --- |
-| 1 | Hero | pain, one install outcome, review CTA |
-| 2 | Actual product flow | strongest real-UI proof |
-| 3 | Bedtime briefing | four user actions |
-| 4 | Quiet by design | control and predictability |
-| 5 | Provider support | honest capability boundary |
-| 6 | Private alpha | exact install decision |
-| 7 | Install notes | blockers and next events |
-| 8 | FAQ | category, authorization, data route, evidence limit |
+| 1 | Hero + Morrow Watch signal board | What is this, and why should I care? |
+| 2 | Actual English product proof | Is it real? |
+| 3 | Operator bottleneck thesis | Why do existing agent launchers not solve this? |
+| 4 | Three-state decision system | What does Morrow actually decide? |
+| 5 | Exact approval instrument | What can happen without me? |
+| 6 | Provider support matrix | What works today? |
+| 7 | Private-alpha install | Can I try it, and what is the risk? |
+| 8 | Install boundary + FAQ | What happens next? |
 
-### Click path
+The strongest proof remains section 2. Character art appears only in the
+below-fold install close and does not displace actual product evidence.
 
-1. `Review the private alpha`
-2. read the notarization boundary
-3. `Download private alpha`
-4. complete four-step onboarding
-5. ask Morrow or review an overnight plan
-6. receive provider receipt plus bounded workspace evidence
+## Claim language checked
 
-### Strongest proof
+- **Six sources discovered** is allowed; **six providers executed** is not.
+- Planning, recommendation, and preflight are read-only.
+- An approved run is limited to Codex, Claude, and Hermes routes described in
+  the support matrix.
+- Direct Grok, Cursor, and OpenClaw write paths are visibly `Not yet`.
+- `Local-first` modifies the control plane, not provider prompts.
+- Morning Review proves receipt linkage and observed workspace evidence, not
+  correctness.
+- The download is always called **private alpha** and states that Apple
+  notarization is pending.
 
-- **Content:** 22-second current-app cut showing Morrow Watch,
-  recommendation, exact approval, and Morning Review.
-- **Rank:** section 2.
-- **Result:** pass; proof appears before workflow philosophy and support detail.
+## Applied clarity fixes
 
-The page has one entry path, so no artificial two-path fork is needed. The
-outcome promise appears in the hero and brand close; intermediate sections add
-new evidence instead of paraphrasing it.
+- Put the concrete proof CTA before the alpha-review CTA.
+- Replaced implementation jargon with the exact user-visible approval fields.
+- Added chapter labels that name outcomes instead of video timestamps.
+- Made unsupported provider execution a first-class table value.
+- Kept `REAL APP UI · DEMO DATA` visible in every fixture-backed proof frame.
+- Shortened the Korean hero to avoid a layout-driven change in emphasis.
+- Aligned X copy, metadata, social image, and landing hook around the same
+  queue → clear-next-move story.
 
 ## Certification
 
-**Result: PASS**
-
-| Edit | Result | Next event | No internals | No jargon | Why press | Verb + object | Expectation matches | Auxiliary |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1-001 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | CTA ✓ |
-| P1-002 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Trust ✓ |
-| P1-003 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Trust ✓ |
-
-- Unresolved P0: **0**
-- Unresolved P1: **0**
-- Blocked P0/P1: **0**
-- Scope verification: all applied edits are within the enumerated launch
-  surfaces.
-
-**Certified by:** `public-copy-review` Phase 3
+- Unresolved copy P0: **0**
+- Unresolved copy P1: **0**
+- Product/operations blockers represented honestly: **3**
+  (notarization, hosted artifact path, clean-machine install proof)
+- External actions performed: **none**

@@ -66,12 +66,14 @@ memorable. Do not rename the product to Morrow.
 
 ## Launch copy hierarchy
 
-1. **Stop babysitting AI sessions.**
-2. **One bedtime approval. Verified work by morning.**
-3. Morrow finds what needs you now—and what can safely move overnight.
+1. **Stop being the queue.**
+2. **Every session. One clear next move.**
+3. **One bedtime approval. Verified work by morning.**
+4. Morrow finds what needs you now—and what can safely move overnight.
 
-The first line names the pain. The second is the install reason. The third
-explains the mechanism.
+The first line turns the operator bottleneck into a phrase people can repeat.
+The second is the durable product catchphrase. The third is the concrete
+install outcome, and the fourth explains the mechanism.
 
 ## Public URL candidate
 

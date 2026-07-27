@@ -53,14 +53,6 @@ combination (API key/issuer/key file, or Apple ID app-specific password plus
 team ID), followed by notarization, stapling, and a clean Gatekeeper check on
 a downloaded/quarantined copy.
 
-### P0 — Complete English product surface
-
-The navigation, settings, onboarding, and conversation shell translate, but
-live project titles and some Control Board/Overnight fixture-derived content
-can still appear in Korean. Public English screenshots and first use must not
-look partially localized. Provider-owned user content should remain verbatim;
-product-owned labels and bundled fixtures must follow the selected language.
-
 ### P0 — Public download path
 
 `sessions.vibejason.com` is the selected candidate, but no DNS, hosting, or
@@ -90,21 +82,35 @@ polished Finder placement/background. There is no verified auto-update path
 yet. Neither blocks a trusted alpha, but both matter before asking strangers to
 install repeatedly.
 
+## Product-surface blocker cleared
+
+The earlier English-surface P0 is now cleared for the bundled launch path:
+
+- Ask Morrow, Control Board, Overnight, Session Inbox, Settings, onboarding,
+  model/effort notices, preview evidence, and bundled conversation excerpts
+  follow the selected language;
+- user- and provider-owned live titles remain verbatim by design;
+- the launch proof was recaptured entirely from the English product surface;
+- the landing, proof poster, and 1200×630 social image no longer use the old
+  Korean product capture;
+- visible and collapsed Control Board evidence were checked for Hangul in
+  English preview mode, with no product-owned Korean strings remaining.
+
 ## Release decision
 
 - **Private alpha:** GO for a small, explicit tester cohort.
 - **Public waitlist/demo page:** GO once hosted without presenting the current
   DMG as a normal public install.
 - **Public downloadable launch:** NO-GO until notarization, clean-machine
-  install proof, and product-owned English surface completion.
+  install proof, and the hosted artifact path are verified.
 
 ## Minimum morning actions
 
-1. Provide an App Store Connect notarization credential, rebuild/notarize/staple
-   the app and DMG, then require a clean `spctl` result.
-2. Finish the product-owned English Control Board/Overnight strings and run the
+1. Provide an App Store Connect notarization credential, rebuild/notarize/
+   staple the app and DMG, then require a clean `spctl` result.
+2. Upload that exact artifact, connect `sessions.vibejason.com`, and run the
    hosted-download → Applications → onboarding → first question → relaunch
    test on a clean Apple Silicon account with quarantine preserved.
-3. Only after both pass, upload the notarized artifact, connect
-   `sessions.vibejason.com`, recheck the landing CTA, and choose between the
-   Monday 8:30 AM PT public post or the already-drafted private-alpha wording.
+3. Recheck the production CTA, video, social preview, and support matrix, then
+   choose between the public post and the already-drafted private-alpha
+   wording.
