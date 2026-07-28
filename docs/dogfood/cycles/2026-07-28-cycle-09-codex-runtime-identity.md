@@ -286,4 +286,15 @@ English. The production frontend build passed after the change.
 The final debug application bundle also passed. A visual Computer Use smoke
 check could not run because the sleeping user's Mac was locked; the lock was
 not bypassed. Therefore this cycle claims a compiled and bundled UI, not a
-completed post-change visual inspection.
+completed native-window visual inspection.
+
+A local browser preview supplied the remaining UI check without bypassing the
+lock. Onboarding switched to English, the Overnight preview generated three
+recommendations, and both the DOM and rendered viewport showed:
+
+- Codex: `Resume existing thread`;
+- Claude: `Isolated fork from existing session`;
+- new work: `New session`.
+
+The visible recommendation-card layout remained intact. The local preview tab
+and development server were closed after inspection.
