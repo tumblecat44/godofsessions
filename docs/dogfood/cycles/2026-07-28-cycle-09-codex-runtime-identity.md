@@ -282,3 +282,8 @@ or dispatch behavior.
 
 The candidate summary now uses those provider-specific labels in Korean and
 English. The production frontend build passed after the change.
+
+The final debug application bundle also passed. A visual Computer Use smoke
+check could not run because the sleeping user's Mac was locked; the lock was
+not bypassed. Therefore this cycle claims a compiled and bundled UI, not a
+completed post-change visual inspection.
