@@ -15,11 +15,27 @@ export type WorkspaceView =
 
 export type AppLanguage = "en" | "ko";
 
+export type SubscriptionPlanTier =
+  | "claude_pro"
+  | "claude_max5x"
+  | "claude_max20x"
+  | "codex_plus"
+  | "codex_pro5x"
+  | "codex_pro20x";
+
+export interface SubscriptionPlanOverrides {
+  claude: SubscriptionPlanTier | null;
+  codex: SubscriptionPlanTier | null;
+}
+
 export interface AppPreferences {
   language: AppLanguage;
   default_chat_provider: ChatProvider;
   default_chat_models: Partial<Record<ChatProvider, string>>;
   default_chat_efforts: Partial<Record<ChatProvider, string>>;
+  subscription_plan_tiers: Partial<
+    Record<ChatProvider, SubscriptionPlanTier>
+  >;
   default_overnight_hours: number;
   onboarding_complete: boolean;
 }
@@ -122,11 +138,33 @@ export interface ResourceBudget {
   provider: Provider;
   state: ResourceState;
   plan: string | null;
+  plan_capacity: PlanCapacityEstimate | null;
   windows: UsageWindow[];
   credits: string | null;
   observed_at: string;
   source_label: string;
   message: string | null;
+}
+
+export type CapacityEstimateConfidence =
+  | "provider_reported"
+  | "user_confirmed"
+  | "inferred";
+
+export interface PlanCapacityEstimate {
+  tier_label: string;
+  base_plan: string;
+  multiplier: number;
+  binding_window: string | null;
+  native_remaining_percent: number;
+  equivalent_base_plan_percent: number;
+  equivalent_base_plans_remaining: number;
+  confidence: CapacityEstimateConfidence;
+  scope:
+    | "verified_session"
+    | "estimated_non_session"
+    | "plan_equivalent_estimate";
+  methodology: string;
 }
 
 export type CapacityPool =
@@ -641,6 +679,8 @@ export interface HostReadiness {
 }
 
 export interface OvernightPlan {
+  approval_fingerprint: string;
+  approval_authority_id: string;
   generated_at: string;
   evidence_window_hours: number;
   sleep_hours: number;
@@ -656,6 +696,26 @@ export interface OvernightPlan {
   host_readiness: HostReadiness;
   read_only: boolean;
   methodology: string;
+  advisor?: RecommendationAdvisor | null;
+}
+
+export interface PortfolioAdvisorSelection {
+  provider: ChatProvider;
+  model: string | null;
+  effort: string | null;
+  language: AppLanguage;
+  plan_overrides: SubscriptionPlanOverrides;
+}
+
+export interface RecommendationAdvisor {
+  mode: "subscription_model";
+  provider: ChatProvider;
+  model: string | null;
+  effort: string | null;
+  route_label: string;
+  observed_at: string;
+  input_digest: string;
+  output_digest: string;
 }
 
 export type WorkItemOrigin = "inferred_session" | "hermes_kanban";
@@ -765,6 +825,7 @@ export interface WorkspaceOverview {
 }
 
 export type ChatProvider = "codex_subscription" | "claude_subscription";
+export type ConnectionProvider = ChatProvider | "grok_subscription";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -793,7 +854,7 @@ export interface ChatProviderOption {
 }
 
 export interface ProviderConnection {
-  provider: ChatProvider;
+  provider: ConnectionProvider;
   installed: boolean;
   authenticated: boolean;
   auth_method: string | null;
@@ -805,7 +866,7 @@ export interface ProviderConnection {
 export type ProviderLoginState = "waiting" | "connected" | "error";
 
 export interface ProviderLoginResult {
-  provider: ChatProvider;
+  provider: ConnectionProvider;
   state: ProviderLoginState;
   message: string;
   fallback_command: string;
@@ -817,6 +878,25 @@ export interface ChatToolTrace {
   label: string;
   summary: string;
   success: boolean;
+  handoff?: ChatOvernightHandoff | null;
+}
+
+export interface ChatOvernightHandoff {
+  id: string;
+  sleep_hours: number;
+  generated_at: string;
+  expires_at: string;
+  fingerprint: string;
+}
+
+export type ChatPlanAuthorityState = "active" | "expired" | "revoked";
+
+export interface ChatPlanReview {
+  plan: OvernightPlan;
+  handoff: ChatOvernightHandoff;
+  authority_state: ChatPlanAuthorityState;
+  refresh_required: boolean;
+  message: string;
 }
 
 export interface ChatModelOption {

@@ -847,6 +847,8 @@ export function previewNightRunDetail(taskId: string): NightRunDetail {
 }
 
 export const previewOvernightPlan: OvernightPlan = {
+  approval_fingerprint: "preview-approval-plan",
+  approval_authority_id: "preview-approval-authority",
   generated_at: new Date().toISOString(),
   evidence_window_hours: 24,
   sleep_hours: 7,
@@ -898,6 +900,7 @@ export const previewOvernightPlan: OvernightPlan = {
       provider: "claude",
       state: "ready",
       plan: null,
+      plan_capacity: null,
       windows: [
         {
           label: "5시간",
@@ -919,6 +922,19 @@ export const previewOvernightPlan: OvernightPlan = {
       provider: "codex",
       state: "ready",
       plan: "Pro",
+      plan_capacity: {
+        tier_label: "ChatGPT Pro $200 · 20×",
+        base_plan: "ChatGPT Plus",
+        multiplier: 20,
+        binding_window: "7일",
+        native_remaining_percent: 87,
+        equivalent_base_plan_percent: 1740,
+        equivalent_base_plans_remaining: 17.4,
+        confidence: "inferred",
+        scope: "plan_equivalent_estimate",
+        methodology:
+          "Provider planType and the current Plus-relative plan multiplier are used as a routing estimate, not a task guarantee.",
+      },
       windows: [
         {
           label: "7일",
@@ -935,6 +951,7 @@ export const previewOvernightPlan: OvernightPlan = {
       provider: "grok",
       state: "ready",
       plan: "SuperGrok Heavy",
+      plan_capacity: null,
       windows: [
         {
           label: "7일",

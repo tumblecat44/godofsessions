@@ -27,7 +27,7 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
-const ADAPTER_VERSION: &str = "claude-forked-print-v1";
+const ADAPTER_VERSION: &str = "claude-resume-new-print-v2";
 const MIN_SANDBOX_VERSION: (u32, u32, u32) = (2, 1, 216);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_PROBE_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -132,12 +132,16 @@ fn preview(
         .as_deref()
         .unwrap_or_else(|| Path::new(&draft.workspace));
     let idempotency_key = idempotency_key(draft, route);
-    let source_marker_absent = environment
-        .session
-        .transcript_path
-        .as_deref()
-        .map(|path| !ledger::marker_exists(path, &idempotency_key))
-        .unwrap_or(false);
+    let source_marker_absent = if draft.run_mode == RunMode::ResumeExisting {
+        environment
+            .session
+            .transcript_path
+            .as_deref()
+            .map(|path| !ledger::marker_exists(path, &idempotency_key))
+            .unwrap_or(false)
+    } else {
+        true
+    };
     let receipt_absent = !ledger::receipt_exists(&idempotency_key);
     let session_workspace = environment
         .session
@@ -192,12 +196,25 @@ fn preview(
         ),
         check(
             "session",
-            environment.session.exists
-                && !environment.session.active
-                && session_workspace.as_deref() == Some(workspace),
-            "기존 세션 fork",
-            "같은 작업공간의 유휴 세션 컨텍스트를 새 세션으로 fork합니다.",
-            "기존 Claude 세션이 없거나 실행 중이거나 작업공간이 다릅니다.",
+            if draft.run_mode == RunMode::ResumeExisting {
+                environment.session.exists
+                    && !environment.session.active
+                    && session_workspace.as_deref() == Some(workspace)
+                    && draft.native_session_id.is_some()
+            } else {
+                draft.native_session_id.is_none()
+            },
+            "Claude 세션",
+            if draft.run_mode == RunMode::ResumeExisting {
+                "같은 작업공간의 유휴 세션 컨텍스트를 새 세션으로 fork합니다."
+            } else {
+                "승인 뒤 새 durable Claude 세션을 만들도록 계약되어 있습니다."
+            },
+            if draft.run_mode == RunMode::ResumeExisting {
+                "기존 Claude 세션이 없거나 실행 중이거나 작업공간이 다릅니다."
+            } else {
+                "새 세션 계약에 기존 Claude session id가 섞여 있습니다."
+            },
         ),
         check(
             "workspace",
@@ -216,8 +233,10 @@ fn preview(
         check(
             "contract",
             draft.format == RunDraftFormat::StructuredPrompt
-                && draft.run_mode == RunMode::ResumeExisting
-                && draft.native_session_id.is_some()
+                && match draft.run_mode {
+                    RunMode::ResumeExisting => draft.native_session_id.is_some(),
+                    RunMode::NewSession => draft.native_session_id.is_none(),
+                }
                 && draft.permission_profile == PermissionProfile::WorkspaceWrite
                 && draft.approval_required
                 && draft.dispatch_supported
@@ -225,27 +244,41 @@ fn preview(
                 && (1.0..=16.0).contains(&draft.time_budget_hours)
                 && !crate::control_board::may_have_external_side_effect(&draft.goal),
             "Night Contract",
-            "fork, workspace-write, 외부 부작용 금지, 시간 상한이 고정되어 있습니다.",
+            "resume/new, workspace-write, 외부 부작용 금지, 시간 상한이 고정되어 있습니다.",
             "계약 형식, 세션, 권한, 시간 또는 외부행동 게이트가 안전 조건을 만족하지 않습니다.",
         ),
     ];
     let ready = checks
         .iter()
         .all(|item| item.level != PreflightLevel::Block);
-    let source_session = draft.native_session_id.as_deref().unwrap_or("");
+    let source_session = draft.native_session_id.as_deref();
     let prompt = worker::marked_prompt(&draft.prompt, &idempotency_key);
-    let command_arguments =
-        worker::claude_arguments(source_session, workspace, worker::DEFAULT_MAX_TURNS);
+    let command_arguments = worker::claude_arguments(
+        draft.run_mode,
+        source_session,
+        workspace,
+        worker::DEFAULT_MAX_TURNS,
+    );
     let commands = vec![
         worker::command_preview(),
         DispatchCommandPreview {
-            step: "fork_claude_session".to_owned(),
+            step: if draft.run_mode == RunMode::ResumeExisting {
+                "fork_claude_session"
+            } else {
+                "start_claude_session"
+            }
+            .to_owned(),
             program: environment.binary.display().to_string(),
             arguments: command_arguments,
             mutates_local_state: true,
             summary: format!(
-                "기존 세션을 fork하고 {}자 Night Contract를 stdin으로 전달",
-                prompt.chars().count()
+                "{}하고 {}자 Night Contract를 stdin으로 전달",
+                if draft.run_mode == RunMode::ResumeExisting {
+                    "기존 세션을 fork"
+                } else {
+                    "새 durable 세션을 시작"
+                },
+                prompt.chars().count(),
             ),
         },
     ];
@@ -258,18 +291,24 @@ fn preview(
             DispatchPreflightState::Blocked
         },
         surface: Provider::Claude,
-        adapter: "Claude Code forked print worker".to_owned(),
+        adapter: "Claude Code durable print worker".to_owned(),
         scope_label: "쓰기 가능한 Git 작업공간".to_owned(),
         scope_value: workspace.display().to_string(),
-        executor_label: "출처 세션 → 격리 fork".to_owned(),
-        executor_value: source_session.to_owned(),
+        executor_label: if draft.run_mode == RunMode::ResumeExisting {
+            "출처 세션 → 격리 fork"
+        } else {
+            "새 durable 세션"
+        }
+        .to_owned(),
+        executor_value: source_session.unwrap_or("승인 후 생성").to_owned(),
         transport: "detached worker → Claude Code stdin".to_owned(),
         idempotency_key,
         checks,
         commands,
         protocol_requests: Vec::new(),
-        expected_receipt: "worker pid + fork된 Claude session transcript의 marker/result"
-            .to_owned(),
+        expected_receipt:
+            "worker pid + 새/fork된 Claude session id + provider transcript의 marker/result"
+                .to_owned(),
         read_only: true,
         execution_enabled: false,
     }
@@ -285,7 +324,7 @@ fn idempotency_key(draft: &NightRunDraft, route: &ExecutionRoute) -> String {
         draft.prompt.as_str(),
         route.id.as_str(),
         route.runtime.as_str(),
-        "safe-mode|dontAsk|strict-sandbox|network-deny|fork|20-turns",
+        "safe-mode|dontAsk|strict-sandbox|network-deny|resume-or-new|20-turns",
     ] {
         hasher.update(value.as_bytes());
         hasher.update(b"\n");

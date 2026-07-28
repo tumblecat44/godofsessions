@@ -19,6 +19,8 @@ const SESSION_HEAD_EXCERPTS: usize = 2;
 const SESSION_TAIL_EXCERPTS: usize = 4;
 const PROJECT_EXCERPT_LIMIT: usize = 12;
 const EXCERPT_CHARACTER_LIMIT: usize = 420;
+const DEFAULT_CONTEXT_WINDOW_HOURS: u32 = 24;
+pub const PORTFOLIO_ADVISOR_CONTEXT_WINDOW_HOURS: u32 = 24 * 7;
 
 #[derive(Debug, Clone)]
 pub struct ContextSources {
@@ -61,14 +63,29 @@ struct ProjectAccumulator {
 }
 
 pub fn build_context_index(snapshot: &Snapshot, now: DateTime<Utc>) -> ContextIndex {
+    build_context_index_for_window(snapshot, now, DEFAULT_CONTEXT_WINDOW_HOURS)
+}
+
+pub fn build_portfolio_advisor_context_index(
+    snapshot: &Snapshot,
+    now: DateTime<Utc>,
+) -> ContextIndex {
+    build_context_index_for_window(snapshot, now, PORTFOLIO_ADVISOR_CONTEXT_WINDOW_HOURS)
+}
+
+fn build_context_index_for_window(
+    snapshot: &Snapshot,
+    now: DateTime<Utc>,
+    window_hours: u32,
+) -> ContextIndex {
     let Some(sources) = ContextSources::from_home() else {
-        let mut index = empty_context_index(now);
+        let mut index = empty_context_index_for_window(now, window_hours);
         index
             .warnings
-            .push("홈 폴더를 찾지 못해 오늘의 대화 문맥을 읽지 못했습니다.".to_owned());
+            .push("홈 폴더를 찾지 못해 최근 대화 문맥을 읽지 못했습니다.".to_owned());
         return index;
     };
-    build_context_index_from_sources(snapshot, &sources, now)
+    build_context_index_from_sources_for_window(snapshot, &sources, now, window_hours)
 }
 
 pub fn build_context_index_from_sources(
@@ -76,7 +93,34 @@ pub fn build_context_index_from_sources(
     sources: &ContextSources,
     now: DateTime<Utc>,
 ) -> ContextIndex {
-    let cutoff = now - Duration::hours(24);
+    build_context_index_from_sources_for_window(
+        snapshot,
+        sources,
+        now,
+        DEFAULT_CONTEXT_WINDOW_HOURS,
+    )
+}
+
+pub fn build_portfolio_advisor_context_index_from_sources(
+    snapshot: &Snapshot,
+    sources: &ContextSources,
+    now: DateTime<Utc>,
+) -> ContextIndex {
+    build_context_index_from_sources_for_window(
+        snapshot,
+        sources,
+        now,
+        PORTFOLIO_ADVISOR_CONTEXT_WINDOW_HOURS,
+    )
+}
+
+fn build_context_index_from_sources_for_window(
+    snapshot: &Snapshot,
+    sources: &ContextSources,
+    now: DateTime<Utc>,
+    window_hours: u32,
+) -> ContextIndex {
+    let cutoff = now - Duration::hours(i64::from(window_hours));
     let recent = snapshot
         .sessions
         .iter()
@@ -245,13 +289,18 @@ pub fn build_context_index_from_sources(
 
     ContextIndex {
         generated_at: now.to_rfc3339(),
-        window_hours: 24,
+        window_hours,
         projects,
         warnings,
         ephemeral: true,
-        methodology:
+        methodology: if window_hours == DEFAULT_CONTEXT_WINDOW_HOURS {
             "최근 24시간의 최상위 대화에서 사용자·최종 응답 텍스트만 읽고, 세션별 첫 2개와 마지막 4개 발췌를 프로젝트로 묶었습니다. 시스템 지시·도구 기록·추론은 제외하며 발췌는 저장하지 않습니다."
-                .to_owned(),
+                .to_owned()
+        } else {
+            format!(
+                "최근 {window_hours}시간의 최상위 대화에서 사용자·최종 응답 텍스트만 읽고, 세션별 첫 2개와 마지막 4개 발췌를 프로젝트로 묶었습니다. 시스템 지시·도구 기록·추론은 제외하며 발췌는 저장하지 않습니다."
+            )
+        },
     }
 }
 
@@ -695,15 +744,24 @@ fn parse_time(value: &str) -> Option<DateTime<Utc>> {
 }
 
 pub fn empty_context_index(now: DateTime<Utc>) -> ContextIndex {
+    empty_context_index_for_window(now, DEFAULT_CONTEXT_WINDOW_HOURS)
+}
+
+fn empty_context_index_for_window(now: DateTime<Utc>, window_hours: u32) -> ContextIndex {
     ContextIndex {
         generated_at: now.to_rfc3339(),
-        window_hours: 24,
+        window_hours,
         projects: Vec::new(),
         warnings: Vec::new(),
         ephemeral: true,
-        methodology:
+        methodology: if window_hours == DEFAULT_CONTEXT_WINDOW_HOURS {
             "오늘의 사용자·응답 텍스트만 메모리에서 제한적으로 읽으며 별도 데이터베이스에 저장하지 않습니다."
-                .to_owned(),
+                .to_owned()
+        } else {
+            format!(
+                "최근 {window_hours}시간의 사용자·응답 텍스트만 메모리에서 제한적으로 읽으며 별도 데이터베이스에 저장하지 않습니다."
+            )
+        },
     }
 }
 
@@ -998,6 +1056,74 @@ mod tests {
         assert_eq!(index.projects[0].excerpts.len(), 6);
         assert_eq!(index.projects[0].excerpts[0].text, "첫 목표");
         assert_eq!(index.projects[0].excerpts.last().unwrap().text, "최신 결론");
+    }
+
+    #[test]
+    fn portfolio_advisor_context_includes_a_session_older_than_twenty_four_hours() {
+        let directory = tempdir().expect("directory");
+        let codex_root = directory.path().join("codex");
+        fs::create_dir_all(&codex_root).expect("codex root");
+        let mut transcript =
+            File::create(codex_root.join("rollout-older-priority.jsonl")).expect("transcript");
+        writeln!(
+            transcript,
+            r#"{{"timestamp":"2026-07-25T08:00:00Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"이 프로젝트 마감이 이번 주 최우선이야"}}]}}}}"#
+        )
+        .unwrap();
+        let snapshot = Snapshot {
+            generated_at: "2026-07-27T10:00:00Z".to_owned(),
+            sessions: vec![Session {
+                id: "codex:older-priority".to_owned(),
+                provider: Provider::Codex,
+                native_id: "older-priority".to_owned(),
+                native_kind: NativeKind::Interactive,
+                title: Some("Older explicit priority".to_owned()),
+                cwd: Some("/work/priority".to_owned()),
+                repository: Some("priority".to_owned()),
+                branch: Some("main".to_owned()),
+                worktree: None,
+                created_at: Some("2026-07-25T08:00:00Z".to_owned()),
+                updated_at: Some("2026-07-25T09:00:00Z".to_owned()),
+                status: SessionStatus::Idle,
+                status_confidence: StatusConfidence::Inferred,
+                model: None,
+                tokens_used: None,
+                archived: false,
+                parent_native_id: None,
+                child_count: 0,
+                capabilities: vec![Capability::Discover],
+                source_version: "test".to_owned(),
+                signals: Vec::new(),
+            }],
+            providers: Vec::new(),
+            warnings: Vec::new(),
+            privacy_note: "test".to_owned(),
+        };
+        let sources = ContextSources {
+            codex_sessions: codex_root,
+            claude_projects: directory.path().join("claude"),
+            grok_sessions: directory.path().join("grok"),
+            hermes_state: directory.path().join("hermes.db"),
+            openclaw_agents: directory.path().join("openclaw"),
+        };
+        let now = chrono::DateTime::parse_from_rfc3339("2026-07-27T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        let today = build_context_index_from_sources(&snapshot, &sources, now);
+        let portfolio =
+            build_portfolio_advisor_context_index_from_sources(&snapshot, &sources, now);
+
+        assert!(today.projects.is_empty());
+        assert_eq!(
+            portfolio.window_hours,
+            PORTFOLIO_ADVISOR_CONTEXT_WINDOW_HOURS
+        );
+        assert_eq!(portfolio.projects.len(), 1);
+        assert_eq!(
+            portfolio.projects[0].excerpts[0].text,
+            "이 프로젝트 마감이 이번 주 최우선이야"
+        );
     }
 
     #[test]

@@ -160,8 +160,8 @@ export function Onboarding({
               </h1>
               <p>
                 {ko
-                  ? "연결 버튼은 Codex와 Claude의 공식 OAuth를 엽니다. 토큰은 공식 앱 또는 운영체제 키체인에 남고 Morrow는 성공 여부만 확인합니다."
-                  : "Connect opens each provider's official OAuth flow. Credentials remain with the official app or OS keychain; Morrow only checks whether it worked."}
+                  ? "Codex와 Grok은 공식 로그인 흐름을 열고, Claude는 공식 Claude Code 로그인 방법을 안내합니다. 자격 증명은 각 공식 도구에만 남고 Morrow는 연결 여부만 확인합니다."
+                  : "Codex and Grok open their official login flows; Claude shows the official Claude Code login steps. Credentials stay with each provider tool, and Morrow only verifies the connection."}
               </p>
               <div className="onboarding-trust-line">
                 <ShieldCheck size={15} />

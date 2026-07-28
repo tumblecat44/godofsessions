@@ -32,7 +32,7 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
-const ADAPTER_VERSION: &str = "codex-app-server-preflight-v1";
+const ADAPTER_VERSION: &str = "codex-app-server-resume-new-v2";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone, Default)]
@@ -322,7 +322,10 @@ fn protocol_preview(
                     "title": "God of Sessions",
                     "version": env!("CARGO_PKG_VERSION")
                 },
-                "capabilities": {}
+                "capabilities": {
+                    "experimentalApi": true,
+                    "requestAttestation": false
+                }
             }),
             mutates_local_state: false,
             summary: "안정 API로 클라이언트 초기화".to_owned(),
@@ -438,7 +441,7 @@ fn run_probe(binary: &Path) -> Result<CodexProtocolProbe, String> {
     let input = concat!(
         "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":",
         "{\"name\":\"god-of-sessions\",\"title\":\"God of Sessions\",\"version\":\"0.1.0\"},",
-        "\"capabilities\":{}}}\n",
+        "\"capabilities\":{\"experimentalApi\":true,\"requestAttestation\":false}}}\n",
         "{\"method\":\"initialized\",\"params\":{}}\n",
         "{\"id\":2,\"method\":\"model/list\",\"params\":{\"limit\":100}}\n"
     );
@@ -545,7 +548,8 @@ mod tests {
         MarkerEvent as CodexMarkerEvent, ThreadRunSource as CodexThreadRunSource,
     };
     use super::worker::{
-        is_completed_turn, is_server_request, server_request_denial, validate_resume_response,
+        is_completed_turn, is_server_request, receive_response, send_notification, send_request,
+        server_request_denial, start_app_server, validate_thread_response,
     };
     use super::*;
 
@@ -775,11 +779,36 @@ mod tests {
             }
         });
 
-        validate_resume_response(&valid, "thread-1", &workspace).expect("valid response");
+        assert_eq!(
+            validate_thread_response(&valid, Some("thread-1"), &workspace).expect("valid response"),
+            "thread-1"
+        );
 
         let mut unsafe_response = valid;
         unsafe_response["result"]["sandbox"]["networkAccess"] = Value::Bool(true);
-        assert!(validate_resume_response(&unsafe_response, "thread-1", &workspace).is_err());
+        assert!(validate_thread_response(&unsafe_response, Some("thread-1"), &workspace).is_err());
+    }
+
+    #[test]
+    fn new_thread_receipt_accepts_a_provider_assigned_id_with_the_same_boundary() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let workspace = directory.path().canonicalize().expect("workspace");
+        let response = json!({
+            "result": {
+                "thread": {"id": "provider-thread-new"},
+                "cwd": workspace,
+                "approvalPolicy": "never",
+                "sandbox": {
+                    "type": "workspaceWrite",
+                    "networkAccess": false
+                }
+            }
+        });
+
+        assert_eq!(
+            validate_thread_response(&response, None, &workspace).expect("new thread"),
+            "provider-thread-new"
+        );
     }
 
     #[test]
@@ -899,6 +928,167 @@ mod tests {
             .user_agent
             .as_deref()
             .is_some_and(|value| value.to_ascii_lowercase().contains("codex")));
+    }
+
+    #[test]
+    #[ignore = "starts an ephemeral thread on the installed Codex app-server"]
+    fn installed_codex_supports_new_thread_contract_without_starting_a_turn() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(directory.path().join(".git")).expect("git");
+        let workspace = directory.path().canonicalize().expect("workspace");
+        let binary = RouteSources::local().codex_binary;
+        let (mut child, mut stdin, receiver) =
+            start_app_server(&binary).expect("installed Codex app-server");
+        send_request(
+            &mut stdin,
+            1,
+            "initialize",
+            json!({
+                "clientInfo": {
+                    "name": "god-of-sessions-canary",
+                    "title": "God of Sessions Canary",
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "experimentalApi": true,
+                    "requestAttestation": false
+                }
+            }),
+        )
+        .expect("initialize request");
+        receive_response(&mut stdin, &receiver, 1, Duration::from_secs(20))
+            .expect("initialize response");
+        send_notification(&mut stdin, "initialized", json!({})).expect("initialized");
+        send_request(
+            &mut stdin,
+            2,
+            "thread/start",
+            json!({
+                "cwd": workspace,
+                "approvalPolicy": "never",
+                "sandbox": "workspace-write",
+                "runtimeWorkspaceRoots": [workspace],
+                "ephemeral": true
+            }),
+        )
+        .expect("thread start request");
+        let response = receive_response(&mut stdin, &receiver, 2, Duration::from_secs(20))
+            .expect("thread start response");
+        let thread_id =
+            validate_thread_response(&response, None, &workspace).expect("safe thread receipt");
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(!thread_id.is_empty());
+    }
+
+    #[test]
+    #[ignore = "uses the installed Codex subscription for one ephemeral workspace-write turn"]
+    fn installed_codex_new_thread_can_complete_one_bounded_workspace_turn() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(directory.path().join(".git")).expect("git");
+        let workspace = directory.path().canonicalize().expect("workspace");
+        let binary = RouteSources::local().codex_binary;
+        let (mut child, mut stdin, receiver) =
+            start_app_server(&binary).expect("installed Codex app-server");
+        send_request(
+            &mut stdin,
+            1,
+            "initialize",
+            json!({
+                "clientInfo": {
+                    "name": "god-of-sessions-canary",
+                    "title": "God of Sessions Canary",
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "experimentalApi": true,
+                    "requestAttestation": false
+                }
+            }),
+        )
+        .expect("initialize request");
+        receive_response(&mut stdin, &receiver, 1, Duration::from_secs(20))
+            .expect("initialize response");
+        send_notification(&mut stdin, "initialized", json!({})).expect("initialized");
+        send_request(
+            &mut stdin,
+            2,
+            "thread/start",
+            json!({
+                "cwd": workspace,
+                "approvalPolicy": "never",
+                "approvalsReviewer": "user",
+                "sandbox": "workspace-write",
+                "runtimeWorkspaceRoots": [workspace],
+                "ephemeral": true
+            }),
+        )
+        .expect("thread start request");
+        let response = receive_response(&mut stdin, &receiver, 2, Duration::from_secs(20))
+            .expect("thread start response");
+        let thread_id =
+            validate_thread_response(&response, None, &workspace).expect("safe thread receipt");
+        send_request(
+            &mut stdin,
+            3,
+            "turn/start",
+            json!({
+                "threadId": thread_id,
+                "clientUserMessageId": "gos-codex-canary-workspace-write",
+                "input": [{
+                    "type": "text",
+                    "text": "Create gos_canary.txt in the current workspace with exactly GOS_CODEX_CANARY_OK and a trailing newline. Do not change anything else."
+                }],
+                "cwd": workspace,
+                "approvalPolicy": "never",
+                "approvalsReviewer": "user",
+                "sandboxPolicy": {
+                    "type": "workspaceWrite",
+                    "writableRoots": [workspace],
+                    "networkAccess": false,
+                    "excludeSlashTmp": true,
+                    "excludeTmpdirEnvVar": true
+                },
+                "runtimeWorkspaceRoots": [workspace],
+                "environments": []
+            }),
+        )
+        .expect("turn start request");
+        let response = receive_response(&mut stdin, &receiver, 3, Duration::from_secs(30))
+            .expect("turn start response");
+        let turn_id = response
+            .pointer("/result/turn/id")
+            .and_then(Value::as_str)
+            .expect("turn id")
+            .to_owned();
+        let started = Instant::now();
+        let completed = loop {
+            if started.elapsed() > Duration::from_secs(120) {
+                break false;
+            }
+            let Ok(line) = receiver.recv_timeout(Duration::from_millis(500)) else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            assert!(
+                !is_server_request(&value),
+                "canary unexpectedly requested interactive approval: {value}"
+            );
+            if is_completed_turn(&value, &thread_id, &turn_id) {
+                break true;
+            }
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(completed, "Codex turn did not complete within two minutes");
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("gos_canary.txt")).expect("canary output"),
+            "GOS_CODEX_CANARY_OK\n"
+        );
     }
 
     #[test]

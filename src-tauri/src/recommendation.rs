@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Capability, CapacityPool, ContextIndex, ContextRole, ExcludedProject, ExecutionRoute,
@@ -23,6 +24,44 @@ impl SleepHours {
     fn value(self) -> f64 {
         self.0
     }
+}
+
+pub const PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS: u32 = 24 * 7;
+pub const MAX_PORTFOLIO_ADVISOR_SELECTIONS: usize = 3;
+const UNKNOWN_PLAN_CAPACITY_SCORE: f64 = 50.0;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PortfolioCandidateOption {
+    pub option_id: String,
+    pub candidate: OvernightCandidate,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PortfolioCandidateEnvelope {
+    pub generated_at: String,
+    pub evidence_window_hours: u32,
+    pub sleep_hours: f64,
+    pub sessions_considered: usize,
+    pub projects_considered: usize,
+    pub budgets: Vec<ResourceBudget>,
+    pub route_inventory: ExecutionRouteInventory,
+    pub context_index: ContextIndex,
+    pub options: Vec<PortfolioCandidateOption>,
+    pub exclusions: Vec<ExcludedProject>,
+    pub methodology: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortfolioAdvisorOptionDecision {
+    pub option_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PortfolioAdvisorDecision {
+    pub selected: Vec<PortfolioAdvisorOptionDecision>,
+    pub unselected: Vec<PortfolioAdvisorOptionDecision>,
+    pub no_run_reason: Option<String>,
 }
 
 struct ProviderChoice<'a> {
@@ -81,8 +120,49 @@ fn build_overnight_plan_inner(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
+    let envelope = discover_candidate_envelope_inner(
+        snapshot,
+        budgets,
+        context,
+        route_inventory,
+        sleep_hours,
+        now,
+        24,
+    );
+    finalize_deterministic_plan(envelope, now)
+}
+
+pub fn discover_portfolio_candidates_with_context_and_routes(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: &ContextIndex,
+    routes: &ExecutionRouteInventory,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+    evidence_window_hours: u32,
+) -> PortfolioCandidateEnvelope {
+    discover_candidate_envelope_inner(
+        snapshot,
+        budgets,
+        Some(context),
+        Some(routes),
+        sleep_hours,
+        now,
+        evidence_window_hours,
+    )
+}
+
+fn discover_candidate_envelope_inner(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: Option<&ContextIndex>,
+    route_inventory: Option<&ExecutionRouteInventory>,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+    evidence_window_hours: u32,
+) -> PortfolioCandidateEnvelope {
     let sleep_hours = sleep_hours.value();
-    let cutoff = now - Duration::hours(24);
+    let cutoff = now - Duration::hours(i64::from(evidence_window_hours));
     let recent_sessions = snapshot
         .sessions
         .iter()
@@ -231,7 +311,7 @@ fn build_overnight_plan_inner(
             .as_deref()
             .and_then(parse_time)
             .map(|updated_at| (now - updated_at).num_minutes().max(0) as f64 / 60.0)
-            .unwrap_or(24.0);
+            .unwrap_or(evidence_window_hours as f64);
         let distinct_providers = sessions
             .iter()
             .map(|session| session.provider.as_str())
@@ -290,10 +370,10 @@ fn build_overnight_plan_inner(
         };
 
         let mut risks = if context_goal.is_some() {
-            vec![
-                "오늘 대화의 제한된 발췌만 사용했으므로 오래된 결정이나 생략된 중간 맥락이 있을 수 있습니다."
-                    .to_owned(),
-            ]
+            vec![format!(
+                "{} 대화의 제한된 발췌만 사용했으므로 오래된 결정이나 생략된 중간 맥락이 있을 수 있습니다.",
+                context_window_label(evidence_window_hours)
+            )]
         } else {
             vec!["대화 본문이 아닌 로컬 메타데이터만으로 목표를 추론했습니다.".to_owned()]
         };
@@ -302,8 +382,10 @@ fn build_overnight_plan_inner(
         }
         if !resume_existing {
             risks.push(if provider_session.is_some() {
-                "근거가 된 제공자 세션을 직접 재개하지 않고, 제한된 오늘 문맥으로 새 Hermes goal을 시작합니다."
-                    .to_owned()
+                format!(
+                    "근거가 된 제공자 세션을 직접 재개하지 않고, 제한된 {} 문맥으로 새 Hermes goal을 시작합니다.",
+                    context_window_label(evidence_window_hours)
+                )
             } else {
                 "선택된 제공자에 이어갈 세션이 없어 새 컨텍스트가 필요합니다.".to_owned()
             });
@@ -332,7 +414,11 @@ fn build_overnight_plan_inner(
             .clone()
             .unwrap_or_else(|| latest.repository.clone().unwrap_or_default());
         let mut evidence = vec![
-            format!("최근 24시간에 {project} 관련 세션 {}개", sessions.len()),
+            format!(
+                "{}에 {project} 관련 세션 {}개",
+                evidence_window_label(evidence_window_hours),
+                sessions.len()
+            ),
             format!(
                 "가장 최근 근거: “{title}” · {}",
                 relative_age_label(latest_age_hours)
@@ -344,7 +430,8 @@ fn build_overnight_plan_inner(
         ];
         if let Some(brief) = context_brief {
             evidence.push(format!(
-                "오늘 대화 {}개 중 사용자·응답 발췌 {}개를 확인함{}",
+                "{} 대화 {}개 중 사용자·응답 발췌 {}개를 확인함{}",
+                context_window_label(evidence_window_hours),
                 brief.excerpt_count,
                 brief.excerpts.len(),
                 if brief.truncated { " (bookends)" } else { "" }
@@ -414,13 +501,72 @@ fn build_overnight_plan_inner(
             .total_cmp(&left.score)
             .then_with(|| left.project.cmp(&right.project))
     });
+    exclusions.sort_by(|left, right| left.project.cmp(&right.project));
+    let options = candidates
+        .into_iter()
+        .enumerate()
+        .map(|(index, candidate)| PortfolioCandidateOption {
+            option_id: format!("o_{:03}", index + 1),
+            candidate,
+        })
+        .collect();
+    let context_index = context.cloned().unwrap_or_else(|| ContextIndex {
+        generated_at: now.to_rfc3339(),
+        window_hours: evidence_window_hours,
+        projects: Vec::new(),
+        warnings: Vec::new(),
+        ephemeral: true,
+        methodology: "대화 문맥 없이 세션 메타데이터만 사용했습니다.".to_owned(),
+    });
+
+    PortfolioCandidateEnvelope {
+        generated_at: now.to_rfc3339(),
+        evidence_window_hours,
+        sleep_hours,
+        sessions_considered: recent_sessions.len(),
+        projects_considered: projects.len(),
+        budgets,
+        route_inventory: route_inventory
+            .cloned()
+            .unwrap_or_else(|| empty_route_inventory(now)),
+        context_index,
+        options,
+        exclusions,
+        methodology:
+            "먼저 정확한 실행 형태를 승인·시작할 수 있는 경로가 있는지 확인한 뒤 최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 실행 가능한 후보 안에서는 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
+                .to_owned(),
+    }
+}
+
+pub fn finalize_portfolio_advisor_plan(
+    envelope: &PortfolioCandidateEnvelope,
+    decision: &PortfolioAdvisorDecision,
+    now: DateTime<Utc>,
+) -> Result<OvernightPlan, String> {
+    validate_portfolio_advisor_decision(envelope, decision)?;
+    Ok(assemble_plan(
+        envelope,
+        &decision.selected,
+        &decision.unselected,
+        decision.no_run_reason.as_deref(),
+        true,
+        now,
+    ))
+}
+
+fn finalize_deterministic_plan(
+    envelope: PortfolioCandidateEnvelope,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
     let mut selected = Vec::new();
+    let mut unselected = Vec::new();
     let mut lane_hours = BTreeMap::<CapacityPool, f64>::new();
     let mut workspace_hours = BTreeMap::<String, f64>::new();
-    for mut candidate in candidates {
-        if selected.len() >= 3 {
-            exclusions.push(ExcludedProject {
-                project: candidate.project,
+    for option in &envelope.options {
+        let candidate = &option.candidate;
+        if selected.len() >= MAX_PORTFOLIO_ADVISOR_SELECTIONS {
+            unselected.push(PortfolioAdvisorOptionDecision {
+                option_id: option.option_id.clone(),
                 reason: format!(
                     "안전한 후보였지만 추천 지수 {:.0}점으로 상위 3개보다 우선순위가 낮습니다.",
                     candidate.score
@@ -428,6 +574,202 @@ fn build_overnight_plan_inner(
             });
             continue;
         }
+        let lane_ready_at = lane_hours
+            .get(&candidate.capacity_pool)
+            .copied()
+            .unwrap_or_default();
+        let workspace_key = candidate_workspace_key(candidate);
+        let workspace_ready_at = workspace_hours
+            .get(&workspace_key)
+            .copied()
+            .unwrap_or_default();
+        let starts_after_hours = lane_ready_at
+            .max(workspace_ready_at)
+            .max(candidate.capacity_ready_after_hours);
+        let remaining = floor_half((envelope.sleep_hours - starts_after_hours).max(0.0));
+        if remaining < 1.0 {
+            unselected.push(PortfolioAdvisorOptionDecision {
+                option_id: option.option_id.clone(),
+                reason: allocation_exclusion_reason(candidate, lane_ready_at, workspace_ready_at),
+            });
+            continue;
+        }
+        let estimated_hours = candidate.estimated_hours.min(remaining);
+        let ends_at = starts_after_hours + estimated_hours;
+        lane_hours.insert(candidate.capacity_pool, ends_at);
+        workspace_hours.insert(workspace_key, ends_at);
+        selected.push(PortfolioAdvisorOptionDecision {
+            option_id: option.option_id.clone(),
+            reason: "결정론적 추천 순위".to_owned(),
+        });
+    }
+
+    assemble_plan(&envelope, &selected, &unselected, None, false, now)
+}
+
+fn validate_portfolio_advisor_decision(
+    envelope: &PortfolioCandidateEnvelope,
+    decision: &PortfolioAdvisorDecision,
+) -> Result<(), String> {
+    if decision.selected.len() > MAX_PORTFOLIO_ADVISOR_SELECTIONS {
+        return Err(format!(
+            "선택 가능한 후보는 최대 {MAX_PORTFOLIO_ADVISOR_SELECTIONS}개입니다."
+        ));
+    }
+    if decision.selected.is_empty() {
+        if decision
+            .no_run_reason
+            .as_deref()
+            .is_none_or(|reason| reason.trim().is_empty())
+        {
+            return Err("후보를 선택하지 않을 때는 no_run_reason이 필요합니다.".to_owned());
+        }
+    } else if decision.no_run_reason.is_some() {
+        return Err("후보를 선택한 결정에는 no_run_reason을 함께 보낼 수 없습니다.".to_owned());
+    }
+
+    let known_ids = envelope
+        .options
+        .iter()
+        .map(|option| option.option_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    for item in decision.selected.iter().chain(&decision.unselected) {
+        if item.reason.trim().is_empty() {
+            return Err(format!(
+                "{}의 모델 판단 이유가 비어 있습니다.",
+                item.option_id
+            ));
+        }
+        if !known_ids.contains(item.option_id.as_str()) {
+            return Err(format!("알 수 없는 후보 ID입니다: {}", item.option_id));
+        }
+        if !seen.insert(item.option_id.as_str()) {
+            return Err(format!(
+                "후보 ID는 선택·제외 목록에 정확히 한 번만 있어야 합니다: {}",
+                item.option_id
+            ));
+        }
+    }
+    if seen.len() != known_ids.len() {
+        return Err(format!(
+            "모델 판단이 전체 후보를 분할하지 않았습니다. 후보 {}개 중 {}개만 판단했습니다.",
+            known_ids.len(),
+            seen.len()
+        ));
+    }
+    Ok(())
+}
+
+fn assemble_plan(
+    envelope: &PortfolioCandidateEnvelope,
+    selected_decisions: &[PortfolioAdvisorOptionDecision],
+    unselected_decisions: &[PortfolioAdvisorOptionDecision],
+    no_run_reason: Option<&str>,
+    include_model_reasons: bool,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
+    let options = envelope
+        .options
+        .iter()
+        .map(|option| (option.option_id.as_str(), option))
+        .collect::<BTreeMap<_, _>>();
+    let mut exclusions = envelope.exclusions.clone();
+    for item in unselected_decisions {
+        let option = options
+            .get(item.option_id.as_str())
+            .expect("validated or internally generated option ID");
+        exclusions.push(ExcludedProject {
+            project: option.candidate.project.clone(),
+            reason: if include_model_reasons {
+                format!("AI 포트폴리오 판단: {}", item.reason.trim())
+            } else {
+                item.reason.clone()
+            },
+        });
+    }
+
+    let mut ordered_candidates = selected_decisions
+        .iter()
+        .map(|item| {
+            let option = options
+                .get(item.option_id.as_str())
+                .expect("validated or internally generated option ID");
+            let mut candidate = option.candidate.clone();
+            if include_model_reasons {
+                candidate
+                    .evidence
+                    .push(format!("AI 포트폴리오 판단: {}", item.reason.trim()));
+            }
+            candidate
+        })
+        .collect::<Vec<_>>();
+    ordered_candidates = fit_candidates_within_sleep_window(
+        ordered_candidates,
+        envelope.sleep_hours,
+        &mut exclusions,
+    );
+    for (index, candidate) in ordered_candidates.iter_mut().enumerate() {
+        candidate.rank = index + 1;
+    }
+
+    if let Some(reason) = no_run_reason {
+        exclusions.push(ExcludedProject {
+            project: "오늘 밤 실행 안 함".to_owned(),
+            reason: format!("AI 포트폴리오 판단: {}", reason.trim()),
+        });
+    }
+    exclusions.sort_by(|left, right| {
+        left.project
+            .cmp(&right.project)
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+    let schedule = build_schedule(&ordered_candidates);
+    let run_drafts = ordered_candidates
+        .iter()
+        .map(crate::night_contract::build)
+        .collect::<Vec<_>>();
+    let host_readiness = crate::host_readiness::inspect(&run_drafts, now);
+    let methodology = if include_model_reasons {
+        format!(
+            "{} 안전 필터를 통과한 후보의 최종 순서와 제외 이유는 사용자가 선택한 구독 모델이 판단했고, 호스트가 후보 ID·중복·전체 분할·최대 선택 수를 검증한 뒤 일정과 실행 초안을 다시 만들었습니다.",
+            envelope.methodology
+        )
+    } else {
+        envelope.methodology.clone()
+    };
+
+    OvernightPlan {
+        approval_fingerprint: String::new(),
+        approval_authority_id: String::new(),
+        generated_at: now.to_rfc3339(),
+        evidence_window_hours: envelope.evidence_window_hours,
+        sleep_hours: envelope.sleep_hours,
+        sessions_considered: envelope.sessions_considered,
+        projects_considered: envelope.projects_considered,
+        budgets: envelope.budgets.clone(),
+        route_inventory: envelope.route_inventory.clone(),
+        candidates: ordered_candidates,
+        run_drafts,
+        schedule,
+        dispatch_preflights: Vec::new(),
+        exclusions,
+        host_readiness,
+        read_only: true,
+        methodology,
+        advisor: None,
+    }
+}
+
+fn fit_candidates_within_sleep_window(
+    candidates: Vec<OvernightCandidate>,
+    sleep_hours: f64,
+    exclusions: &mut Vec<ExcludedProject>,
+) -> Vec<OvernightCandidate> {
+    let mut selected = Vec::new();
+    let mut lane_hours = BTreeMap::<CapacityPool, f64>::new();
+    let mut workspace_hours = BTreeMap::<String, f64>::new();
+    for mut candidate in candidates {
         let lane_ready_at = lane_hours
             .get(&candidate.capacity_pool)
             .copied()
@@ -443,23 +785,8 @@ fn build_overnight_plan_inner(
         let remaining = floor_half((sleep_hours - starts_after_hours).max(0.0));
         if remaining < 1.0 {
             exclusions.push(ExcludedProject {
-                project: candidate.project,
-                reason: if candidate.capacity_ready_after_hours
-                    > lane_ready_at.max(workspace_ready_at)
-                {
-                    format!(
-                        "{} 초기화 뒤에는 검증 가능한 최소 시간이 남지 않습니다.",
-                        capacity_pool_display_name(candidate.capacity_pool)
-                    )
-                } else if workspace_ready_at > lane_ready_at {
-                    "같은 Git worktree의 더 높은 순위 작업 뒤에는 검증 가능한 최소 시간이 남지 않습니다."
-                        .to_owned()
-                } else {
-                    format!(
-                        "{}의 오늘 밤 시간 예산을 더 높은 순위 작업이 이미 사용합니다.",
-                        capacity_pool_display_name(candidate.capacity_pool)
-                    )
-                },
+                project: candidate.project.clone(),
+                reason: allocation_exclusion_reason(&candidate, lane_ready_at, workspace_ready_at),
             });
             continue;
         }
@@ -469,38 +796,27 @@ fn build_overnight_plan_inner(
         workspace_hours.insert(workspace_key, ends_at);
         selected.push(candidate);
     }
-    let mut candidates = selected;
-    for (index, candidate) in candidates.iter_mut().enumerate() {
-        candidate.rank = index + 1;
-    }
-    exclusions.sort_by(|left, right| left.project.cmp(&right.project));
-    let schedule = build_schedule(&candidates);
-    let run_drafts = candidates
-        .iter()
-        .map(crate::night_contract::build)
-        .collect::<Vec<_>>();
-    let host_readiness = crate::host_readiness::inspect(&run_drafts, now);
+    selected
+}
 
-    OvernightPlan {
-        generated_at: now.to_rfc3339(),
-        evidence_window_hours: 24,
-        sleep_hours,
-        sessions_considered: recent_sessions.len(),
-        projects_considered: projects.len(),
-        budgets,
-        route_inventory: route_inventory
-            .cloned()
-            .unwrap_or_else(|| empty_route_inventory(now)),
-        candidates,
-        run_drafts,
-        schedule,
-        dispatch_preflights: Vec::new(),
-        exclusions,
-        host_readiness,
-        read_only: true,
-        methodology:
-            "먼저 정확한 실행 형태를 승인·시작할 수 있는 경로가 있는지 확인한 뒤 최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 실행 가능한 후보 안에서는 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
-                .to_owned(),
+fn allocation_exclusion_reason(
+    candidate: &OvernightCandidate,
+    lane_ready_at: f64,
+    workspace_ready_at: f64,
+) -> String {
+    if candidate.capacity_ready_after_hours > lane_ready_at.max(workspace_ready_at) {
+        format!(
+            "{} 초기화 뒤에는 검증 가능한 최소 시간이 남지 않습니다.",
+            capacity_pool_display_name(candidate.capacity_pool)
+        )
+    } else if workspace_ready_at > lane_ready_at {
+        "같은 Git worktree의 더 높은 순위 작업 뒤에는 검증 가능한 최소 시간이 남지 않습니다."
+            .to_owned()
+    } else {
+        format!(
+            "{}의 오늘 밤 시간 예산을 더 높은 순위 작업이 이미 사용합니다.",
+            capacity_pool_display_name(candidate.capacity_pool)
+        )
     }
 }
 
@@ -786,7 +1102,7 @@ fn choose_provider<'a>(
             let context_score = provider_sessions.len().min(3) as f64
                 + if latest.provider == provider { 2.0 } else { 0.0 }
                 + if resumable.is_some() { 3.0 } else { 0.0 };
-            let score = capacity + context_score
+            let score = capacity.clamp(0.0, 250.0) + context_score
                 - budget_penalty
                 - scarcity_penalty
                 - capacity_ready_after_hours * 3.0;
@@ -802,15 +1118,15 @@ fn choose_provider<'a>(
             } else {
                 match (resumable, budget) {
                 (Some(_), Some(budget)) if budget.state == ResourceState::Ready => format!(
-                    "{provider_name}에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 {:.0}% 남아 있습니다.",
-                    capacity
+                    "{provider_name}에 이 프로젝트를 이어갈 세션이 있고, {}",
+                    capacity_description(budget, capacity)
                 ),
                 (Some(_), _) => format!(
                     "사용량 신선도는 낮지만 {provider_name}에 이어갈 프로젝트 컨텍스트가 있어 전환 비용이 가장 낮습니다."
                 ),
                 (None, Some(budget)) if budget.state == ResourceState::Ready => format!(
-                    "기존 세션은 없지만 확인된 사용 가능 여유가 약 {:.0}%로 후보 중 유리합니다.",
-                    capacity
+                    "기존 세션은 없지만 {}",
+                    capacity_description(budget, capacity)
                 ),
                 _ => format!(
                     "{provider_name} 사용량을 확인하지 못해 세션 맥락을 중심으로 임시 선택했습니다."
@@ -874,7 +1190,7 @@ fn capacity_opportunity(
     }) else {
         return (current, 0.0);
     };
-    let remaining_after_reset = budget
+    let native_remaining_after_reset = budget
         .windows
         .iter()
         .map(|window| {
@@ -890,14 +1206,21 @@ fn capacity_opportunity(
             }
         })
         .fold(100.0, f64::min);
-    if remaining_after_reset <= 0.5 {
+    if native_remaining_after_reset <= 0.5 {
         return (current, 0.0);
     }
     let hours = (reset_at - now).num_seconds().max(1) as f64 / 3_600.0;
-    (remaining_after_reset, ceil_quarter(hours))
+    (
+        normalize_capacity(budget, native_remaining_after_reset),
+        ceil_quarter(hours),
+    )
 }
 
 fn remaining_capacity(budget: &ResourceBudget) -> f64 {
+    normalize_capacity(budget, native_remaining_capacity(budget))
+}
+
+fn native_remaining_capacity(budget: &ResourceBudget) -> f64 {
     if budget.windows.is_empty() {
         return if budget.credits.is_some() { 60.0 } else { 35.0 };
     }
@@ -906,6 +1229,36 @@ fn remaining_capacity(budget: &ResourceBudget) -> f64 {
         .iter()
         .map(|window| (100.0 - window.used_percent).clamp(0.0, 100.0))
         .fold(100.0, f64::min)
+}
+
+fn normalize_capacity(budget: &ResourceBudget, native_remaining: f64) -> f64 {
+    if native_remaining <= 0.5 {
+        return native_remaining;
+    }
+    budget
+        .plan_capacity
+        .as_ref()
+        .map(|estimate| native_remaining * estimate.multiplier)
+        .unwrap_or(UNKNOWN_PLAN_CAPACITY_SCORE)
+}
+
+fn capacity_description(budget: &ResourceBudget, normalized_capacity: f64) -> String {
+    match budget.plan_capacity.as_ref() {
+        Some(estimate) => format!(
+            "가장 제한적인 {} 창은 약 {:.0}% 남아 있고, 요금제 규모를 반영하면 {} 약 {:.1}개분으로 추정됩니다.",
+            estimate
+                .binding_window
+                .as_deref()
+                .unwrap_or("사용량"),
+            estimate.native_remaining_percent,
+            estimate.base_plan,
+            normalized_capacity / 100.0
+        ),
+        None => format!(
+            "가장 제한적인 사용량 창도 약 {:.0}% 남아 있습니다. 정확한 요금제 배수는 확인되지 않았습니다.",
+            native_remaining_capacity(budget)
+        ),
+    }
 }
 
 fn duration_label(hours: f64) -> String {
@@ -948,6 +1301,22 @@ fn relative_age_label(hours: f64) -> String {
     }
 }
 
+fn evidence_window_label(window_hours: u32) -> String {
+    match window_hours {
+        24 => "최근 24시간".to_owned(),
+        PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS => "최근 7일".to_owned(),
+        hours => format!("최근 {hours}시간"),
+    }
+}
+
+fn context_window_label(window_hours: u32) -> String {
+    match window_hours {
+        24 => "오늘".to_owned(),
+        PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS => "최근 7일".to_owned(),
+        hours => format!("최근 {hours}시간"),
+    }
+}
+
 fn round_one(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
@@ -965,10 +1334,10 @@ mod tests {
     use std::{path::Path, process::Command};
 
     use crate::model::{
-        AdapterReadiness, Capability, ContextExcerpt, ContextIndex, ContextRole, ExecutionRoute,
-        ExecutionRouteInventory, NativeKind, ProjectContextBrief, Provider, ResourceBudget,
-        ResourceState, RouteCapability, Session, SessionSignal, SessionStatus, Snapshot,
-        StatusConfidence, UsageWindow,
+        AdapterReadiness, Capability, CapacityEstimateConfidence, ContextExcerpt, ContextIndex,
+        ContextRole, ExecutionRoute, ExecutionRouteInventory, NativeKind, PlanCapacityEstimate,
+        ProjectContextBrief, Provider, ResourceBudget, ResourceState, RouteCapability, Session,
+        SessionSignal, SessionStatus, Snapshot, StatusConfidence, UsageWindow,
     };
 
     use super::*;
@@ -1011,10 +1380,23 @@ mod tests {
     }
 
     fn budget(provider: Provider, used_percent: f64) -> ResourceBudget {
+        let native_remaining_percent = 100.0 - used_percent;
         ResourceBudget {
             provider,
             state: ResourceState::Ready,
             plan: Some("test".to_owned()),
+            plan_capacity: Some(PlanCapacityEstimate {
+                tier_label: "test base plan".to_owned(),
+                base_plan: "test base plan".to_owned(),
+                multiplier: 1.0,
+                binding_window: Some("주간".to_owned()),
+                native_remaining_percent,
+                equivalent_base_plan_percent: native_remaining_percent,
+                equivalent_base_plans_remaining: native_remaining_percent / 100.0,
+                confidence: CapacityEstimateConfidence::UserConfirmed,
+                scope: "test".to_owned(),
+                methodology: "test".to_owned(),
+            }),
             windows: vec![UsageWindow {
                 label: "주간".to_owned(),
                 used_percent,
@@ -1025,6 +1407,31 @@ mod tests {
             source_label: "test".to_owned(),
             message: None,
         }
+    }
+
+    fn budget_with_plan_equivalent(
+        provider: Provider,
+        used_percent: f64,
+        tier_label: &str,
+        base_plan: &str,
+        multiplier: f64,
+    ) -> ResourceBudget {
+        let mut budget = budget(provider, used_percent);
+        let native_remaining_percent = 100.0 - used_percent;
+        budget.plan = Some(tier_label.to_owned());
+        budget.plan_capacity = Some(PlanCapacityEstimate {
+            tier_label: tier_label.to_owned(),
+            base_plan: base_plan.to_owned(),
+            multiplier,
+            binding_window: Some("5시간".to_owned()),
+            native_remaining_percent,
+            equivalent_base_plan_percent: native_remaining_percent * multiplier,
+            equivalent_base_plans_remaining: native_remaining_percent * multiplier / 100.0,
+            confidence: CapacityEstimateConfidence::UserConfirmed,
+            scope: "verified_session".to_owned(),
+            methodology: "test".to_owned(),
+        });
+        budget
     }
 
     fn snapshot(sessions: Vec<Session>) -> Snapshot {
@@ -1121,7 +1528,7 @@ mod tests {
     }
 
     #[test]
-    fn writable_hermes_goal_beats_an_unimplemented_native_grok_resume() {
+    fn implemented_native_grok_resume_beats_a_cross_runtime_fallback() {
         let snapshot = snapshot(vec![session(
             Provider::Grok,
             "grok-session",
@@ -1172,29 +1579,20 @@ mod tests {
         );
         let candidate = &plan.candidates[0];
 
-        assert_eq!(candidate.execution_route_id, "hermes:default");
-        assert_eq!(candidate.execution_surface, Provider::Hermes);
-        assert_eq!(candidate.executor_profile.as_deref(), Some("default"));
-        assert!(!candidate.resume_existing);
-        assert!(candidate.native_session_id.is_none());
-        assert!(candidate.provider_reason.contains("네이티브 재개 대신"));
-        assert!(candidate
-            .risks
-            .iter()
-            .any(|risk| risk.contains("직접 재개하지 않고")));
-        assert!(candidate
-            .risks
-            .iter()
-            .any(|risk| risk.contains("실행 경로 제약")));
+        assert_eq!(candidate.execution_route_id, "grok:native");
+        assert_eq!(candidate.execution_surface, Provider::Grok);
+        assert_eq!(candidate.executor_profile, None);
+        assert!(candidate.resume_existing);
+        assert_eq!(candidate.native_session_id.as_deref(), Some("grok-session"));
         assert!(plan.run_drafts[0].dispatch_supported);
         assert_eq!(
             plan.run_drafts[0].run_mode,
-            crate::model::RunMode::NewSession
+            crate::model::RunMode::ResumeExisting
         );
     }
 
     #[test]
-    fn provider_choice_prefers_a_writable_route_over_more_available_quota() {
+    fn provider_choice_uses_the_fresher_writable_grok_route_when_quota_is_available() {
         let snapshot = snapshot(vec![
             session(
                 Provider::Grok,
@@ -1252,9 +1650,9 @@ mod tests {
         );
         let candidate = &plan.candidates[0];
 
-        assert_eq!(candidate.provider, Provider::Codex);
-        assert_eq!(candidate.execution_route_id, "codex:native");
-        assert_eq!(candidate.execution_surface, Provider::Codex);
+        assert_eq!(candidate.provider, Provider::Grok);
+        assert_eq!(candidate.execution_route_id, "grok:native");
+        assert_eq!(candidate.execution_surface, Provider::Grok);
         assert!(candidate.resume_existing);
         assert!(candidate
             .provider_reason
@@ -1263,7 +1661,7 @@ mod tests {
     }
 
     #[test]
-    fn a_project_without_any_writable_route_is_excluded() {
+    fn a_project_without_any_contract_ready_route_is_excluded() {
         let snapshot = snapshot(vec![session(
             Provider::Grok,
             "grok-session",
@@ -1272,14 +1670,16 @@ mod tests {
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
+        let mut unavailable_route = route(
+            "grok:native",
+            Provider::Grok,
+            Provider::Grok,
+            ResourceState::Ready,
+        );
+        unavailable_route.adapter_readiness = AdapterReadiness::ObserveOnly;
         let inventory = ExecutionRouteInventory {
             generated_at: "2026-07-24T22:00:00Z".to_owned(),
-            routes: vec![route(
-                "grok:native",
-                Provider::Grok,
-                Provider::Grok,
-                ResourceState::Ready,
-            )],
+            routes: vec![unavailable_route],
             warnings: Vec::new(),
             methodology: "test".to_owned(),
         };
@@ -1508,6 +1908,7 @@ mod tests {
             provider: Provider::Grok,
             state: ResourceState::Ready,
             plan: Some("test".to_owned()),
+            plan_capacity: None,
             windows: vec![
                 UsageWindow {
                     label: "5시간".to_owned(),
@@ -1525,7 +1926,10 @@ mod tests {
             source_label: "test".to_owned(),
             message: None,
         };
-        assert_eq!(capacity_opportunity(&recovering, now, 7.0), (80.0, 1.0));
+        assert_eq!(
+            capacity_opportunity(&recovering, now, 7.0),
+            (UNKNOWN_PLAN_CAPACITY_SCORE, 1.0)
+        );
 
         let context = ContextIndex {
             generated_at: now.to_rfc3339(),
@@ -1591,6 +1995,7 @@ mod tests {
             provider: Provider::Claude,
             state: ResourceState::Ready,
             plan: Some("test".to_owned()),
+            plan_capacity: None,
             windows: vec![UsageWindow {
                 label: "주간".to_owned(),
                 used_percent: 100.0,
@@ -1643,6 +2048,73 @@ mod tests {
         );
 
         assert_eq!(small_gap_plan.candidates[0].provider, Provider::Claude);
+    }
+
+    #[test]
+    fn max20_five_percent_beats_thirty_percent_of_a_base_plan() {
+        let plan = build_overnight_plan(
+            &snapshot(vec![
+                session(
+                    Provider::Claude,
+                    "claude-alpha",
+                    "alpha",
+                    "Continue the same implementation",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:20:00Z",
+                ),
+                session(
+                    Provider::Codex,
+                    "codex-alpha",
+                    "alpha",
+                    "Continue the same implementation",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:30:00Z",
+                ),
+            ]),
+            vec![
+                budget_with_plan_equivalent(
+                    Provider::Claude,
+                    95.0,
+                    "Claude Max 20x",
+                    "Claude Pro",
+                    20.0,
+                ),
+                budget_with_plan_equivalent(
+                    Provider::Codex,
+                    70.0,
+                    "ChatGPT Plus",
+                    "ChatGPT Plus",
+                    1.0,
+                ),
+            ],
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates[0].provider, Provider::Claude);
+        assert!(plan.candidates[0]
+            .provider_reason
+            .contains("Claude Pro 약 1.0개분"));
+    }
+
+    #[test]
+    fn unknown_plan_capacity_is_neutral_instead_of_silently_treated_as_one_x() {
+        let mut unknown = budget(Provider::Grok, 92.0);
+        unknown.plan = None;
+        unknown.plan_capacity = None;
+        let mut another_unknown = budget(Provider::Claude, 15.0);
+        another_unknown.plan = None;
+        another_unknown.plan_capacity = None;
+
+        assert_eq!(remaining_capacity(&unknown), UNKNOWN_PLAN_CAPACITY_SCORE);
+        assert_eq!(
+            remaining_capacity(&another_unknown),
+            UNKNOWN_PLAN_CAPACITY_SCORE
+        );
+        assert!(capacity_description(&unknown, remaining_capacity(&unknown))
+            .contains("정확한 요금제 배수는 확인되지 않았습니다"));
     }
 
     #[test]
@@ -1897,6 +2369,182 @@ mod tests {
         assert!(plan.exclusions.iter().any(|item| {
             item.project == "alpha" && item.reason.contains("같은 Git worktree")
         }));
+    }
+
+    fn portfolio_envelope(projects: &[&str]) -> PortfolioCandidateEnvelope {
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let context = ContextIndex {
+            generated_at: now.to_rfc3339(),
+            window_hours: PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS,
+            projects: Vec::new(),
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let inventory = ExecutionRouteInventory {
+            generated_at: now.to_rfc3339(),
+            routes: vec![route(
+                "codex:native",
+                Provider::Codex,
+                Provider::Codex,
+                ResourceState::Ready,
+            )],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+        let sessions = projects
+            .iter()
+            .map(|project| {
+                session(
+                    Provider::Codex,
+                    project,
+                    project,
+                    "Continue verified implementation",
+                    SessionStatus::Idle,
+                    "2026-07-24T21:30:00Z",
+                )
+            })
+            .collect();
+        discover_portfolio_candidates_with_context_and_routes(
+            &snapshot(sessions),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            &inventory,
+            SleepHours::new(8.0).expect("valid sleep duration"),
+            now,
+            PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS,
+        )
+    }
+
+    #[test]
+    fn advisor_can_promote_a_former_lower_ranked_option_without_mutating_its_contract() {
+        let envelope = portfolio_envelope(&["alpha", "beta"]);
+        assert_eq!(envelope.options[0].candidate.project, "alpha");
+        assert_eq!(envelope.options[1].candidate.project, "beta");
+        let chosen = &envelope.options[1];
+        let original = chosen.candidate.clone();
+        let decision = PortfolioAdvisorDecision {
+            selected: vec![PortfolioAdvisorOptionDecision {
+                option_id: chosen.option_id.clone(),
+                reason: "The user's explicit deadline makes beta the highest-value night."
+                    .to_owned(),
+            }],
+            unselected: vec![PortfolioAdvisorOptionDecision {
+                option_id: envelope.options[0].option_id.clone(),
+                reason: "Alpha has no comparable deadline.".to_owned(),
+            }],
+            no_run_reason: None,
+        };
+
+        let plan = finalize_portfolio_advisor_plan(
+            &envelope,
+            &decision,
+            DateTime::parse_from_rfc3339("2026-07-24T22:01:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .expect("valid model partition");
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].rank, 1);
+        assert_eq!(plan.candidates[0].project, "beta");
+        assert_eq!(plan.candidates[0].cwd, original.cwd);
+        assert_eq!(plan.candidates[0].provider, original.provider);
+        assert_eq!(
+            plan.candidates[0].execution_route_id,
+            original.execution_route_id
+        );
+        assert_eq!(plan.candidates[0].goal, original.goal);
+        assert!(plan.candidates[0]
+            .evidence
+            .iter()
+            .any(|line| line.contains("explicit deadline")));
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == "alpha" && item.reason.contains("no comparable deadline")));
+    }
+
+    #[test]
+    fn advisor_rejects_unknown_and_duplicate_option_ids() {
+        let envelope = portfolio_envelope(&["alpha"]);
+        let unknown = PortfolioAdvisorDecision {
+            selected: vec![PortfolioAdvisorOptionDecision {
+                option_id: "option_unknown".to_owned(),
+                reason: "Pick it.".to_owned(),
+            }],
+            unselected: Vec::new(),
+            no_run_reason: None,
+        };
+        assert!(finalize_portfolio_advisor_plan(
+            &envelope,
+            &unknown,
+            DateTime::parse_from_rfc3339("2026-07-24T22:01:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .expect_err("unknown ID must fail")
+        .contains("알 수 없는 후보 ID"));
+
+        let duplicate = PortfolioAdvisorDecision {
+            selected: vec![PortfolioAdvisorOptionDecision {
+                option_id: envelope.options[0].option_id.clone(),
+                reason: "Pick it.".to_owned(),
+            }],
+            unselected: vec![PortfolioAdvisorOptionDecision {
+                option_id: envelope.options[0].option_id.clone(),
+                reason: "Also exclude it.".to_owned(),
+            }],
+            no_run_reason: None,
+        };
+        assert!(finalize_portfolio_advisor_plan(
+            &envelope,
+            &duplicate,
+            DateTime::parse_from_rfc3339("2026-07-24T22:01:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .expect_err("duplicate ID must fail")
+        .contains("정확히 한 번"));
+    }
+
+    #[test]
+    fn advisor_no_run_rebuilds_an_empty_plan() {
+        let envelope = portfolio_envelope(&["alpha", "beta"]);
+        let decision = PortfolioAdvisorDecision {
+            selected: Vec::new(),
+            unselected: envelope
+                .options
+                .iter()
+                .map(|option| PortfolioAdvisorOptionDecision {
+                    option_id: option.option_id.clone(),
+                    reason: "The evidence does not justify unattended execution.".to_owned(),
+                })
+                .collect(),
+            no_run_reason: Some(
+                "Every candidate has lower expected value than preserving capacity.".to_owned(),
+            ),
+        };
+
+        let plan = finalize_portfolio_advisor_plan(
+            &envelope,
+            &decision,
+            DateTime::parse_from_rfc3339("2026-07-24T22:01:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .expect("valid no-run partition");
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan.run_drafts.is_empty());
+        assert!(plan.schedule.lanes.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == "오늘 밤 실행 안 함"
+                && item.reason.contains("preserving capacity")));
     }
 
     #[test]

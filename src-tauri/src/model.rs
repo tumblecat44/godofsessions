@@ -142,6 +142,45 @@ pub enum ResourceState {
     Unavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionPlanTier {
+    ClaudePro,
+    ClaudeMax5x,
+    ClaudeMax20x,
+    CodexPlus,
+    CodexPro5x,
+    CodexPro20x,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SubscriptionPlanOverrides {
+    pub claude: Option<SubscriptionPlanTier>,
+    pub codex: Option<SubscriptionPlanTier>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapacityEstimateConfidence {
+    ProviderReported,
+    UserConfirmed,
+    Inferred,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanCapacityEstimate {
+    pub tier_label: String,
+    pub base_plan: String,
+    pub multiplier: f64,
+    pub binding_window: Option<String>,
+    pub native_remaining_percent: f64,
+    pub equivalent_base_plan_percent: f64,
+    pub equivalent_base_plans_remaining: f64,
+    pub confidence: CapacityEstimateConfidence,
+    pub scope: String,
+    pub methodology: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageWindow {
     pub label: String,
@@ -154,6 +193,8 @@ pub struct ResourceBudget {
     pub provider: Provider,
     pub state: ResourceState,
     pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_capacity: Option<PlanCapacityEstimate>,
     pub windows: Vec<UsageWindow>,
     pub credits: Option<String>,
     pub observed_at: String,
@@ -211,7 +252,7 @@ pub struct ExecutionRoute {
     pub limitations: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRouteInventory {
     pub generated_at: String,
     pub routes: Vec<ExecutionRoute>,
@@ -219,7 +260,7 @@ pub struct ExecutionRouteInventory {
     pub methodology: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecommendationConfidence {
     High,
@@ -277,7 +318,7 @@ pub struct NightRunDraft {
     pub dispatch_supported: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NightScheduleSlot {
     pub candidate_rank: usize,
     pub project: String,
@@ -295,14 +336,14 @@ pub enum ScheduleWaitReason {
     Workspace,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NightScheduleLane {
     pub capacity_pool: CapacityPool,
     pub planned_hours: f64,
     pub slots: Vec<NightScheduleSlot>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NightSchedule {
     pub lanes: Vec<NightScheduleLane>,
     pub parallel: bool,
@@ -708,7 +749,7 @@ pub struct MorningBrief {
     pub methodology: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OvernightCandidate {
     pub rank: usize,
     pub project: String,
@@ -734,20 +775,20 @@ pub struct OvernightCandidate {
     pub estimated_hours: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExcludedProject {
     pub project: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostReadinessState {
     Ready,
     NeedsAttention,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostReadinessLevel {
     Pass,
@@ -755,7 +796,7 @@ pub enum HostReadinessLevel {
     Warning,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostReadinessCheck {
     pub key: String,
     pub level: HostReadinessLevel,
@@ -764,7 +805,7 @@ pub struct HostReadinessCheck {
     pub action: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostReadiness {
     pub observed_at: String,
     pub state: HostReadinessState,
@@ -773,8 +814,12 @@ pub struct HostReadiness {
     pub methodology: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OvernightPlan {
+    #[serde(default)]
+    pub approval_fingerprint: String,
+    #[serde(default)]
+    pub approval_authority_id: String,
     pub generated_at: String,
     pub evidence_window_hours: u32,
     pub sleep_hours: f64,
@@ -790,6 +835,8 @@ pub struct OvernightPlan {
     pub host_readiness: HostReadiness,
     pub read_only: bool,
     pub methodology: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advisor: Option<RecommendationAdvisor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -934,6 +981,51 @@ pub enum ChatProvider {
     ClaudeSubscription,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionProvider {
+    CodexSubscription,
+    ClaudeSubscription,
+    GrokSubscription,
+}
+
+impl From<ChatProvider> for ConnectionProvider {
+    fn from(provider: ChatProvider) -> Self {
+        match provider {
+            ChatProvider::CodexSubscription => Self::CodexSubscription,
+            ChatProvider::ClaudeSubscription => Self::ClaudeSubscription,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioAdvisorSelection {
+    pub provider: ChatProvider,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub language: String,
+    #[serde(default)]
+    pub plan_overrides: SubscriptionPlanOverrides,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecommendationAdvisorMode {
+    SubscriptionModel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecommendationAdvisor {
+    pub mode: RecommendationAdvisorMode,
+    pub provider: ChatProvider,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub route_label: String,
+    pub observed_at: String,
+    pub input_digest: String,
+    pub output_digest: String,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -964,7 +1056,7 @@ pub struct ChatProviderOption {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProviderConnection {
-    pub provider: ChatProvider,
+    pub provider: ConnectionProvider,
     pub installed: bool,
     pub authenticated: bool,
     pub auth_method: Option<String>,
@@ -983,11 +1075,37 @@ pub enum ProviderLoginState {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProviderLoginResult {
-    pub provider: ChatProvider,
+    pub provider: ConnectionProvider,
     pub state: ProviderLoginState,
     pub message: String,
     pub fallback_command: String,
     pub connection: Option<ProviderConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatOvernightHandoff {
+    pub id: String,
+    pub sleep_hours: f64,
+    pub generated_at: String,
+    pub expires_at: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatPlanAuthorityState {
+    Active,
+    Expired,
+    Revoked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatPlanReview {
+    pub plan: OvernightPlan,
+    pub handoff: ChatOvernightHandoff,
+    pub authority_state: ChatPlanAuthorityState,
+    pub refresh_required: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -996,6 +1114,8 @@ pub struct ChatToolTrace {
     pub label: String,
     pub summary: String,
     pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<ChatOvernightHandoff>,
 }
 
 #[cfg(test)]
@@ -1017,6 +1137,8 @@ pub struct ChatTurnRequest {
     pub effort: Option<String>,
     pub sleep_hours: Option<f64>,
     pub language: String,
+    #[serde(default)]
+    pub plan_overrides: SubscriptionPlanOverrides,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

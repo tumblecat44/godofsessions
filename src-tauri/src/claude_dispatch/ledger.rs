@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 
 use crate::model::{
     NightRunAttempt, NightRunDetail, NightRunEvent, NightRunRecord, NightRunVerdict, Provider,
+    RunMode,
 };
 
 use super::ClaudeAgentProbe;
@@ -24,7 +25,9 @@ const RECEIPT_VERSION: u32 = 1;
 pub(super) struct ClaudeRunReceipt {
     pub(super) version: u32,
     pub(super) idempotency_key: String,
-    pub(super) source_session_id: String,
+    #[serde(default = "resume_run_mode")]
+    pub(super) run_mode: RunMode,
+    pub(super) source_session_id: Option<String>,
     pub(super) fork_session_id: Option<String>,
     pub(super) workspace: String,
     pub(super) prompt: String,
@@ -44,7 +47,8 @@ pub(super) struct ClaudeRunReceipt {
 impl ClaudeRunReceipt {
     pub(super) fn accepted(
         idempotency_key: String,
-        source_session_id: String,
+        run_mode: RunMode,
+        source_session_id: Option<String>,
         workspace: String,
         prompt: String,
         max_runtime_seconds: u64,
@@ -53,6 +57,7 @@ impl ClaudeRunReceipt {
         Self {
             version: RECEIPT_VERSION,
             idempotency_key,
+            run_mode,
             source_session_id,
             fork_session_id: None,
             workspace,
@@ -70,6 +75,10 @@ impl ClaudeRunReceipt {
             error: None,
         }
     }
+}
+
+fn resume_run_mode() -> RunMode {
+    RunMode::ResumeExisting
 }
 
 #[derive(Debug, Clone, Default)]
@@ -343,7 +352,14 @@ fn encode_receipt(receipt: &ClaudeRunReceipt) -> Result<Vec<u8>, String> {
 fn validate_receipt(receipt: &ClaudeRunReceipt) -> Result<(), String> {
     if receipt.version != RECEIPT_VERSION
         || !safe_idempotency_key(&receipt.idempotency_key)
-        || !safe_session_id(&receipt.source_session_id)
+        || receipt
+            .source_session_id
+            .as_deref()
+            .is_some_and(|value| !safe_session_id(value))
+        || !match receipt.run_mode {
+            RunMode::ResumeExisting => receipt.source_session_id.is_some(),
+            RunMode::NewSession => receipt.source_session_id.is_none(),
+        }
         || receipt
             .fork_session_id
             .as_deref()
@@ -458,7 +474,7 @@ fn history_record(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunR
         session_id: receipt
             .fork_session_id
             .clone()
-            .or_else(|| Some(receipt.source_session_id.clone())),
+            .or_else(|| receipt.source_session_id.clone()),
         thread_id: None,
         turn_id: None,
         outcome: match receipt.state.as_str() {
@@ -680,7 +696,8 @@ mod tests {
         ClaudeRunReceipt {
             version: RECEIPT_VERSION,
             idempotency_key: format!("gos-claude-{}", "a".repeat(64)),
-            source_session_id: "source-session".to_owned(),
+            run_mode: RunMode::ResumeExisting,
+            source_session_id: Some("source-session".to_owned()),
             fork_session_id: None,
             workspace: workspace.display().to_string(),
             prompt: concat!(

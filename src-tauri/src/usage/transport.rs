@@ -12,11 +12,30 @@ use wait_timeout::ChildExt;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn spawn_usage_command(binary: &Path, arguments: &[&str]) -> Result<Child, String> {
-    Command::new(binary)
+    spawn_usage_command_with_environment(binary, arguments, None, None)
+}
+
+fn spawn_usage_command_with_environment(
+    binary: &Path,
+    arguments: &[&str],
+    environment: Option<&[(String, String)]>,
+    current_dir: Option<&Path>,
+) -> Result<Child, String> {
+    let mut command = Command::new(binary);
+    command
         .args(arguments)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(environment) = environment {
+        command
+            .env_clear()
+            .envs(environment.iter().map(|(key, value)| (key, value)));
+    }
+    if let Some(current_dir) = current_dir {
+        command.current_dir(current_dir);
+    }
+    command
         .spawn()
         .map_err(|_| "로컬 사용량 조회 프로세스를 시작하지 못했습니다.".to_owned())
 }
@@ -65,7 +84,19 @@ pub(super) fn run_streaming_protocol(
     input: &str,
     response_received: impl Fn(&str) -> bool,
 ) -> Result<String, String> {
-    let mut child = spawn_usage_command(binary, arguments)?;
+    run_streaming_protocol_with_environment(binary, arguments, input, None, None, response_received)
+}
+
+pub(super) fn run_streaming_protocol_with_environment(
+    binary: &Path,
+    arguments: &[&str],
+    input: &str,
+    environment: Option<&[(String, String)]>,
+    current_dir: Option<&Path>,
+    response_received: impl Fn(&str) -> bool,
+) -> Result<String, String> {
+    let mut child =
+        spawn_usage_command_with_environment(binary, arguments, environment, current_dir)?;
     let stdout = child
         .stdout
         .take()

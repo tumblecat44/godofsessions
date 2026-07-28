@@ -43,6 +43,10 @@ import {
 import type {
   AppLanguage,
   ApprovalChallenge,
+  ChatModelOption,
+  ChatPlanReview,
+  ChatProviderOption,
+  PortfolioAdvisorSelection,
   DispatchPreflight,
   DispatchReceipt,
   HostReadiness,
@@ -72,6 +76,21 @@ type PlanState =
   | { kind: "ready"; plan: OvernightPlan }
   | { kind: "error"; message: string; previous?: OvernightPlan };
 
+type AdvisorReadinessState =
+  | { kind: "loading" }
+  | { kind: "ready"; label: string }
+  | { kind: "error"; message: string };
+
+type ApprovalPreparationKind = "single" | "portfolio" | "recovery";
+
+interface ApprovalPreparationToken {
+  id: number;
+  kind: ApprovalPreparationKind;
+  planEpoch: number;
+  planFingerprint: string | null;
+  planAuthorityId: string | null;
+}
+
 const sleepOptions = [4, 6, 7, 8, 10];
 
 const OvernightLanguageContext = createContext<AppLanguage>("ko");
@@ -87,6 +106,15 @@ function useNightCopy() {
 
 function remainingPercent(usedPercent: number) {
   return Math.max(0, Math.min(100, 100 - usedPercent));
+}
+
+function challengeExpired(
+  challenge: { expires_at: string } | null | undefined,
+  now = Date.now(),
+) {
+  if (!challenge) return false;
+  const expiresAt = Date.parse(challenge.expires_at);
+  return !Number.isFinite(expiresAt) || expiresAt <= now;
 }
 
 function BudgetCard({ budget }: { budget: ResourceBudget }) {
@@ -139,6 +167,33 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
               "Usage window could not be verified.",
             )}
         </p>
+      )}
+
+      {budget.plan_capacity && (
+        <div
+          className={`budget-equivalent budget-equivalent--${budget.plan_capacity.scope}`}
+        >
+          <span>
+            {copy("기본 요금제 환산", "Base-plan equivalent")}
+          </span>
+          <strong>
+            {copy(
+              `약 ${budget.plan_capacity.equivalent_base_plans_remaining.toFixed(1)}개 ${budget.plan_capacity.base_plan}분`,
+              `≈ ${budget.plan_capacity.equivalent_base_plans_remaining.toFixed(1)}× ${budget.plan_capacity.base_plan} remaining`,
+            )}
+          </strong>
+          <small>
+            {budget.plan_capacity.scope === "verified_session"
+              ? copy(
+                  `${budget.plan_capacity.binding_window} 창 · ${budget.plan_capacity.multiplier}× 세션 배수`,
+                  `${budget.plan_capacity.binding_window} window · ${budget.plan_capacity.multiplier}× session multiplier`,
+                )
+              : copy(
+                  `${budget.plan_capacity.binding_window || "현재"} 창의 요금제 규모 추정 · 작업 수 보장 아님`,
+                  `Plan-size estimate for the ${budget.plan_capacity.binding_window || "current"} window · not a task guarantee`,
+                )}
+          </small>
+        </div>
       )}
 
       {budget.windows.length > 0 && budget.message && (
@@ -236,6 +291,7 @@ const adapterReadinessLabels = {
 function dispatchCommandFor(surface: DispatchPreflight["surface"]) {
   if (surface === "codex") return "dispatch_approved_codex";
   if (surface === "claude") return "dispatch_approved_claude";
+  if (surface === "grok") return "dispatch_approved_grok";
   return "dispatch_approved_hermes";
 }
 
@@ -247,23 +303,34 @@ function approvalEffectsFor(
   if (surface === "codex") {
     return ko
       ? [
-          "승인한 기존 Codex 작업만 재개",
+          "승인한 Codex 새 작업 또는 기존 작업만 실행",
           "단일 writable root · 네트워크 차단",
         ]
       : [
-          "Resume only the approved existing Codex task",
+          "Run only the approved new or existing Codex task",
           "One writable root · network disabled",
         ];
   }
   if (surface === "claude") {
     return ko
       ? [
-          "기존 Claude 세션은 보존하고 격리 fork",
+          "Claude 새 세션 또는 원본을 보존한 격리 fork",
           "작업공간 중심 sandbox · 네트워크와 MCP 차단",
         ]
       : [
-          "Preserve the Claude source session and use an isolated fork",
+          "Start a new Claude session or preserve the source in an isolated fork",
           "Workspace sandbox · network and MCP disabled",
+        ];
+  }
+  if (surface === "grok") {
+    return ko
+      ? [
+          "Grok 새 세션 또는 원본을 보존한 격리 fork",
+          "strict workspace sandbox · 웹·MCP·외부 부작용 차단",
+        ]
+      : [
+          "Start a new Grok session or preserve the source in an isolated fork",
+          "Strict workspace sandbox · web, MCP, and external side effects denied",
         ];
   }
   return ko
@@ -1308,8 +1375,10 @@ function CandidateCard({
   waitReasons = [],
   approvalLoading = false,
   approvalDisabled = false,
+  approvalBusy = false,
   onRequestApproval,
   primary = false,
+  modelJudged = false,
 }: {
   candidate: OvernightCandidate;
   draft?: NightRunDraft;
@@ -1319,8 +1388,10 @@ function CandidateCard({
   waitReasons?: ScheduleWaitReason[];
   approvalLoading?: boolean;
   approvalDisabled?: boolean;
+  approvalBusy?: boolean;
   onRequestApproval?: (preflight: DispatchPreflight) => void;
   primary?: boolean;
+  modelJudged?: boolean;
 }) {
   const { language, ko, copy } = useNightCopy();
   const confidenceLabels =
@@ -1340,8 +1411,12 @@ function CandidateCard({
         </div>
         <div className="candidate-score">
           <span>{confidenceLabels[candidate.confidence]}</span>
-          <strong>{Math.round(candidate.score)}</strong>
-          <small>{copy("추천 지수", "FIT SCORE")}</small>
+          <strong>{modelJudged ? "AI" : Math.round(candidate.score)}</strong>
+          <small>
+            {modelJudged
+              ? copy("구독 모델 판단", "MODEL JUDGMENT")
+              : copy("추천 지수", "FIT SCORE")}
+          </small>
         </div>
       </header>
 
@@ -1676,6 +1751,7 @@ function CandidateCard({
                       preflight.state !== "ready_for_approval" ||
                       approvalLoading ||
                       approvalDisabled ||
+                      approvalBusy ||
                       !onRequestApproval
                     }
                     onClick={() => onRequestApproval?.(preflight)}
@@ -1687,6 +1763,8 @@ function CandidateCard({
                         <RefreshCw className="is-spinning" size={12} />
                         {copy("승인 준비 중", "Preparing approval")}
                       </>
+                    ) : approvalBusy ? (
+                      copy("다른 승인 준비 중", "Another approval is preparing")
                     ) : preflight.state === "ready_for_approval" ? (
                       <>
                         <ShieldCheck size={12} />
@@ -1949,12 +2027,38 @@ function NightPlanHistorySection({
   );
 }
 
-export function OvernightView({ language }: { language: AppLanguage }) {
+export function OvernightView({
+  language,
+  handoffId = null,
+  advisor,
+  defaultSleepHours,
+  onOpenSettings,
+}: {
+  language: AppLanguage;
+  handoffId?: string | null;
+  advisor: PortfolioAdvisorSelection;
+  defaultSleepHours: number;
+  onOpenSettings: () => void;
+}) {
   const ko = language === "ko";
   const copy = (koText: string, enText: string) => (ko ? koText : enText);
   const poolLabels = ko ? capacityPoolLabels : capacityPoolLabelsEn;
-  const [sleepHours, setSleepHours] = useState(7);
+  const [sleepHours, setSleepHours] = useState(defaultSleepHours);
   const [state, setState] = useState<PlanState>({ kind: "idle" });
+  const [advisorReadiness, setAdvisorReadiness] =
+    useState<AdvisorReadinessState>(
+      isTauri()
+        ? { kind: "loading" }
+        : {
+            kind: "ready",
+            label: advisor.model || "provider default",
+          },
+    );
+  const [handoffReview, setHandoffReview] =
+    useState<ChatPlanReview | null>(null);
+  const [handoffClock, setHandoffClock] = useState(() => Date.now());
+  const [challengeClock, setChallengeClock] = useState(() => Date.now());
+  const [approvalInvalidated, setApprovalInvalidated] = useState(false);
   const [approval, setApproval] = useState<ApprovalChallenge | null>(null);
   const [portfolioApproval, setPortfolioApproval] =
     useState<PortfolioApprovalChallenge | null>(null);
@@ -1978,6 +2082,119 @@ export function OvernightView({ language }: { language: AppLanguage }) {
   const [morningBrief, setMorningBrief] = useState<MorningBrief | null>(null);
   const planResultsRef = useRef<HTMLDivElement>(null);
   const revealNextPlanRef = useRef(false);
+  const openedHandoffRef = useRef<string | null>(null);
+  const planEpochRef = useRef(0);
+  const planFingerprintRef = useRef<string | null>(null);
+  const planAuthorityIdRef = useRef<string | null>(null);
+  const preparationSequenceRef = useRef(0);
+  const preparationRef = useRef<ApprovalPreparationToken | null>(null);
+  const activeApprovalChallenge = portfolioApproval || approval;
+  const activeApprovalExpired = challengeExpired(
+    activeApprovalChallenge,
+    Math.max(challengeClock, Date.now()),
+  );
+  const recoveryApprovalExpired = challengeExpired(
+    recoveryApproval,
+    Math.max(challengeClock, Date.now()),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isTauri()) {
+      setAdvisorReadiness({
+        kind: "ready",
+        label: advisor.model || "provider default",
+      });
+      return;
+    }
+
+    setAdvisorReadiness({ kind: "loading" });
+    void (async () => {
+      try {
+        const providers =
+          await invoke<ChatProviderOption[]>("load_chat_providers");
+        const selectedProvider = providers.find(
+          (option) => option.provider === advisor.provider,
+        );
+        if (
+          !selectedProvider ||
+          !selectedProvider.available ||
+          !selectedProvider.authenticated
+        ) {
+          throw new Error(
+            copy(
+              `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"} 구독 연결이 필요합니다. 설정에서 로그인 상태를 확인하세요.`,
+              `Connect your ${advisor.provider === "codex_subscription" ? "Codex" : "Claude"} subscription in Settings before asking for a judgment.`,
+            ),
+          );
+        }
+        const models = await invoke<ChatModelOption[]>("load_chat_models", {
+          provider: advisor.provider,
+        });
+        const selectedModel = advisor.model
+          ? models.find((model) => model.id === advisor.model)
+          : (models.find((model) => model.is_default) ?? models[0]);
+        if (!selectedModel) {
+          throw new Error(
+            copy(
+              advisor.model
+                ? `저장된 ${advisor.model} 모델을 현재 사용할 수 없습니다. 설정에서 모델을 다시 선택하세요.`
+                : "공급자가 사용 가능한 기본 모델을 반환하지 않았습니다.",
+              advisor.model
+                ? `${advisor.model} is no longer available. Choose another advisor model in Settings.`
+                : "The provider returned no available default model.",
+            ),
+          );
+        }
+        if (
+          advisor.effort &&
+          !selectedModel.supported_efforts.includes(advisor.effort)
+        ) {
+          throw new Error(
+            copy(
+              `${selectedModel.display_name}은(는) ${advisor.effort} effort를 지원하지 않습니다. 설정에서 다시 선택하세요.`,
+              `${selectedModel.display_name} does not support ${advisor.effort} effort. Choose another effort in Settings.`,
+            ),
+          );
+        }
+        if (!cancelled) {
+          setAdvisorReadiness({
+            kind: "ready",
+            label: `${selectedProvider.route_label} · ${selectedModel.display_name}${advisor.effort ? ` · ${advisor.effort}` : ""}`,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAdvisorReadiness({
+            kind: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : String(
+                    error ||
+                      copy(
+                        "판단 모델을 확인하지 못했습니다.",
+                        "The advisor model could not be verified.",
+                      ),
+                  ),
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [advisor.effort, advisor.model, advisor.provider, language]);
+
+  const advancePlanEpoch = useCallback(
+    (fingerprint: string | null, authorityId: string | null) => {
+      planEpochRef.current += 1;
+      planFingerprintRef.current = fingerprint;
+      planAuthorityIdRef.current = authorityId;
+      return planEpochRef.current;
+    },
+    [],
+  );
 
   const loadNightHistory = useCallback(async () => {
     try {
@@ -2130,6 +2347,90 @@ export function OvernightView({ language }: { language: AppLanguage }) {
   }, [loadMorningBrief, loadNightHistory, loadNightPlanHistory]);
 
   useEffect(() => {
+    if (!handoffId || openedHandoffRef.current === handoffId) return;
+    openedHandoffRef.current = handoffId;
+    advancePlanEpoch(null, null);
+    let cancelled = false;
+    let previous: OvernightPlan | undefined;
+    setApprovalError(null);
+    setHandoffReview(null);
+    setState((current) => {
+      previous =
+        current.kind === "ready"
+          ? current.plan
+          : current.kind === "loading" || current.kind === "error"
+            ? current.previous
+            : undefined;
+      return { kind: "loading", previous };
+    });
+
+    const openHandoff = async () => {
+      try {
+        if (!isTauri()) {
+          throw new Error(
+            copy(
+              "저장된 채팅 계획 검토는 데스크톱 앱에서만 사용할 수 있습니다.",
+              "Saved chat-plan review is available only in the desktop app.",
+            ),
+          );
+        }
+        const review = await invoke<ChatPlanReview>(
+          "open_chat_plan_handoff",
+          { handoffId },
+        );
+        if (cancelled) return;
+        setSleepHours(review.handoff.sleep_hours);
+        setHandoffReview(review);
+        setApprovalInvalidated(false);
+        advancePlanEpoch(
+          review.plan.approval_fingerprint || null,
+          review.plan.approval_authority_id || null,
+        );
+        revealNextPlanRef.current = true;
+        setState({ kind: "ready", plan: review.plan });
+      } catch (error) {
+        if (cancelled) return;
+        setState({
+          kind: "error",
+          previous,
+          message:
+            error instanceof Error
+              ? error.message
+              : String(
+                  error ||
+                    copy(
+                      "채팅에서 추천한 계획을 열지 못했습니다.",
+                      "The plan recommended in chat could not be opened.",
+                    ),
+                ),
+        });
+      }
+    };
+    void openHandoff();
+    return () => {
+      cancelled = true;
+    };
+  }, [advancePlanEpoch, handoffId, language]);
+
+  useEffect(() => {
+    if (!handoffReview) return;
+    setHandoffClock(Date.now());
+    const interval = window.setInterval(() => {
+      setHandoffClock(Date.now());
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [handoffReview]);
+
+  useEffect(() => {
+    if (!approval && !portfolioApproval && !recoveryApproval) return;
+    setChallengeClock(Date.now());
+    const interval = window.setInterval(() => {
+      setChallengeClock(Date.now());
+    }, 1_000);
+    return () => window.clearInterval(interval);
+  }, [approval, portfolioApproval, recoveryApproval]);
+
+  useEffect(() => {
     const activeApproval = portfolioApproval || approval;
     if (!activeApproval || isDispatching) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -2182,7 +2483,32 @@ export function OvernightView({ language }: { language: AppLanguage }) {
   }, [state]);
 
   const generate = async () => {
+    if (advisorReadiness.kind !== "ready") {
+      const previous =
+        state.kind === "ready"
+          ? state.plan
+          : state.kind === "loading" || state.kind === "error"
+            ? state.previous
+            : undefined;
+      setState({
+        kind: "error",
+        previous,
+        message:
+          advisorReadiness.kind === "error"
+            ? advisorReadiness.message
+            : copy(
+                "선택한 판단 모델을 아직 확인하고 있습니다.",
+                "The selected advisor is still being verified.",
+              ),
+      });
+      return;
+    }
+    advancePlanEpoch(null, null);
     setApprovalError(null);
+    setHandoffReview(null);
+    setApproval(null);
+    setPortfolioApproval(null);
+    setConfirmationPhrase("");
     revealNextPlanRef.current = true;
     const previous =
       state.kind === "ready"
@@ -2193,12 +2519,34 @@ export function OvernightView({ language }: { language: AppLanguage }) {
     setState({ kind: "loading", previous });
     try {
       const plan = isTauri()
-        ? await invoke<OvernightPlan>("generate_overnight_plan", { sleepHours })
+        ? await invoke<OvernightPlan>("generate_overnight_plan", {
+            sleepHours,
+            advisor,
+          })
         : {
             ...localizePreviewFixture(previewOvernightPlan, language),
             sleep_hours: sleepHours,
+            evidence_window_hours: 168,
+            advisor: {
+              mode: "subscription_model" as const,
+              provider: advisor.provider,
+              model: advisor.model,
+              effort: advisor.effort,
+              route_label:
+                advisor.provider === "codex_subscription"
+                  ? "ChatGPT Codex app-server"
+                  : "Claude Code CLI",
+              observed_at: new Date().toISOString(),
+              input_digest: "preview-input",
+              output_digest: "preview-output",
+            },
           };
+      advancePlanEpoch(
+        plan.approval_fingerprint || null,
+        plan.approval_authority_id || null,
+      );
       setState({ kind: "ready", plan });
+      setApprovalInvalidated(false);
     } catch (error) {
       setState({
         kind: "error",
@@ -2223,9 +2571,22 @@ export function OvernightView({ language }: { language: AppLanguage }) {
       : state.kind === "loading" || state.kind === "error"
         ? state.previous || null
         : null;
+  const durationChanged =
+    plan !== null && Math.abs(plan.sleep_hours - sleepHours) > 0.001;
+  const handoffRevoked = handoffReview?.authority_state === "revoked";
+  const handoffExpired =
+    handoffReview !== null &&
+    !handoffRevoked &&
+    (handoffReview.authority_state === "expired" ||
+      handoffReview.refresh_required ||
+      challengeExpired(handoffReview.handoff, handoffClock));
+  const handoffRequiresRefresh = handoffRevoked || handoffExpired;
   const planIsReadOnly =
     state.kind === "loading" ||
-    (state.kind === "error" && state.previous !== undefined);
+    (state.kind === "error" && state.previous !== undefined) ||
+    handoffRequiresRefresh ||
+    approvalInvalidated ||
+    durationChanged;
   const readyPortfolioPreflights = plan
     ? readyPortfolioPreflightsForPlan(plan)
     : [];
@@ -2252,8 +2613,122 @@ export function OvernightView({ language }: { language: AppLanguage }) {
         (preflight) => preflight.draft_id === approval.draft_id,
       )
     : undefined;
+  const approvalPreparationActive =
+    preparingDraftId !== null ||
+    isPreparingPortfolio ||
+    isPreparingRecovery;
+
+  const beginApprovalPreparation = (
+    kind: ApprovalPreparationKind,
+    planFingerprint: string | null,
+    planAuthorityId: string | null,
+  ) => {
+    if (
+      preparationRef.current ||
+      approval ||
+      portfolioApproval ||
+      recoveryApproval ||
+      isDispatching ||
+      isRecovering
+    ) {
+      setApprovalError(
+        copy(
+          "이미 다른 승인 창을 준비하거나 검토 중입니다. 먼저 그 작업을 마쳐 주세요.",
+          "Another approval is already being prepared or reviewed. Finish it first.",
+        ),
+      );
+      return null;
+    }
+    const token: ApprovalPreparationToken = {
+      id: ++preparationSequenceRef.current,
+      kind,
+      planEpoch: planEpochRef.current,
+      planFingerprint,
+      planAuthorityId,
+    };
+    preparationRef.current = token;
+    return token;
+  };
+
+  const releaseApprovalPreparation = (token: ApprovalPreparationToken) => {
+    if (preparationRef.current?.id === token.id) {
+      preparationRef.current = null;
+    }
+  };
+
+  const preparationMatchesCurrentPlan = (
+    token: ApprovalPreparationToken,
+  ) =>
+    preparationRef.current?.id === token.id &&
+    token.planFingerprint !== null &&
+    token.planAuthorityId !== null &&
+    token.planEpoch === planEpochRef.current &&
+    token.planFingerprint === planFingerprintRef.current &&
+    token.planAuthorityId === planAuthorityIdRef.current;
+
+  const rejectStalePreparedChallenge = async (
+    token: ApprovalPreparationToken,
+    challengeId: string,
+  ) => {
+    let cancellationFailed = false;
+    if (isTauri()) {
+      try {
+        await invoke("cancel_dispatch_approval", {
+          approvalId: challengeId,
+        });
+      } catch {
+        cancellationFailed = true;
+      }
+    }
+    setApprovalError((current) =>
+      current ||
+      copy(
+        cancellationFailed
+          ? "승인 준비 중 계획이 바뀌어 창을 열지 않았습니다. 오래된 승인은 로컬에서 차단했지만 백엔드 취소를 확인하지 못했습니다. 현재 근거로 다시 준비해 주세요."
+          : "승인 준비 중 계획이 바뀌어 오래된 응답을 폐기했습니다. 현재 계획에서 승인을 다시 준비해 주세요.",
+        cancellationFailed
+          ? "The plan changed while approval was preparing. The stale approval is blocked locally, but backend cancellation could not be confirmed. Prepare it again from current evidence."
+          : "The plan changed while approval was preparing, so the stale response was discarded. Prepare approval again from the current plan.",
+      ),
+    );
+    releaseApprovalPreparation(token);
+  };
 
   const requestApproval = async (preflight: DispatchPreflight) => {
+    if (
+      !plan ||
+      planIsReadOnly ||
+      !plan.approval_fingerprint ||
+      !plan.approval_authority_id
+    ) {
+      setApprovalError(
+        copy(
+          "현재 화면의 계획은 승인할 수 없습니다. 추천을 다시 만들어 주세요.",
+          "The plan currently shown cannot be approved. Refresh the recommendation.",
+        ),
+      );
+      return;
+    }
+    const planFingerprint = plan.approval_fingerprint;
+    const planAuthorityId = plan.approval_authority_id;
+    if (
+      planFingerprintRef.current !== planFingerprint ||
+      planAuthorityIdRef.current !== planAuthorityId
+    ) {
+      setApprovalError(
+        copy(
+          "화면의 계획과 현재 승인 계약이 일치하지 않습니다. 추천을 다시 만들어 주세요.",
+          "The visible plan no longer matches the current approval contract. Refresh the recommendation.",
+        ),
+      );
+      return;
+    }
+    const preparation = beginApprovalPreparation(
+      "single",
+      planFingerprint,
+      planAuthorityId,
+    );
+    if (!preparation) return;
     setPreparingDraftId(preflight.draft_id);
     setApprovalError(null);
     try {
@@ -2261,6 +2736,9 @@ export function OvernightView({ language }: { language: AppLanguage }) {
         ? await invoke<ApprovalChallenge>("prepare_dispatch_approval", {
             draftId: preflight.draft_id,
             idempotencyKey: preflight.idempotency_key,
+            expectedPlanFingerprint: planFingerprint,
+            expectedPlanAuthorityId: planAuthorityId,
+            language,
           })
         : {
             id: `preview-${preflight.draft_id}`,
@@ -2287,19 +2765,29 @@ export function OvernightView({ language }: { language: AppLanguage }) {
             warning:
               preflight.surface === "codex"
                 ? copy(
-                    "확인하면 이 기존 Codex 작업에 network-off workspace-write turn 하나를 시작합니다. GUI를 닫아도 전용 야간 작업자는 계속됩니다.",
-                    "This starts one network-off, workspace-write turn in the approved existing Codex task. The dedicated night worker continues if the UI closes.",
+                    "확인하면 승인한 Codex 새 thread 또는 기존 thread에 network-off workspace-write turn 하나를 시작합니다. GUI를 닫아도 전용 야간 작업자는 계속됩니다.",
+                    "This starts one network-off, workspace-write turn in the approved new or existing Codex thread. The dedicated night worker continues if the UI closes.",
                   )
                 : preflight.surface === "claude"
                   ? copy(
-                      "확인하면 이 기존 Claude 세션을 strict sandbox 안에서 fork해 작업합니다. 원본 세션과 민감 환경변수는 넘기지 않습니다.",
-                      "This forks the existing Claude session inside a strict sandbox. The source session and sensitive environment variables are not passed through.",
+                      "확인하면 승인한 Claude 새 세션 또는 기존 세션의 격리 fork를 strict sandbox 안에서 시작합니다. 민감 환경변수는 넘기지 않습니다.",
+                      "This starts the approved new Claude session or isolated fork inside a strict sandbox. Sensitive environment variables are not passed through.",
                     )
+                  : preflight.surface === "grok"
+                    ? copy(
+                        "확인하면 승인한 Grok 새 세션 또는 기존 세션의 격리 fork를 strict sandbox 안에서 시작합니다. 웹, MCP, 외부 부작용은 차단됩니다.",
+                        "This starts the approved new Grok session or isolated fork inside a strict sandbox. Web, MCP, and external side effects are denied.",
+                      )
                   : copy(
                       "확인하면 전용 Hermes 보드에 이 작업 하나를 만들고 로컬 작업자를 시작합니다.",
                       "This creates one task on the dedicated Hermes board and starts one local worker.",
                     ),
           };
+      if (!preparationMatchesCurrentPlan(preparation)) {
+        await rejectStalePreparedChallenge(preparation, challenge.id);
+        return;
+      }
+      setChallengeClock(Date.now());
       setApproval(challenge);
       setConfirmationPhrase("");
     } catch (error) {
@@ -2307,11 +2795,48 @@ export function OvernightView({ language }: { language: AppLanguage }) {
         error instanceof Error ? error.message : String(error),
       );
     } finally {
-      setPreparingDraftId(null);
+      releaseApprovalPreparation(preparation);
+      setPreparingDraftId((current) =>
+        current === preflight.draft_id ? null : current,
+      );
     }
   };
 
   const requestPortfolioApproval = async () => {
+    if (
+      !plan ||
+      planIsReadOnly ||
+      !plan.approval_fingerprint ||
+      !plan.approval_authority_id
+    ) {
+      setApprovalError(
+        copy(
+          "현재 화면의 밤 전체 계획은 승인할 수 없습니다. 추천을 다시 만들어 주세요.",
+          "The portfolio currently shown cannot be approved. Refresh the recommendation.",
+        ),
+      );
+      return;
+    }
+    const planFingerprint = plan.approval_fingerprint;
+    const planAuthorityId = plan.approval_authority_id;
+    if (
+      planFingerprintRef.current !== planFingerprint ||
+      planAuthorityIdRef.current !== planAuthorityId
+    ) {
+      setApprovalError(
+        copy(
+          "화면의 밤 계획과 현재 승인 계약이 일치하지 않습니다. 추천을 다시 만들어 주세요.",
+          "The visible night plan no longer matches the current approval contract. Refresh the recommendation.",
+        ),
+      );
+      return;
+    }
+    const preparation = beginApprovalPreparation(
+      "portfolio",
+      planFingerprint,
+      planAuthorityId,
+    );
+    if (!preparation) return;
     setIsPreparingPortfolio(true);
     setApprovalError(null);
     setPortfolioDispatchMessage(null);
@@ -2319,6 +2844,11 @@ export function OvernightView({ language }: { language: AppLanguage }) {
       const challenge = isTauri()
         ? await invoke<PortfolioApprovalChallenge>(
             "prepare_portfolio_approval",
+            {
+              expectedPlanFingerprint: planFingerprint,
+              expectedPlanAuthorityId: planAuthorityId,
+              language,
+            },
           )
         : {
             id: "preview-portfolio",
@@ -2369,13 +2899,17 @@ export function OvernightView({ language }: { language: AppLanguage }) {
               `Approve ${readyPortfolioPreflights.length} night runs`,
             ),
             expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
-            warning:
-              copy(
-                "확인하면 고정된 모든 lane과 순서를 수면 마감까지 실행합니다. 새 작업을 추가하거나 대체하지 않으며 후속 작업은 시작 직전에 다시 점검합니다.",
-                "This runs only the frozen lanes and order until the wake deadline. No work is added or substituted, and every later run is checked again just before start.",
-              ),
+            warning: copy(
+              "확인하면 고정된 모든 lane과 순서를 수면 마감까지 실행합니다. 새 작업을 추가하거나 대체하지 않으며 후속 작업은 시작 직전에 다시 점검합니다.",
+              "This runs only the frozen lanes and order until the wake deadline. No work is added or substituted, and every later run is checked again just before start.",
+            ),
           };
+      if (!preparationMatchesCurrentPlan(preparation)) {
+        await rejectStalePreparedChallenge(preparation, challenge.id);
+        return;
+      }
       setApproval(null);
+      setChallengeClock(Date.now());
       setPortfolioApproval(challenge);
       setConfirmationPhrase("");
     } catch (error) {
@@ -2383,6 +2917,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
         error instanceof Error ? error.message : String(error),
       );
     } finally {
+      releaseApprovalPreparation(preparation);
       setIsPreparingPortfolio(false);
     }
   };
@@ -2401,6 +2936,8 @@ export function OvernightView({ language }: { language: AppLanguage }) {
   };
 
   const requestNightPlanRecovery = async (planId: string) => {
+    const preparation = beginApprovalPreparation("recovery", null, null);
+    if (!preparation) return;
     setIsPreparingRecovery(true);
     setApprovalError(null);
     try {
@@ -2440,6 +2977,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
               ),
             };
           })();
+      setChallengeClock(Date.now());
       setRecoveryApproval(challenge);
       setRecoveryPhrase("");
     } catch (error) {
@@ -2448,6 +2986,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
       );
       void loadNightPlanHistory();
     } finally {
+      releaseApprovalPreparation(preparation);
       setIsPreparingRecovery(false);
     }
   };
@@ -2465,6 +3004,16 @@ export function OvernightView({ language }: { language: AppLanguage }) {
   };
 
   const confirmRecovery = async () => {
+    if (challengeExpired(recoveryApproval, Date.now())) {
+      setRecoveryPhrase("");
+      setApprovalError(
+        copy(
+          "복구 승인 시간이 만료되었습니다. 이 창을 닫고 새 복구 승인을 준비해 주세요.",
+          "This recovery approval expired. Close it and prepare a fresh recovery approval.",
+        ),
+      );
+      return;
+    }
     if (
       !recoveryApproval ||
       recoveryPhrase !== recoveryApproval.confirmation_phrase
@@ -2513,7 +3062,26 @@ export function OvernightView({ language }: { language: AppLanguage }) {
   };
 
   const confirmAndDispatch = async () => {
+    if (planIsReadOnly) {
+      setApprovalError(
+        copy(
+          "계획의 시간·근거 또는 승인 유효시간이 바뀌었습니다. 새 추천을 검토해 주세요.",
+          "The plan duration, evidence, or approval window changed. Review a fresh recommendation.",
+        ),
+      );
+      return;
+    }
     const currentApproval = portfolioApproval || approval;
+    if (challengeExpired(currentApproval, Date.now())) {
+      setConfirmationPhrase("");
+      setApprovalError(
+        copy(
+          "승인 확인 시간이 만료되었습니다. 이 창을 닫고 현재 계획에서 새 승인을 준비해 주세요.",
+          "This approval challenge expired. Close it and prepare a fresh approval from the current plan.",
+        ),
+      );
+      return;
+    }
     if (
       !currentApproval ||
       confirmationPhrase !== currentApproval.confirmation_phrase
@@ -2545,6 +3113,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
             approvalId: portfolioApproval.id,
             idempotencyKey: portfolioApproval.idempotency_key,
             confirmationPhrase,
+            language,
           },
         );
         const successfulReceipts = result.outcomes.reduce<
@@ -2577,6 +3146,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
           approvalId: approval.id,
           idempotencyKey: approval.idempotency_key,
           confirmationPhrase,
+          language,
         },
       );
       setReceipts((current) => ({
@@ -2595,6 +3165,58 @@ export function OvernightView({ language }: { language: AppLanguage }) {
     }
   };
 
+  const changeSleepHours = (nextHours: number) => {
+    if (Math.abs(nextHours - sleepHours) < 0.001) return;
+    setSleepHours(nextHours);
+    if (!plan || Math.abs(nextHours - plan.sleep_hours) < 0.001) return;
+    const invalidatedEpoch = advancePlanEpoch(null, null);
+    const invalidatedFingerprint = plan.approval_fingerprint;
+    const invalidatedAuthorityId = plan.approval_authority_id;
+    setApprovalInvalidated(true);
+    setApproval(null);
+    setPortfolioApproval(null);
+    setConfirmationPhrase("");
+    setApprovalError(null);
+    if (
+      isTauri() &&
+      invalidatedFingerprint &&
+      invalidatedAuthorityId
+    ) {
+      void invoke<boolean>("invalidate_approval_plan", {
+        expectedPlanFingerprint: invalidatedFingerprint,
+        expectedPlanAuthorityId: invalidatedAuthorityId,
+      })
+        .then((invalidated) => {
+          if (invalidated || planEpochRef.current !== invalidatedEpoch) return;
+          setApprovalInvalidated(true);
+          setApprovalError(
+            copy(
+              "시간 변경으로 이 계획을 로컬에서 차단했지만 백엔드에서 일치하는 승인 계획을 찾지 못했습니다. 승인은 계속 차단됩니다. 현재 근거로 추천을 다시 만들어 주세요.",
+              "This plan is blocked locally after the duration change, but the backend did not find a matching approval plan to invalidate. Approval remains blocked. Refresh the recommendation from current evidence.",
+            ),
+          );
+        })
+        .catch((error) => {
+          if (planEpochRef.current !== invalidatedEpoch) return;
+          const detail = error instanceof Error ? error.message : String(error);
+          setApprovalInvalidated(true);
+          setApprovalError(
+            copy(
+              `시간 변경으로 이 계획을 로컬에서 차단했지만 백엔드 승인 폐기를 확인하지 못했습니다. 승인은 계속 차단됩니다. 현재 근거로 추천을 다시 만들어 주세요.${detail ? ` (${detail})` : ""}`,
+              `This plan is blocked locally after the duration change, but backend invalidation could not be confirmed. Approval remains blocked. Refresh the recommendation from current evidence.${detail ? ` (${detail})` : ""}`,
+            ),
+          );
+        });
+    } else if (isTauri()) {
+      setApprovalError(
+        copy(
+          "현재 계획에 승인 권한 정보가 없어 백엔드 승인 폐기를 요청하지 못했습니다. 이 계획은 로컬에서 계속 차단됩니다. 추천을 다시 만들어 주세요.",
+          "This plan is missing approval authority data, so backend invalidation could not be requested. The plan remains blocked locally. Refresh the recommendation.",
+        ),
+      );
+    }
+  };
+
   return (
     <OvernightLanguageContext.Provider value={language}>
     <main className="workspace overnight-workspace">
@@ -2604,8 +3226,8 @@ export function OvernightView({ language }: { language: AppLanguage }) {
           <h1>{copy("오늘 밤 어디에 맡길까요?", "What should move tonight?")}</h1>
           <p>
             {copy(
-              "최근 24시간의 프로젝트 흔적과 현재 구독 여유를 함께 보고, 아침에 검증 가능한 일만 순서대로 고릅니다.",
-              "Rank the last 24 hours of project context against live subscription capacity—and choose only work that can leave verifiable evidence by morning.",
+              "선택한 구독 모델이 실제 프로젝트 근거를 판단하고, Morrow가 현재 용량·경로·충돌을 검증해 아침에 증명 가능한 일만 고릅니다.",
+              "Your selected subscription model judges real project evidence; Morrow verifies capacity, routes, and conflicts before anything can run.",
             )}
           </p>
         </div>
@@ -2641,8 +3263,12 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                 className={sleepHours === hours ? "is-selected" : ""}
                 type="button"
                 key={hours}
-                onClick={() => setSleepHours(hours)}
-                disabled={state.kind === "loading"}
+                onClick={() => changeSleepHours(hours)}
+                disabled={
+                  state.kind === "loading" ||
+                  approvalPreparationActive ||
+                  isDispatching
+                }
               >
                 {ko ? `${hours}시간` : `${hours}h`}
               </button>
@@ -2657,10 +3283,14 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                 onChange={(event) => {
                   const value = Number(event.target.value);
                   if (Number.isFinite(value) && value >= 1 && value <= 16) {
-                    setSleepHours(value);
+                    changeSleepHours(value);
                   }
                 }}
-                disabled={state.kind === "loading"}
+                disabled={
+                  state.kind === "loading" ||
+                  approvalPreparationActive ||
+                  isDispatching
+                }
                 aria-label={copy("직접 입력할 수면 시간", "Custom sleep duration")}
               />
               <span>{ko ? "시간" : "hours"}</span>
@@ -2671,12 +3301,20 @@ export function OvernightView({ language }: { language: AppLanguage }) {
           className="generate-plan-button"
           type="button"
           onClick={() => void generate()}
-          disabled={state.kind === "loading"}
+          disabled={
+            state.kind === "loading" ||
+            advisorReadiness.kind !== "ready" ||
+            approvalPreparationActive ||
+            isDispatching
+          }
         >
           {state.kind === "loading" ? (
             <>
               <RefreshCw className="is-spinning" size={16} />
-              {copy("근거와 사용량 확인 중", "Checking evidence and capacity")}
+              {copy(
+                `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"}가 우선순위 판단 중`,
+                `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"} is judging priority`,
+              )}
             </>
           ) : (
             <>
@@ -2688,6 +3326,102 @@ export function OvernightView({ language }: { language: AppLanguage }) {
           )}
         </button>
       </section>
+
+      {advisorReadiness.kind === "loading" && state.kind !== "loading" && (
+        <section className="portfolio-inline-result" role="status">
+          <RefreshCw className="is-spinning" size={14} />
+          <p>
+            {copy(
+              "선택한 구독 모델과 effort를 확인하고 있습니다.",
+              "Verifying the selected subscription model and effort.",
+            )}
+          </p>
+        </section>
+      )}
+
+      {advisorReadiness.kind === "ready" && state.kind !== "loading" && (
+        <section className="portfolio-inline-result" role="status">
+          <Check size={14} />
+          <p>
+            {copy("판단 모델 준비됨", "Advisor ready")} ·{" "}
+            {advisorReadiness.label}
+          </p>
+        </section>
+      )}
+
+      {advisorReadiness.kind === "error" && (
+        <section className="plan-error" role="alert">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>
+              {copy(
+                "선택한 판단 모델을 사용할 수 없습니다",
+                "The selected advisor is unavailable",
+              )}
+            </strong>
+            <p>{advisorReadiness.message}</p>
+          </div>
+          <button type="button" onClick={onOpenSettings}>
+            {copy("설정 열기", "Open Settings")}
+          </button>
+        </section>
+      )}
+
+      {handoffReview &&
+        handoffReview.authority_state === "active" &&
+        !handoffRequiresRefresh &&
+        !durationChanged &&
+        !approvalInvalidated && (
+          <section className="portfolio-inline-result" role="status">
+            <Check size={14} />
+            <p>
+              {copy(
+                `Morrow가 대화에서 추천한 ${handoffReview.plan.sleep_hours}시간 계획과 동일합니다. 이 계획만 승인 대상으로 등록했습니다.`,
+                `This is the exact ${handoffReview.plan.sleep_hours}-hour plan Morrow recommended in chat. Only this plan is registered for approval.`,
+              )}
+            </p>
+          </section>
+        )}
+
+      {handoffRevoked && (
+        <section className="approval-inline-error" role="alert">
+          <AlertTriangle size={14} />
+          <p>
+            {copy(
+              "대화에서 추천한 정확한 계획은 그대로 보존했습니다. 하지만 이 계획의 승인 권한은 폐기되었거나 더 최신 계획으로 대체되어 아래 내용은 읽기 전용입니다. 현재 근거로 추천을 다시 만들어 주세요.",
+              "The exact chat plan is preserved, but its approval authority was invalidated or superseded by a newer plan. It is read-only; refresh the recommendation from current evidence.",
+            )}
+          </p>
+        </section>
+      )}
+
+      {handoffExpired && (
+        <section className="approval-inline-error" role="alert">
+          <AlertTriangle size={14} />
+          <p>
+            {copy(
+              "대화에서 추천한 정확한 계획은 보존했지만 승인 유효시간이 지났습니다. 아래 내용은 읽기 전용입니다. 현재 근거로 추천을 다시 만들어 주세요.",
+              "The exact chat plan is preserved, but its approval window expired. It is read-only; refresh the recommendation from current evidence.",
+            )}
+          </p>
+        </section>
+      )}
+
+      {(durationChanged || approvalInvalidated) && !handoffRequiresRefresh && (
+        <section className="approval-inline-error" role="alert">
+          <AlertTriangle size={14} />
+          <p>
+            {copy(
+              durationChanged
+                ? `시간 예산을 ${sleepHours}시간으로 바꿨지만 아래 계획은 ${plan?.sleep_hours}시간 기준입니다. 승인하기 전에 추천을 다시 만들어 주세요.`
+                : "시간 변경으로 이전 승인 계약을 폐기했습니다. 같은 시간으로 되돌려도 추천을 다시 만들어야 합니다.",
+              durationChanged
+                ? `The budget is now ${sleepHours} hours, but the plan below was built for ${plan?.sleep_hours} hours. Refresh it before approval.`
+                : "Changing the duration invalidated the prior approval contract. Returning to the old duration still requires a fresh recommendation.",
+            )}
+          </p>
+        </section>
+      )}
 
       {portfolioDispatchMessage &&
         !portfolioApproval &&
@@ -2740,13 +3474,13 @@ export function OvernightView({ language }: { language: AppLanguage }) {
           </h2>
           <p>
             {copy(
-              "Codex, Claude, Grok, Cursor, Hermes, OpenClaw의 로컬 세션 메타데이터를 프로젝트별로 묶습니다. 오늘의 사용자·최종 응답 일부는 메모리에서만 읽고 저장하지 않습니다.",
-              "Group local session metadata from Codex, Claude, Grok, Cursor, Hermes, and OpenClaw by project. Today's bounded conversation excerpts are read in memory and never persisted by the watch room.",
+              "Codex, Claude, Grok, Cursor, Hermes, OpenClaw의 로컬 세션 메타데이터를 프로젝트별로 묶습니다. 최근 7일의 제한된 사용자·최종 응답 일부는 메모리에서만 읽고 관제판에 저장하지 않습니다.",
+              "Group local session metadata from Codex, Claude, Grok, Cursor, Hermes, and OpenClaw by project. Bounded conversation excerpts from the last 7 days are read in memory and never persisted by the watch room.",
             )}
           </p>
           <div>
             <span>
-              <Database size={13} /> {copy("최근 24시간", "Last 24 hours")}
+              <Database size={13} /> {copy("최근 7일", "Last 7 days")}
             </span>
             <span>
               <ShieldCheck size={13} /> {copy("읽기 전용", "Read only")}
@@ -2772,8 +3506,8 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                     "Keeping the current answer while evidence refreshes",
                   )
                 : copy(
-                    "오늘 밤의 기회비용을 계산하고 있습니다",
-                    "Calculating tonight's opportunity cost",
+                    `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"}가 프로젝트 우선순위를 판단하고 있습니다`,
+                    `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"} is judging project priority`,
                   )}
             </strong>
             <p>
@@ -2783,8 +3517,8 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                     "The plan below stays read-only until the refresh finishes.",
                   )
                 : copy(
-                    "프로젝트 맥락과 Claude·Codex·Grok 사용량을 함께 확인합니다. 로컬 인증 상태에 따라 20초 안팎 걸릴 수 있습니다.",
-                    "Reading project context with Claude, Codex, and Grok capacity. Local auth checks may take around 20 seconds.",
+                    "실제 세션 근거와 현재 사용량을 읽은 뒤 구독 모델에 판단을 요청합니다. 몇 분 걸릴 수 있습니다.",
+                    "Morrow reads real session evidence and current capacity, then asks your subscription model to judge it. This may take a few minutes.",
                   )}
             </p>
           </div>
@@ -2826,6 +3560,18 @@ export function OvernightView({ language }: { language: AppLanguage }) {
             </span>
           </div>
 
+          {plan.advisor && (
+            <section className="portfolio-inline-result" role="status">
+              <Sparkles size={14} />
+              <p>
+                {copy(
+                  `${plan.advisor.provider === "codex_subscription" ? "Codex" : "Claude"} · ${plan.advisor.model || "공급자 기본 모델"}${plan.advisor.effort ? ` · ${plan.advisor.effort}` : ""}가 프로젝트 순서를 판단했습니다. 실행 경로와 승인 범위는 Morrow가 검증했습니다.`,
+                  `Judged by ${plan.advisor.provider === "codex_subscription" ? "Codex" : "Claude"} · ${plan.advisor.model || "provider default"}${plan.advisor.effort ? ` · ${plan.advisor.effort}` : ""}. Morrow verified the execution routes and approval scope.`,
+                )}
+              </p>
+            </section>
+          )}
+
           {plan.candidates.length > 0 ? (
             <section className="candidate-stack">
               <CandidateCard
@@ -2861,9 +3607,19 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                     ?.id
                 }
                 approvalDisabled={planIsReadOnly}
+                approvalBusy={
+                  isPreparingPortfolio ||
+                  isPreparingRecovery ||
+                  (preparingDraftId !== null &&
+                    preparingDraftId !==
+                      plan.run_drafts.find(
+                        (draft) => draft.candidate_rank === 1,
+                      )?.id)
+                }
                 onRequestApproval={(preflight) =>
                   void requestApproval(preflight)
                 }
+                modelJudged={Boolean(plan.advisor)}
                 primary
               />
               {plan.candidates.length > 1 && (
@@ -2917,9 +3673,20 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                         )?.id
                       }
                       approvalDisabled={planIsReadOnly}
+                      approvalBusy={
+                        isPreparingPortfolio ||
+                        isPreparingRecovery ||
+                        (preparingDraftId !== null &&
+                          preparingDraftId !==
+                            plan.run_drafts.find(
+                              (draft) =>
+                                draft.candidate_rank === candidate.rank,
+                            )?.id)
+                      }
                       onRequestApproval={(preflight) =>
                         void requestApproval(preflight)
                       }
+                      modelJudged={Boolean(plan.advisor)}
                       key={candidate.project}
                     />
                   ))}
@@ -3051,7 +3818,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                     onClick={() => void requestPortfolioApproval()}
                     disabled={
                       planIsReadOnly ||
-                      isPreparingPortfolio ||
+                      approvalPreparationActive ||
                       isDispatching
                     }
                   >
@@ -3203,13 +3970,21 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                   setRecoveryPhrase(event.target.value);
                   setApprovalError(null);
                 }}
-                disabled={isRecovering}
+                disabled={isRecovering || recoveryApprovalExpired}
                 autoComplete="off"
                 spellCheck={false}
               />
             </label>
 
             <p className="approval-warning">{recoveryApproval.warning}</p>
+            {recoveryApprovalExpired && (
+              <p className="approval-error" role="alert">
+                {copy(
+                  "복구 승인 시간이 만료되었습니다. 이 창을 닫고 새 복구 승인을 준비해 주세요.",
+                  "This recovery approval expired. Close it and prepare a fresh recovery approval.",
+                )}
+              </p>
+            )}
             {approvalError && (
               <p className="approval-error" role="alert">
                 {approvalError}
@@ -3231,6 +4006,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                 onClick={() => void confirmRecovery()}
                 disabled={
                   isRecovering ||
+                  recoveryApprovalExpired ||
                   recoveryPhrase !== recoveryApproval.confirmation_phrase
                 }
               >
@@ -3238,6 +4014,11 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                   <>
                     <RefreshCw className="is-spinning" size={13} />
                     공급자 증거 대조 중
+                  </>
+                ) : recoveryApprovalExpired ? (
+                  <>
+                    <AlertTriangle size={13} />
+                    {copy("승인 만료 · 새로 준비 필요", "Approval expired · prepare again")}
                   </>
                 ) : (
                   <>
@@ -3365,13 +4146,21 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                   setConfirmationPhrase(event.target.value);
                   setApprovalError(null);
                 }}
-                disabled={isDispatching}
+                disabled={isDispatching || activeApprovalExpired}
                 autoComplete="off"
                 spellCheck={false}
               />
             </label>
 
             <p className="approval-warning">{portfolioApproval.warning}</p>
+            {activeApprovalExpired && (
+              <p className="approval-error" role="alert">
+                {copy(
+                  "승인 확인 시간이 만료되었습니다. 이 창을 닫고 현재 계획에서 새 승인을 준비해 주세요.",
+                  "This approval challenge expired. Close it and prepare a fresh approval from the current plan.",
+                )}
+              </p>
+            )}
             {approvalError && (
               <p className="approval-error" role="alert">
                 {approvalError}
@@ -3393,6 +4182,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                 onClick={() => void confirmAndDispatch()}
                 disabled={
                   isDispatching ||
+                  activeApprovalExpired ||
                   confirmationPhrase !==
                     portfolioApproval.confirmation_phrase
                 }
@@ -3401,6 +4191,11 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                   <>
                     <RefreshCw className="is-spinning" size={13} />
                     {copy("각 계약 재확인 중", "Rechecking every contract")}
+                  </>
+                ) : activeApprovalExpired ? (
+                  <>
+                    <AlertTriangle size={13} />
+                    {copy("승인 만료 · 새로 준비 필요", "Approval expired · prepare again")}
                   </>
                 ) : (
                   <>
@@ -3477,13 +4272,21 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                   setConfirmationPhrase(event.target.value);
                   setApprovalError(null);
                 }}
-                disabled={isDispatching}
+                disabled={isDispatching || activeApprovalExpired}
                 autoComplete="off"
                 spellCheck={false}
               />
             </label>
 
             <p className="approval-warning">{approval.warning}</p>
+            {activeApprovalExpired && (
+              <p className="approval-error" role="alert">
+                {copy(
+                  "승인 확인 시간이 만료되었습니다. 이 창을 닫고 현재 계획에서 새 승인을 준비해 주세요.",
+                  "This approval challenge expired. Close it and prepare a fresh approval from the current plan.",
+                )}
+              </p>
+            )}
             {approvalError && (
               <p className="approval-error" role="alert">
                 {approvalError}
@@ -3505,6 +4308,7 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                 onClick={() => void confirmAndDispatch()}
                 disabled={
                   isDispatching ||
+                  activeApprovalExpired ||
                   confirmationPhrase !== approval.confirmation_phrase
                 }
               >
@@ -3512,6 +4316,11 @@ export function OvernightView({ language }: { language: AppLanguage }) {
                   <>
                     <RefreshCw className="is-spinning" size={13} />
                     {copy("계약 재확인 후 시작 중", "Rechecking contract and starting")}
+                  </>
+                ) : activeApprovalExpired ? (
+                  <>
+                    <AlertTriangle size={13} />
+                    {copy("승인 만료 · 새로 준비 필요", "Approval expired · prepare again")}
                   </>
                 ) : (
                   <>

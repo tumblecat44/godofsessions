@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import {
+  AlertTriangle,
   ArrowRight,
   Brain,
   Check,
@@ -21,6 +22,7 @@ import type {
   AppPreferences,
   ChatEvent,
   ChatModelOption,
+  ChatOvernightHandoff,
   ChatProvider,
   ChatProviderOption,
   ChatToolTrace,
@@ -30,6 +32,7 @@ import type {
   WorkspaceOverview,
   WorkspaceView,
 } from "../types";
+import { planOverrides } from "../lib/preferences";
 import { MorrowWatchRail } from "./MorrowWatchRail";
 import { OperatorMark } from "./OperatorMark";
 
@@ -38,6 +41,7 @@ const ACTIVE_CHAT_KEY = "morrow.active-chat.v1";
 interface ChatViewProps {
   overview: WorkspaceOverview;
   onNavigate: (view: WorkspaceView) => void;
+  onReviewOvernightPlan: (handoffId: string) => void;
   preferences: AppPreferences;
   onPreferencesChange: (preferences: AppPreferences) => void;
 }
@@ -186,6 +190,58 @@ function entriesFromConversation(
   return restored;
 }
 
+function latestOvernightHandoff(entry: ConversationEntry) {
+  for (let index = (entry.tools?.length || 0) - 1; index >= 0; index -= 1) {
+    const handoff = entry.tools?.[index]?.handoff;
+    if (handoff) return handoff;
+  }
+  return null;
+}
+
+function overnightHandoffExpired(
+  handoff: ChatOvernightHandoff,
+  now = Date.now(),
+) {
+  const expiresAt = Date.parse(handoff.expires_at);
+  return !Number.isFinite(expiresAt) || expiresAt <= now;
+}
+
+function localizedToolTrace(tool: ChatToolTrace, ko: boolean) {
+  if (ko) return { label: tool.label, summary: tool.summary };
+  const labels: Partial<Record<string, string>> = {
+    inspect_workspace: "Workspace context",
+    search_sessions: "Session search",
+    inspect_execution_routes: "Execution routes",
+    recommend_overnight: "Overnight recommendation",
+  };
+  let summary = tool.summary;
+  const recommendation = summary.match(
+    /^후보 (\d+)개 · 1순위 (.+) → (.+)$/,
+  );
+  const workspace = summary.match(
+    /^세션 (\d+)개 · 프로젝트 맥락 (\d+)개 · 사람 판단 (\d+)개$/,
+  );
+  const routes = summary.match(
+    /^경로 (\d+)개 · 승인 실행 계약이 있는 경로 (\d+)개$/,
+  );
+  const search = summary.match(/^‘(.+)’ 세션 (\d+)개$/);
+  if (recommendation) {
+    summary = `${recommendation[1]} candidates · top choice ${recommendation[2]} → ${recommendation[3]}`;
+  } else if (workspace) {
+    summary = `${workspace[1]} sessions · ${workspace[2]} project contexts · ${workspace[3]} need judgment`;
+  } else if (routes) {
+    summary = `${routes[1]} routes · ${routes[2]} with an approval-ready execution contract`;
+  } else if (search) {
+    summary = `${search[2]} sessions matching “${search[1]}”`;
+  } else if (summary === "실행 가능한 야간 후보가 없습니다.") {
+    summary = "No executable overnight candidates";
+  }
+  return {
+    label: labels[tool.tool] || tool.label,
+    summary,
+  };
+}
+
 function renderInline(content: string) {
   return content.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
     part.startsWith("**") && part.endsWith("**") ? (
@@ -257,6 +313,7 @@ function previewAnswer(
 export function ChatView({
   overview,
   onNavigate,
+  onReviewOvernightPlan,
   preferences,
   onPreferencesChange,
 }: ChatViewProps) {
@@ -285,6 +342,7 @@ export function ChatView({
   const [sessions, setSessions] = useState<OperatorChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
+  const [handoffClock, setHandoffClock] = useState(() => Date.now());
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
@@ -325,10 +383,22 @@ export function ChatView({
   const activeTurnRunning = activeSession?.status === "running";
   const configurationLocked = sending || Boolean(activeTurnRunning);
   const activeSessionIdRef = useRef(activeSessionId);
+  const hasOvernightHandoff = entries.some((entry) =>
+    Boolean(latestOvernightHandoff(entry)),
+  );
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!hasOvernightHandoff) return;
+    setHandoffClock(Date.now());
+    const interval = window.setInterval(() => {
+      setHandoffClock(Date.now());
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [hasOvernightHandoff]);
 
   const loadConversation = useCallback(
     async (sessionId: string) => {
@@ -824,6 +894,7 @@ export function ChatView({
               effort,
               sleep_hours: overnightHours,
               language: preferences.language,
+              plan_overrides: planOverrides(preferences),
             },
             onEvent,
           },
@@ -1036,23 +1107,26 @@ export function ChatView({
                       )}
                       {entry.tools && entry.tools.length > 0 && (
                         <div className="tool-traces">
-                          {entry.tools.map((tool) => (
-                            <div
-                              className={tool.success ? "" : "is-failed"}
-                              key={`${entry.id}-${tool.tool}`}
-                            >
-                              <OperatorMark size={22} />
-                              <span>
-                                <strong>{tool.label}</strong>
-                                <small>{tool.summary}</small>
-                              </span>
-                              {tool.success ? (
-                                <Check size={13} />
-                              ) : (
-                                <Wrench size={13} />
-                              )}
-                            </div>
-                          ))}
+                          {entry.tools.map((tool) => {
+                            const localized = localizedToolTrace(tool, ko);
+                            return (
+                              <div
+                                className={tool.success ? "" : "is-failed"}
+                                key={`${entry.id}-${tool.tool}`}
+                              >
+                                <OperatorMark size={22} />
+                                <span>
+                                  <strong>{localized.label}</strong>
+                                  <small>{localized.summary}</small>
+                                </span>
+                                {tool.success ? (
+                                  <Check size={13} />
+                                ) : (
+                                  <Wrench size={13} />
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                       {entry.content ? (
@@ -1063,18 +1137,46 @@ export function ChatView({
                           {ko ? "생각하는 중" : "Thinking"}
                         </div>
                       )}
-                      {entry.suggestedView === "overnight" && (
-                        <button
-                          className="chat-handoff"
-                          type="button"
-                          onClick={() => onNavigate("overnight")}
-                        >
-                          {ko
-                            ? "오늘 밤 추천에서 계획 검토"
-                            : "Review in Overnight"}
-                          <ArrowRight size={14} />
-                        </button>
-                      )}
+                      {entry.suggestedView === "overnight" &&
+                        (() => {
+                          const handoff = latestOvernightHandoff(entry);
+                          const expired = handoff
+                            ? overnightHandoffExpired(
+                                handoff,
+                                Math.max(handoffClock, Date.now()),
+                              )
+                            : false;
+                          return (
+                            <button
+                              className={`chat-handoff ${expired ? "is-expired" : ""}`}
+                              type="button"
+                              onClick={() => {
+                                if (handoff) {
+                                  onReviewOvernightPlan(handoff.id);
+                                } else {
+                                  onNavigate("overnight");
+                                }
+                              }}
+                            >
+                              {expired
+                                ? ko
+                                  ? "만료된 추천 계획 보기 · 새로고침 필요"
+                                  : "View expired recommendation · refresh required"
+                                : handoff
+                                  ? ko
+                                    ? "추천한 계획 그대로 검토"
+                                    : "Review the exact recommended plan"
+                                  : ko
+                                    ? "현재 근거로 새 계획 만들기"
+                                    : "Build a fresh plan from current evidence"}
+                              {expired ? (
+                                <AlertTriangle size={14} />
+                              ) : (
+                                <ArrowRight size={14} />
+                              )}
+                            </button>
+                          );
+                        })()}
                     </div>
                   </article>
                 ),

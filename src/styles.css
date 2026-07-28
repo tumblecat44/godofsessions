@@ -465,6 +465,349 @@ summary:focus-visible {
   background: var(--deck-raised);
 }
 
+.advisor-config {
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--etched-edge-soft);
+}
+
+.advisor-config__heading {
+  min-height: 40px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.advisor-config__heading > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.advisor-config__heading strong {
+  color: var(--ink-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.advisor-config__heading small {
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.advisor-refresh {
+  min-height: 32px;
+  padding: 0 9px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink-tertiary);
+  border: 1px solid var(--etched-edge);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.advisor-refresh:hover:not(:disabled) {
+  color: var(--ink-primary);
+  background: var(--deck-raised);
+}
+
+.advisor-refresh:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.advisor-provider-choice {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.advisor-provider-choice button {
+  min-height: 54px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink-tertiary);
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+  background: var(--deck);
+  cursor: pointer;
+  text-align: left;
+}
+
+.advisor-provider-choice button:hover {
+  color: var(--ink-primary);
+  border-color: var(--etched-edge);
+  background: var(--deck-raised);
+}
+
+.advisor-provider-choice button.is-selected {
+  color: var(--signal-amber);
+  border-color: rgba(231, 168, 77, 0.25);
+  background: var(--deck-raised);
+  box-shadow: inset 2px 0 0 var(--signal-amber);
+}
+
+.advisor-provider-choice button > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal-red);
+  box-shadow: 0 0 0 3px rgba(214, 120, 105, 0.08);
+}
+
+.advisor-provider-choice button > i.is-ready {
+  background: var(--signal-teal);
+  box-shadow: 0 0 0 3px rgba(99, 181, 160, 0.08);
+}
+
+.advisor-provider-choice button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.advisor-provider-choice strong {
+  color: var(--ink-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.advisor-provider-choice small {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advisor-provider-choice svg {
+  color: var(--signal-amber);
+}
+
+.advisor-model-fields {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr);
+  gap: 8px;
+}
+
+.advisor-model-fields label {
+  min-width: 0;
+  padding: 9px 10px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+  background: var(--deck);
+}
+
+.advisor-model-fields label > span {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.advisor-model-fields select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 28px 0 9px;
+  color: var(--ink-primary);
+  border: 1px solid var(--etched-edge);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--control-inset);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 8px;
+}
+
+.advisor-model-fields select:focus-visible {
+  border-color: rgba(231, 168, 77, 0.48);
+  box-shadow: 0 0 0 2px rgba(231, 168, 77, 0.09);
+}
+
+.advisor-model-fields select:disabled {
+  color: var(--ink-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.advisor-model-fields label > small {
+  min-height: 22px;
+  color: var(--ink-muted);
+  font-size: 7px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.advisor-status {
+  min-height: 46px;
+  margin-top: 8px;
+  padding: 8px 9px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--signal-teal);
+  border: 1px solid rgba(99, 181, 160, 0.16);
+  border-radius: var(--radius-control);
+  background: rgba(99, 181, 160, 0.035);
+}
+
+.advisor-status.is-loading,
+.advisor-status.is-warning {
+  color: var(--signal-amber);
+  border-color: rgba(231, 168, 77, 0.18);
+  background: rgba(231, 168, 77, 0.04);
+}
+
+.advisor-status.is-error {
+  color: var(--signal-red);
+  border-color: rgba(214, 120, 105, 0.2);
+  background: var(--signal-red-soft);
+}
+
+.plan-tier-config {
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--etched-edge-soft);
+}
+
+.plan-tier-config__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.plan-tier-config__heading > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.plan-tier-config__heading strong {
+  color: var(--ink-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.plan-tier-config__heading small {
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.plan-tier-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plan-tier-grid label {
+  min-width: 0;
+  padding: 9px 10px 10px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: var(--radius-control);
+  background: var(--deck);
+}
+
+.plan-tier-grid label > span {
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.plan-tier-grid select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 28px 0 9px;
+  color: var(--ink-primary);
+  border: 1px solid var(--etched-edge);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--control-inset);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 8px;
+}
+
+.plan-tier-grid select:focus-visible {
+  border-color: rgba(231, 168, 77, 0.48);
+  box-shadow: 0 0 0 2px rgba(231, 168, 77, 0.09);
+}
+
+.plan-tier-grid label > small {
+  color: var(--ink-muted);
+  font-size: 7px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.advisor-status > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.advisor-status strong {
+  color: var(--ink-secondary);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.advisor-status small {
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 7px;
+  line-height: 1.4;
+}
+
+.advisor-status > button {
+  min-height: 30px;
+  padding: 0 9px;
+  color: var(--ink-secondary);
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.advisor-status > button:hover {
+  color: var(--ink-primary);
+  background: var(--deck-raised);
+}
+
 .provider-default,
 .overnight-setting {
   min-height: 53px;
@@ -1208,6 +1551,31 @@ summary:focus-visible {
   .overnight-setting {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .advisor-config__heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .advisor-refresh {
+    align-self: flex-start;
+  }
+
+  .advisor-provider-choice,
+  .advisor-model-fields,
+  .plan-tier-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .advisor-status {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .advisor-status > button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .language-choice {
@@ -3977,6 +4345,44 @@ button:active:not(:disabled) {
   color: var(--signal-amber);
   font-size: 9px;
   line-height: 1.5;
+}
+
+.budget-equivalent {
+  margin-top: 12px;
+  padding: 9px 10px;
+  display: grid;
+  gap: 3px;
+  color: var(--signal-teal);
+  background: rgba(79, 190, 166, 0.045);
+  border: 1px solid rgba(79, 190, 166, 0.14);
+  border-radius: 6px;
+}
+
+.budget-equivalent--estimated_non_session,
+.budget-equivalent--plan_equivalent_estimate {
+  color: var(--signal-amber);
+  background: rgba(228, 169, 74, 0.045);
+  border-color: rgba(228, 169, 74, 0.14);
+}
+
+.budget-equivalent > span {
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 6.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.budget-equivalent > strong {
+  color: var(--ink-secondary);
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.budget-equivalent > small {
+  color: var(--ink-muted);
+  font-size: 7px;
+  line-height: 1.4;
 }
 
 .budget-warning {
@@ -7567,6 +7973,12 @@ button:active:not(:disabled) {
   cursor: pointer;
   font-size: 10px;
   font-weight: 660;
+}
+
+.chat-handoff.is-expired {
+  color: var(--signal-amber);
+  border: 1px solid rgba(231, 168, 77, 0.32);
+  background: var(--signal-amber-soft);
 }
 
 .chat-turn.is-error .operator-avatar {

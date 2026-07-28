@@ -7,6 +7,7 @@ import {
   Settings,
 } from "lucide-react";
 import { compactNumber, providerNames } from "../lib/format";
+import { localizePreviewFixture } from "../lib/preview-localization";
 import type {
   AppLanguage,
   Provider,
@@ -134,7 +135,10 @@ export function Sidebar({
             }
             onClick={() => onSelectProvider(provider.provider)}
             disabled={activeView !== "inbox"}
-            title={[provider.source_label, provider.message]
+            title={[
+              provider.source_label,
+              localizePreviewFixture(provider.message, language),
+            ]
               .filter(Boolean)
               .join(" · ")}
           >

@@ -71,6 +71,7 @@ fn parse(output: &str) -> Result<ResourceBudget, String> {
         provider: Provider::Claude,
         state: state_for_windows(&windows),
         plan: None,
+        plan_capacity: None,
         windows,
         credits: None,
         observed_at,

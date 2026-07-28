@@ -22,6 +22,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const EVIDENCE_GRACE_SECONDS: i64 = 120;
 const EXHAUSTED_REMAINING_PERCENT: f64 = 0.5;
 const CAPACITY_RECHECK_MINUTES: i64 = 5;
+const MAX_EXECUTION_BUDGET_AGE_MINUTES: i64 = 5;
 const EXTERNAL_WORKSPACE_RECHECK_MINUTES: i64 = 1;
 
 pub(super) fn run(request: CoordinatorWorkerRequest) -> Result<(), String> {
@@ -201,7 +202,7 @@ fn tick(
             .get(&capacity_pool)
             .map(std::slice::from_ref)
             .unwrap_or_default();
-        if let Some(reason) = capacity_wait_reason(capacity_pool, route_budgets) {
+        if let Some(reason) = capacity_wait_reason(capacity_pool, route_budgets, now) {
             let item = &mut plan.lanes[lane_index].items[item_index];
             item.waiting_kind = Some(CoordinatorWaitKind::Capacity);
             item.waiting_reason = Some(reason);
@@ -295,7 +296,16 @@ fn reconcile_running_items(plan: &mut CoordinatorPlan, now: DateTime<Utc>) {
         }
         let idempotency_key = &item.approved.dispatch.preflight.idempotency_key;
         let surface = item.approved.dispatch.preflight.surface;
-        let native_session_id = item.approved.dispatch.draft.native_session_id.as_deref();
+        let native_session_id = item
+            .receipt
+            .as_ref()
+            .and_then(|receipt| {
+                receipt
+                    .thread_id
+                    .as_deref()
+                    .or(receipt.session_id.as_deref())
+            })
+            .or(item.approved.dispatch.draft.native_session_id.as_deref());
         let evidence =
             crate::dispatch::load_night_run_record(surface, idempotency_key, native_session_id);
         let evidence_status = evidence
@@ -476,6 +486,7 @@ fn dispatch_one(
         Provider::Hermes => crate::dispatch::execute_approved(approved, route),
         Provider::Codex => crate::codex_dispatch::execute_approved(approved, route),
         Provider::Claude => crate::claude_dispatch::execute_approved(approved, route),
+        Provider::Grok => crate::grok_dispatch::execute_approved(approved, route),
         _ => Err(format!(
             "{} 실행 어댑터는 승인된 밤 계획을 지원하지 않습니다.",
             surface.as_str()
@@ -487,7 +498,11 @@ fn waiting_retry_due(item: &CoordinatorItem, now: DateTime<Utc>) -> bool {
     item.waiting_retry_at.is_none_or(|retry_at| now >= retry_at)
 }
 
-fn capacity_wait_reason(capacity_pool: CapacityPool, budgets: &[ResourceBudget]) -> Option<String> {
+fn capacity_wait_reason(
+    capacity_pool: CapacityPool,
+    budgets: &[ResourceBudget],
+    now: DateTime<Utc>,
+) -> Option<String> {
     let (provider, pool_label) = capacity_budget_source(capacity_pool)?;
     let Some(budget) = budgets.iter().find(|budget| budget.provider == provider) else {
         return Some(format!(
@@ -497,6 +512,17 @@ fn capacity_wait_reason(capacity_pool: CapacityPool, budgets: &[ResourceBudget])
     if budget.state != ResourceState::Ready || budget.windows.is_empty() {
         return Some(format!(
             "{pool_label} 사용량 근거가 최신 상태가 아닙니다. 승인한 마감 안에서 다시 확인합니다."
+        ));
+    }
+    let observed_at = DateTime::parse_from_rfc3339(&budget.observed_at)
+        .ok()
+        .map(|value| value.with_timezone(&Utc));
+    if !observed_at.is_some_and(|observed_at| {
+        observed_at <= now + chrono::Duration::minutes(1)
+            && now - observed_at <= chrono::Duration::minutes(MAX_EXECUTION_BUDGET_AGE_MINUTES)
+    }) {
+        return Some(format!(
+            "{pool_label} 사용량 관측 시각이 오래됐거나 올바르지 않습니다. 승인한 마감 안에서 다시 확인합니다."
         ));
     }
     let constrained = budget.windows.iter().max_by(|left, right| {
@@ -661,6 +687,7 @@ mod tests {
             provider,
             state,
             plan: Some("test".to_owned()),
+            plan_capacity: None,
             windows: used_percent
                 .map(|used_percent| {
                     vec![UsageWindow {
@@ -750,8 +777,12 @@ mod tests {
     fn exhausted_exact_subscription_waits_for_capacity_recovery() {
         let budgets = vec![budget(Provider::Codex, ResourceState::Ready, Some(99.9))];
 
-        let reason =
-            capacity_wait_reason(CapacityPool::CodexSubscription, &budgets).expect("capacity wait");
+        let reason = capacity_wait_reason(
+            CapacityPool::CodexSubscription,
+            &budgets,
+            plan().approved_at,
+        )
+        .expect("capacity wait");
 
         assert!(reason.contains("0.1%"));
         assert!(reason.contains("2026-07-24T12:00:00Z"));
@@ -760,17 +791,35 @@ mod tests {
     #[test]
     fn ambiguous_usage_waits_but_healthy_capacity_may_start() {
         let degraded = vec![budget(Provider::Claude, ResourceState::Degraded, None)];
-        assert!(
-            capacity_wait_reason(CapacityPool::ClaudeSubscription, &degraded)
-                .expect("ambiguous capacity wait")
-                .contains("최신 상태가 아닙니다")
-        );
+        assert!(capacity_wait_reason(
+            CapacityPool::ClaudeSubscription,
+            &degraded,
+            plan().approved_at,
+        )
+        .expect("ambiguous capacity wait")
+        .contains("최신 상태가 아닙니다"));
 
         let healthy = vec![budget(Provider::Codex, ResourceState::Ready, Some(40.0))];
         assert_eq!(
-            capacity_wait_reason(CapacityPool::CodexSubscription, &healthy),
+            capacity_wait_reason(
+                CapacityPool::CodexSubscription,
+                &healthy,
+                plan().approved_at,
+            ),
             None
         );
+    }
+
+    #[test]
+    fn stale_ready_usage_never_authorizes_execution() {
+        let mut stale = budget(Provider::Codex, ResourceState::Ready, Some(40.0));
+        let now = plan().approved_at + chrono::Duration::minutes(6);
+        stale.observed_at = plan().approved_at.to_rfc3339();
+
+        let reason = capacity_wait_reason(CapacityPool::CodexSubscription, &[stale], now)
+            .expect("stale usage wait");
+
+        assert!(reason.contains("관측 시각"));
     }
 
     #[test]

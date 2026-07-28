@@ -40,10 +40,7 @@ impl RouteSources {
                 PathBuf::from("/opt/homebrew/bin/codex"),
                 PathBuf::from("/usr/local/bin/codex"),
             ]),
-            grok_binary: first_file([
-                home.join(".grok/bin/grok"),
-                PathBuf::from("/opt/homebrew/bin/grok"),
-            ]),
+            grok_binary: resolve_grok_binary().unwrap_or_else(|| home.join(".grok/bin/grok")),
             cursor_binary: first_file([
                 home.join(".local/bin/cursor"),
                 PathBuf::from("/Applications/Cursor.app/Contents/Resources/app/bin/cursor"),
@@ -98,7 +95,7 @@ pub fn load_from(
         native_route(
             "grok:native",
             Provider::Grok,
-            "Grok Build ACP",
+            "Grok Build headless",
             CapacityPool::GrokSubscription,
             &sources.grok_binary,
             None,
@@ -375,12 +372,14 @@ fn native_dispatch_profile(provider: Provider) -> DispatchProfile {
         },
         Provider::Grok => DispatchProfile {
             readiness: AdapterReadiness::ContractReady,
-            interface: "Grok ACP stdio",
-            receipt: "ACP session/update + completion",
+            interface: "Grok Build durable print worker",
+            receipt: "target session transcript + JSON result",
             guardrails: &[
-                "ACP 권한 요청을 앱이 명시적으로 판정",
-                "workspace sandbox와 deny 규칙 고정",
-                "--always-approve 금지",
+                "resume은 원본을 보존하고 결정된 target session으로 fork",
+                "strict workspace sandbox와 dontAsk·명시적 allow/deny 규칙 고정",
+                "web·MCP·subagent·memory·plan 비활성화",
+                "prompt는 process argv가 아닌 전용 0600 파일로 전달 후 삭제",
+                "--always-approve와 bypassPermissions 금지",
             ],
         },
         Provider::Claude => DispatchProfile {
@@ -494,6 +493,26 @@ fn first_file<const N: usize>(paths: [PathBuf; N]) -> PathBuf {
         .unwrap_or_else(|| paths[0].clone())
 }
 
+pub(crate) fn resolve_grok_binary() -> Option<PathBuf> {
+    let home = dirs::home_dir();
+    [
+        home.as_ref().map(|home| home.join(".grok/bin/grok")),
+        Some(PathBuf::from("/opt/homebrew/bin/grok")),
+        Some(PathBuf::from("/usr/local/bin/grok")),
+        home.map(|home| home.join(".local/bin/grok")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|path| path.is_file())
+    .or_else(|| {
+        std::env::var_os("PATH").and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|path| path.join("grok"))
+                .find(|path| path.is_file())
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -513,6 +532,7 @@ mod tests {
             provider,
             state: ResourceState::Ready,
             plan: Some("Pro".to_owned()),
+            plan_capacity: None,
             windows: vec![UsageWindow {
                 label: "5시간".to_owned(),
                 used_percent: 20.0,

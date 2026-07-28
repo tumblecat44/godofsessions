@@ -1,4 +1,10 @@
-import type { AppLanguage, AppPreferences } from "../types";
+import type {
+  AppLanguage,
+  AppPreferences,
+  ChatProvider,
+  SubscriptionPlanOverrides,
+  SubscriptionPlanTier,
+} from "../types";
 
 const STORAGE_KEY = "morrow.preferences.v1";
 
@@ -15,6 +21,7 @@ export function defaultPreferences(): AppPreferences {
     default_chat_provider: "codex_subscription",
     default_chat_models: {},
     default_chat_efforts: {},
+    subscription_plan_tiers: {},
     default_overnight_hours: 7,
     onboarding_complete: false,
   };
@@ -42,6 +49,9 @@ export function loadPreferences(): AppPreferences {
         typeof parsed.default_chat_efforts === "object"
           ? parsed.default_chat_efforts
           : {},
+      subscription_plan_tiers: validPlanTiers(
+        parsed.subscription_plan_tiers,
+      ),
       default_overnight_hours:
         typeof parsed.default_overnight_hours === "number" &&
         parsed.default_overnight_hours >= 1 &&
@@ -53,6 +63,39 @@ export function loadPreferences(): AppPreferences {
   } catch {
     return fallback;
   }
+}
+
+function validPlanTiers(
+  value: AppPreferences["subscription_plan_tiers"] | undefined,
+): AppPreferences["subscription_plan_tiers"] {
+  if (!value || typeof value !== "object") return {};
+  const valid = new Set<SubscriptionPlanTier>([
+    "claude_pro",
+    "claude_max5x",
+    "claude_max20x",
+    "codex_plus",
+    "codex_pro5x",
+    "codex_pro20x",
+  ]);
+  const result: Partial<Record<ChatProvider, SubscriptionPlanTier>> = {};
+  for (const provider of [
+    "claude_subscription",
+    "codex_subscription",
+  ] as ChatProvider[]) {
+    const tier = value[provider];
+    if (tier && valid.has(tier)) result[provider] = tier;
+  }
+  return result;
+}
+
+export function planOverrides(
+  preferences: AppPreferences,
+): SubscriptionPlanOverrides {
+  return {
+    claude:
+      preferences.subscription_plan_tiers.claude_subscription ?? null,
+    codex: preferences.subscription_plan_tiers.codex_subscription ?? null,
+  };
 }
 
 export function savePreferences(preferences: AppPreferences) {

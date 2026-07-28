@@ -7,29 +7,37 @@ mod context_brief;
 mod control_board;
 mod dispatch;
 mod execution_routes;
+mod grok_dispatch;
 mod host_readiness;
 mod model;
 mod morrow_watch;
 mod night_contract;
 mod night_coordinator;
 mod operator_chat;
+mod portfolio_advisor;
 mod provider_auth;
 mod recommendation;
 mod time_utils;
 mod usage;
 mod workspace_identity;
 
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
-
-use chrono::Utc;
-use model::{
-    ApprovalChallenge, CapacityPool, ChatEvent, ChatModelOption, ChatProvider, ChatProviderOption,
-    ChatTurnRequest, DispatchReceipt, ExecutionRouteInventory, MorningBrief, NightPlanHistory,
-    NightPlanResumeChallenge, NightRunDetail, NightRunHistory, OperatorChatConversation,
-    OperatorChatSession, OvernightPlan, PortfolioApprovalChallenge, PortfolioDispatchResult,
-    Provider, ProviderConnection, ProviderLoginResult, Session, Snapshot, StatusConfidence,
-    WorkspaceOverview,
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Mutex,
 };
+
+use chrono::{Duration as ChronoDuration, Utc};
+use model::{
+    ApprovalChallenge, CapacityPool, ChatEvent, ChatModelOption, ChatOvernightHandoff,
+    ChatPlanAuthorityState, ChatPlanReview, ChatProvider, ChatProviderOption, ChatTurnRequest,
+    ConnectionProvider, DispatchPreflightState, DispatchReceipt, ExecutionRouteInventory,
+    MorningBrief, NightPlanHistory, NightPlanResumeChallenge, NightRunDetail, NightRunHistory,
+    OperatorChatConversation, OperatorChatSession, OvernightPlan, PortfolioAdvisorSelection,
+    PortfolioApprovalChallenge, PortfolioDispatchResult, Provider, ProviderConnection,
+    ProviderLoginResult, Session, Snapshot, StatusConfidence, WorkspaceOverview,
+};
+use sha2::{Digest, Sha256};
 use tauri::{ipc::Channel, State};
 
 type ApprovalState = Mutex<approval::ApprovalRegistry>;
@@ -37,12 +45,86 @@ type RecoveryState = Mutex<night_coordinator::RecoveryRegistry>;
 type ProviderAuthState = Mutex<provider_auth::ProviderAuthRegistry>;
 type OperatorChatState = Result<operator_chat::ChatStore, String>;
 
+fn approval_lock_error(language: approval::ApprovalLanguage) -> String {
+    match language {
+        approval::ApprovalLanguage::Ko => "승인 상태를 잠글 수 없습니다.".to_owned(),
+        approval::ApprovalLanguage::En => {
+            "The approval state is temporarily unavailable. Try again.".to_owned()
+        }
+    }
+}
+
+fn revoked_chat_plan_message(reason: Option<&str>) -> String {
+    if matches!(reason, Some("duration_changed")) {
+        return concat!(
+            "This exact saved plan is visible, but changing the sleep window revoked its ",
+            "approval authority. Refresh before approving."
+        )
+        .to_owned();
+    }
+    if reason.is_some_and(|value| value.starts_with("superseded_by_")) {
+        return concat!(
+            "This exact saved plan is visible, but a newer plan superseded its approval ",
+            "authority. Refresh before approving."
+        )
+        .to_owned();
+    }
+    concat!(
+        "This exact saved plan is visible, but its approval authority was revoked. ",
+        "Refresh before approving."
+    )
+    .to_owned()
+}
+
+fn durable_authority_error(
+    state: &operator_chat::StoredPlanAuthorityState,
+    language: approval::ApprovalLanguage,
+) -> Option<String> {
+    match (state, language) {
+        (operator_chat::StoredPlanAuthorityState::Active, _) => None,
+        (operator_chat::StoredPlanAuthorityState::Expired, approval::ApprovalLanguage::Ko) => {
+            Some("이 야간 계획의 승인 시간이 만료되었습니다. 추천을 다시 만들어 주세요.".to_owned())
+        }
+        (operator_chat::StoredPlanAuthorityState::Expired, approval::ApprovalLanguage::En) => {
+            Some("This overnight plan's approval window expired. Refresh the recommendation.".to_owned())
+        }
+        (
+            operator_chat::StoredPlanAuthorityState::Revoked { .. },
+            approval::ApprovalLanguage::Ko,
+        ) => Some(
+            "이 야간 계획은 새 계획이나 명시적 변경으로 폐기되었습니다. 추천을 다시 만들어 주세요."
+                .to_owned(),
+        ),
+        (
+            operator_chat::StoredPlanAuthorityState::Revoked { .. },
+            approval::ApprovalLanguage::En,
+        ) => Some(
+            "This overnight plan was revoked by a newer plan or explicit change. Refresh the recommendation."
+                .to_owned(),
+        ),
+    }
+}
+
+fn require_durable_authority(
+    state: operator_chat::StoredPlanAuthorityState,
+    language: approval::ApprovalLanguage,
+) -> Result<(), String> {
+    match durable_authority_error(&state, language) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
 pub fn run_codex_night_worker() {
     codex_dispatch::run_night_worker_from_stdin();
 }
 
 pub fn run_claude_night_worker() {
     claude_dispatch::run_night_worker_from_stdin();
+}
+
+pub fn run_grok_night_worker() {
+    grok_dispatch::run_night_worker_from_stdin();
 }
 
 pub fn run_night_coordinator_worker() {
@@ -59,23 +141,188 @@ async fn load_snapshot() -> Result<Snapshot, String> {
 #[tauri::command]
 async fn generate_overnight_plan(
     sleep_hours: f64,
+    advisor: PortfolioAdvisorSelection,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<OvernightPlan, String> {
-    let plan =
-        tauri::async_runtime::spawn_blocking(move || build_overnight_plan_read_only(sleep_hours))
-            .await
-            .map_err(|error| error.to_string())??;
-    approvals
+    let store = store.inner().as_ref().map_err(Clone::clone)?.clone();
+    let advisor_store = store.clone();
+    let plan = tauri::async_runtime::spawn_blocking(move || {
+        build_overnight_plan_with_advisor(sleep_hours, &advisor, Some(&advisor_store))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let now = Utc::now();
+    let mut registry = approvals
         .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .replace_plan(
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?;
+    let expires_at = now + ChronoDuration::minutes(30);
+    let authority_state = store.issue_approval_authority(
+        &plan.approval_authority_id,
+        &plan.approval_fingerprint,
+        &plan.generated_at,
+        &expires_at.to_rfc3339(),
+        "direct",
+        None,
+        now,
+    )?;
+    require_durable_authority(authority_state, approval::ApprovalLanguage::En)?;
+    registry.replace_plan_until(
+        &plan.run_drafts,
+        &plan.dispatch_preflights,
+        &plan.schedule,
+        plan.sleep_hours,
+        &plan.approval_authority_id,
+        expires_at,
+    );
+    Ok(plan)
+}
+
+#[tauri::command]
+async fn open_chat_plan_handoff(
+    handoff_id: String,
+    store: State<'_, OperatorChatState>,
+    approvals: State<'_, ApprovalState>,
+) -> Result<ChatPlanReview, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?.clone();
+    let review_store = store.clone();
+    let mut review = tauri::async_runtime::spawn_blocking(move || {
+        let stored = review_store.load_overnight_handoff_raw(&handoff_id)?;
+        if stored.created_at.trim().is_empty() {
+            return Err("채팅 계획 handoff의 저장 시각이 비어 있습니다.".to_owned());
+        }
+        let fingerprint = format!("{:x}", Sha256::digest(stored.plan_json.as_bytes()));
+        if fingerprint != stored.fingerprint {
+            return Err(
+                "저장된 채팅 계획의 지문이 달라졌습니다. 새 추천을 만들어 주세요.".to_owned(),
+            );
+        }
+        let plan = serde_json::from_str::<OvernightPlan>(&stored.plan_json)
+            .map_err(|error| format!("저장된 채팅 계획을 읽지 못했습니다: {error}"))?;
+        if plan.generated_at != stored.generated_at {
+            return Err(
+                "저장된 채팅 계획의 생성 시각이 handoff와 일치하지 않습니다.".to_owned(),
+            );
+        }
+        validate_overnight_plan_contract(&plan)?;
+        let approval_fingerprint = approval::plan_fingerprint(
             &plan.run_drafts,
             &plan.dispatch_preflights,
             &plan.schedule,
             plan.sleep_hours,
-            Utc::now(),
         );
-    Ok(plan)
+        if plan.approval_fingerprint.is_empty()
+            || plan.approval_fingerprint != approval_fingerprint
+        {
+            return Err(
+                "저장된 채팅 계획의 승인 범위가 달라졌습니다. 새 추천을 만들어 주세요."
+                    .to_owned(),
+            );
+        }
+        if plan.approval_authority_id.trim().is_empty() {
+            return Err(
+                "저장된 채팅 계획의 승인 권한 ID가 없습니다. 새 추천을 만들어 주세요."
+                    .to_owned(),
+            );
+        }
+        if stored.approval_authority_id != plan.approval_authority_id {
+            return Err(
+                "저장된 채팅 계획의 승인 권한 ID가 저장 기록과 일치하지 않습니다. 새 추천을 만들어 주세요."
+                    .to_owned(),
+            );
+        }
+        let expires_at = chrono::DateTime::parse_from_rfc3339(&stored.expires_at)
+            .map_err(|_| "채팅 계획 handoff의 만료 시각이 올바르지 않습니다.".to_owned())?
+            .with_timezone(&Utc);
+        let authority_state = if stored.revoked_at.is_some() {
+            ChatPlanAuthorityState::Revoked
+        } else if expires_at <= Utc::now() {
+            ChatPlanAuthorityState::Expired
+        } else {
+            ChatPlanAuthorityState::Active
+        };
+        let refresh_required = authority_state != ChatPlanAuthorityState::Active;
+        let handoff = ChatOvernightHandoff {
+            id: stored.id,
+            sleep_hours: plan.sleep_hours,
+            generated_at: stored.generated_at,
+            expires_at: stored.expires_at,
+            fingerprint: stored.fingerprint,
+        };
+        Ok::<_, String>(ChatPlanReview {
+            plan,
+            handoff,
+            authority_state,
+            refresh_required,
+            message: match authority_state {
+                ChatPlanAuthorityState::Active => {
+                    "This is the exact plan Morrow recommended in chat. Its approval contract is registered."
+                        .to_owned()
+                }
+                ChatPlanAuthorityState::Expired => {
+                    "This exact saved plan is visible, but its approval window expired. Refresh before approving."
+                        .to_owned()
+                }
+                ChatPlanAuthorityState::Revoked => {
+                    revoked_chat_plan_message(stored.revocation_reason.as_deref())
+                }
+            },
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    let mut registry = approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?;
+    match store.authorize_overnight_handoff_authority(
+        &review.handoff.id,
+        &review.plan.approval_authority_id,
+        &review.plan.approval_fingerprint,
+        Utc::now(),
+    )? {
+        operator_chat::StoredPlanAuthorityState::Active => {
+            review.authority_state = ChatPlanAuthorityState::Active;
+            review.refresh_required = false;
+            review.message = "This is the exact plan Morrow recommended in chat. Its approval contract is registered.".to_owned();
+            if !registry.is_current(
+                &review.plan.approval_fingerprint,
+                &review.plan.approval_authority_id,
+            ) {
+                let expires_at = chrono::DateTime::parse_from_rfc3339(&review.handoff.expires_at)
+                    .map_err(|_| "채팅 계획 handoff의 만료 시각이 올바르지 않습니다.".to_owned())?
+                    .with_timezone(&Utc);
+                registry.replace_plan_until(
+                    &review.plan.run_drafts,
+                    &review.plan.dispatch_preflights,
+                    &review.plan.schedule,
+                    review.plan.sleep_hours,
+                    &review.plan.approval_authority_id,
+                    expires_at,
+                );
+            }
+        }
+        operator_chat::StoredPlanAuthorityState::Expired => {
+            review.authority_state = ChatPlanAuthorityState::Expired;
+            review.refresh_required = true;
+            review.message = "This exact saved plan is visible, but its approval window expired. Refresh before approving.".to_owned();
+            registry.invalidate_if_matches(
+                &review.plan.approval_fingerprint,
+                &review.plan.approval_authority_id,
+            );
+        }
+        operator_chat::StoredPlanAuthorityState::Revoked { reason } => {
+            review.authority_state = ChatPlanAuthorityState::Revoked;
+            review.refresh_required = true;
+            review.message = revoked_chat_plan_message(reason.as_deref());
+            registry.invalidate_if_matches(
+                &review.plan.approval_fingerprint,
+                &review.plan.approval_authority_id,
+            );
+        }
+    }
+    drop(registry);
+    Ok(review)
 }
 
 #[tauri::command]
@@ -94,7 +341,7 @@ async fn load_provider_connections() -> Result<Vec<ProviderConnection>, String> 
 
 #[tauri::command]
 fn start_provider_login(
-    provider: ChatProvider,
+    provider: ConnectionProvider,
     provider_auth: State<'_, ProviderAuthState>,
 ) -> Result<ProviderLoginResult, String> {
     let mut registry = provider_auth
@@ -105,7 +352,7 @@ fn start_provider_login(
 
 #[tauri::command]
 fn poll_provider_login(
-    provider: ChatProvider,
+    provider: ConnectionProvider,
     provider_auth: State<'_, ProviderAuthState>,
 ) -> Result<ProviderLoginResult, String> {
     let mut registry = provider_auth
@@ -116,7 +363,7 @@ fn poll_provider_login(
 
 #[tauri::command]
 fn cancel_provider_login(
-    provider: ChatProvider,
+    provider: ConnectionProvider,
     provider_auth: State<'_, ProviderAuthState>,
 ) -> Result<(), String> {
     let mut registry = provider_auth
@@ -198,24 +445,90 @@ async fn prewarm_overnight_evidence() -> Result<(), String> {
 fn prepare_dispatch_approval(
     draft_id: String,
     idempotency_key: String,
+    expected_plan_fingerprint: String,
+    expected_plan_authority_id: String,
+    language: approval::ApprovalLanguage,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<ApprovalChallenge, String> {
-    approvals
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let mut registry = approvals
         .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .begin(&draft_id, &idempotency_key, Utc::now())
-        .map_err(|error| error.to_string())
+        .map_err(|_| approval_lock_error(language))?;
+    require_durable_authority(
+        store.authorize_approval_authority(
+            &expected_plan_authority_id,
+            &expected_plan_fingerprint,
+            now,
+        )?,
+        language,
+    )?;
+    registry
+        .begin(
+            &draft_id,
+            &idempotency_key,
+            &expected_plan_fingerprint,
+            &expected_plan_authority_id,
+            language,
+            now,
+        )
+        .map_err(|error| error.localized(language))
 }
 
 #[tauri::command]
 fn prepare_portfolio_approval(
+    expected_plan_fingerprint: String,
+    expected_plan_authority_id: String,
+    language: approval::ApprovalLanguage,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<PortfolioApprovalChallenge, String> {
-    approvals
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let mut registry = approvals
         .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .begin_portfolio(Utc::now())
-        .map_err(|error| error.to_string())
+        .map_err(|_| approval_lock_error(language))?;
+    require_durable_authority(
+        store.authorize_approval_authority(
+            &expected_plan_authority_id,
+            &expected_plan_fingerprint,
+            now,
+        )?,
+        language,
+    )?;
+    registry
+        .begin_portfolio(
+            &expected_plan_fingerprint,
+            &expected_plan_authority_id,
+            language,
+            now,
+        )
+        .map_err(|error| error.localized(language))
+}
+
+#[tauri::command]
+fn invalidate_approval_plan(
+    expected_plan_fingerprint: String,
+    expected_plan_authority_id: String,
+    approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
+) -> Result<bool, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let mut registry = approvals
+        .lock()
+        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?;
+    if !registry.is_current(&expected_plan_fingerprint, &expected_plan_authority_id) {
+        return Ok(false);
+    }
+    if !store.revoke_current_approval_authority(
+        &expected_plan_authority_id,
+        "duration_changed",
+        Utc::now(),
+    )? {
+        return Ok(false);
+    }
+    Ok(registry.invalidate_if_matches(&expected_plan_fingerprint, &expected_plan_authority_id))
 }
 
 #[tauri::command]
@@ -235,18 +548,31 @@ async fn dispatch_approved_hermes(
     approval_id: String,
     idempotency_key: String,
     confirmation_phrase: String,
+    language: approval::ApprovalLanguage,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<DispatchReceipt, String> {
-    let approved = approvals
-        .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .consume(
-            &approval_id,
-            &idempotency_key,
-            &confirmation_phrase,
-            Utc::now(),
-        )
-        .map_err(|error| error.to_string())?;
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let approved = {
+        let mut registry = approvals
+            .lock()
+            .map_err(|_| approval_lock_error(language))?;
+        let scope = registry
+            .pending_scope(&approval_id)
+            .map_err(|error| error.localized(language))?;
+        require_durable_authority(
+            store.authorize_approval_authority(
+                &scope.authority_id,
+                &scope.plan_fingerprint,
+                now,
+            )?,
+            language,
+        )?;
+        registry
+            .consume(&approval_id, &idempotency_key, &confirmation_phrase, now)
+            .map_err(|error| error.localized(language))?
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let routes = load_exact_route_inventory(&approved.draft.route_id);
         let route = routes
@@ -265,18 +591,31 @@ async fn dispatch_approved_codex(
     approval_id: String,
     idempotency_key: String,
     confirmation_phrase: String,
+    language: approval::ApprovalLanguage,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<DispatchReceipt, String> {
-    let approved = approvals
-        .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .consume(
-            &approval_id,
-            &idempotency_key,
-            &confirmation_phrase,
-            Utc::now(),
-        )
-        .map_err(|error| error.to_string())?;
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let approved = {
+        let mut registry = approvals
+            .lock()
+            .map_err(|_| approval_lock_error(language))?;
+        let scope = registry
+            .pending_scope(&approval_id)
+            .map_err(|error| error.localized(language))?;
+        require_durable_authority(
+            store.authorize_approval_authority(
+                &scope.authority_id,
+                &scope.plan_fingerprint,
+                now,
+            )?,
+            language,
+        )?;
+        registry
+            .consume(&approval_id, &idempotency_key, &confirmation_phrase, now)
+            .map_err(|error| error.localized(language))?
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let routes = load_exact_route_inventory(&approved.draft.route_id);
         let route = routes
@@ -295,18 +634,31 @@ async fn dispatch_approved_claude(
     approval_id: String,
     idempotency_key: String,
     confirmation_phrase: String,
+    language: approval::ApprovalLanguage,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<DispatchReceipt, String> {
-    let approved = approvals
-        .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .consume(
-            &approval_id,
-            &idempotency_key,
-            &confirmation_phrase,
-            Utc::now(),
-        )
-        .map_err(|error| error.to_string())?;
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let approved = {
+        let mut registry = approvals
+            .lock()
+            .map_err(|_| approval_lock_error(language))?;
+        let scope = registry
+            .pending_scope(&approval_id)
+            .map_err(|error| error.localized(language))?;
+        require_durable_authority(
+            store.authorize_approval_authority(
+                &scope.authority_id,
+                &scope.plan_fingerprint,
+                now,
+            )?,
+            language,
+        )?;
+        registry
+            .consume(&approval_id, &idempotency_key, &confirmation_phrase, now)
+            .map_err(|error| error.localized(language))?
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let routes = load_exact_route_inventory(&approved.draft.route_id);
         let route = routes
@@ -321,22 +673,78 @@ async fn dispatch_approved_claude(
 }
 
 #[tauri::command]
+async fn dispatch_approved_grok(
+    approval_id: String,
+    idempotency_key: String,
+    confirmation_phrase: String,
+    language: approval::ApprovalLanguage,
+    approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
+) -> Result<DispatchReceipt, String> {
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let approved = {
+        let mut registry = approvals
+            .lock()
+            .map_err(|_| approval_lock_error(language))?;
+        let scope = registry
+            .pending_scope(&approval_id)
+            .map_err(|error| error.localized(language))?;
+        require_durable_authority(
+            store.authorize_approval_authority(
+                &scope.authority_id,
+                &scope.plan_fingerprint,
+                now,
+            )?,
+            language,
+        )?;
+        registry
+            .consume(&approval_id, &idempotency_key, &confirmation_phrase, now)
+            .map_err(|error| error.localized(language))?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let routes = load_exact_route_inventory(&approved.draft.route_id);
+        let route = routes
+            .routes
+            .iter()
+            .find(|route| route.id == approved.draft.route_id)
+            .ok_or_else(|| "승인한 Grok 실행 경로를 더 이상 찾지 못했습니다.".to_owned())?;
+        grok_dispatch::execute_approved(approved, route)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn dispatch_approved_portfolio(
     approval_id: String,
     idempotency_key: String,
     confirmation_phrase: String,
+    language: approval::ApprovalLanguage,
     approvals: State<'_, ApprovalState>,
+    store: State<'_, OperatorChatState>,
 ) -> Result<PortfolioDispatchResult, String> {
-    let approved = approvals
-        .lock()
-        .map_err(|_| "승인 상태를 잠글 수 없습니다.".to_owned())?
-        .consume_portfolio(
-            &approval_id,
-            &idempotency_key,
-            &confirmation_phrase,
-            Utc::now(),
-        )
-        .map_err(|error| error.to_string())?;
+    let store = store.inner().as_ref().map_err(Clone::clone)?;
+    let now = Utc::now();
+    let approved = {
+        let mut registry = approvals
+            .lock()
+            .map_err(|_| approval_lock_error(language))?;
+        let scope = registry
+            .pending_portfolio_scope(&approval_id)
+            .map_err(|error| error.localized(language))?;
+        require_durable_authority(
+            store.authorize_approval_authority(
+                &scope.authority_id,
+                &scope.plan_fingerprint,
+                now,
+            )?,
+            language,
+        )?;
+        registry
+            .consume_portfolio(&approval_id, &idempotency_key, &confirmation_phrase, now)
+            .map_err(|error| error.localized(language))?
+    };
     tauri::async_runtime::spawn_blocking(move || night_coordinator::execute(approved, approval_id))
         .await
         .map_err(|error| error.to_string())?
@@ -447,6 +855,7 @@ async fn load_night_run_detail(
             codex_dispatch::load_night_run_detail(&task_id, thread_id)
         }
         Provider::Claude => claude_dispatch::load_night_run_detail(&task_id),
+        Provider::Grok => grok_dispatch::load_night_run_detail(&task_id),
         Provider::Hermes => dispatch::load_night_run_detail(&task_id),
         _ => Err("이 공급자의 야간 실행 상세 복구는 아직 지원하지 않습니다.".to_owned()),
     })
@@ -493,7 +902,281 @@ pub(crate) fn build_overnight_plan_read_only(sleep_hours: f64) -> Result<Overnig
         now,
     );
     plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
+    plan.approval_fingerprint = approval::plan_fingerprint(
+        &plan.run_drafts,
+        &plan.dispatch_preflights,
+        &plan.schedule,
+        plan.sleep_hours,
+    );
+    plan.approval_authority_id = approval::new_plan_authority_id(now);
+    validate_overnight_plan_contract(&plan)?;
+    require_ready_plan_preflights(&plan)?;
     Ok(plan)
+}
+
+pub(crate) fn build_overnight_plan_with_advisor(
+    sleep_hours: f64,
+    advisor: &PortfolioAdvisorSelection,
+    store: Option<&operator_chat::ChatStore>,
+) -> Result<OvernightPlan, String> {
+    let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
+    let plan_overrides = advisor.plan_overrides.clone();
+    let budgets_thread = std::thread::spawn(move || usage::load_budgets_for(&plan_overrides));
+    let snapshot = build_snapshot();
+    let now = Utc::now();
+    let context = context_brief::build_portfolio_advisor_context_index(&snapshot, now);
+    let budgets = budgets_thread
+        .join()
+        .map_err(|_| "구독 사용량 증거를 모으지 못했습니다.".to_owned())?;
+    let routes = execution_routes::load(&budgets, now);
+    let envelope = recommendation::discover_portfolio_candidates_with_context_and_routes(
+        &snapshot,
+        budgets,
+        &context,
+        &routes,
+        sleep_hours,
+        now,
+        recommendation::PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS,
+    );
+    let envelope = retain_preflight_ready_advisor_options(envelope, &routes);
+    let mut plan = portfolio_advisor::judge(&envelope, advisor, store)?;
+    plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
+    plan.approval_fingerprint = approval::plan_fingerprint(
+        &plan.run_drafts,
+        &plan.dispatch_preflights,
+        &plan.schedule,
+        plan.sleep_hours,
+    );
+    plan.approval_authority_id = approval::new_plan_authority_id(now);
+    validate_overnight_plan_contract(&plan)?;
+    require_ready_plan_preflights(&plan)?;
+    Ok(plan)
+}
+
+fn retain_preflight_ready_advisor_options(
+    mut envelope: recommendation::PortfolioCandidateEnvelope,
+    routes: &ExecutionRouteInventory,
+) -> recommendation::PortfolioCandidateEnvelope {
+    let drafts = envelope
+        .options
+        .iter()
+        .enumerate()
+        .map(|(index, option)| {
+            let mut candidate = option.candidate.clone();
+            candidate.rank = index + 1;
+            crate::night_contract::build(&candidate)
+        })
+        .collect::<Vec<_>>();
+    let preflights = dispatch::build_preflights(&drafts, routes);
+    let mut retained = Vec::new();
+    for (option, draft) in envelope.options.into_iter().zip(drafts) {
+        let preflight = preflights
+            .iter()
+            .find(|preflight| preflight.draft_id == draft.id);
+        if preflight
+            .is_some_and(|preflight| preflight.state == DispatchPreflightState::ReadyForApproval)
+        {
+            retained.push(option);
+            continue;
+        }
+        let reason = preflight
+            .map(|preflight| {
+                preflight
+                    .checks
+                    .iter()
+                    .filter(|check| check.level == model::PreflightLevel::Block)
+                    .map(|check| check.message.as_str())
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .filter(|reason| !reason.is_empty())
+            .unwrap_or_else(|| "정확한 공급자 사전점검 계약을 만들지 못했습니다.".to_owned());
+        envelope.exclusions.push(model::ExcludedProject {
+            project: option.candidate.project,
+            reason: format!("AI 판단 전 실행 사전점검에서 제외: {reason}"),
+        });
+    }
+    envelope.options = retained;
+    envelope
+}
+
+fn require_ready_plan_preflights(plan: &OvernightPlan) -> Result<(), String> {
+    if let Some(preflight) = plan
+        .dispatch_preflights
+        .iter()
+        .find(|preflight| preflight.state != DispatchPreflightState::ReadyForApproval)
+    {
+        let reason = preflight
+            .checks
+            .iter()
+            .filter(|check| check.level == model::PreflightLevel::Block)
+            .map(|check| check.message.as_str())
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Err(format!(
+            "AI 판단 뒤 {} 실행 사전점검이 바뀌어 계획과 승인 권한을 발급하지 않았습니다. {}",
+            preflight.surface.as_str(),
+            reason
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn build_execution_route_inventory_read_only() -> ExecutionRouteInventory {
+    let budgets = usage::load_budgets();
+    execution_routes::load(&budgets, Utc::now())
+}
+
+fn validate_overnight_plan_contract(plan: &OvernightPlan) -> Result<(), String> {
+    let slots = plan
+        .schedule
+        .lanes
+        .iter()
+        .enumerate()
+        .flat_map(|(lane_index, lane)| {
+            lane.slots
+                .iter()
+                .enumerate()
+                .map(move |(slot_index, slot)| (lane_index, slot_index, lane, slot))
+        })
+        .collect::<Vec<_>>();
+    if plan.candidates.is_empty() {
+        if plan.run_drafts.is_empty() && slots.is_empty() && plan.dispatch_preflights.is_empty() {
+            return Ok(());
+        }
+        return Err("후보가 없는 야간 계획에 실행 초안·일정·사전점검이 남아 있습니다.".to_owned());
+    }
+    if plan.run_drafts.len() != plan.candidates.len()
+        || slots.len() != plan.candidates.len()
+        || plan.dispatch_preflights.len() != plan.candidates.len()
+    {
+        return Err("야간 후보와 실행 초안·일정·사전점검의 개수가 일치하지 않습니다.".to_owned());
+    }
+
+    let mut candidate_ranks = HashSet::new();
+    let mut used_draft_ids = HashSet::new();
+    let mut used_slot_positions = HashSet::new();
+    let mut used_preflight_ids = HashSet::new();
+    for candidate in &plan.candidates {
+        if !candidate_ranks.insert(candidate.rank) {
+            return Err(format!(
+                "야간 후보 순위 {}가 중복되었습니다.",
+                candidate.rank
+            ));
+        }
+        let matching_routes = plan
+            .route_inventory
+            .routes
+            .iter()
+            .filter(|route| route.id == candidate.execution_route_id)
+            .collect::<Vec<_>>();
+        if matching_routes.len() != 1 {
+            return Err(format!(
+                "{} 후보의 실행 경로가 인벤토리에서 유일하지 않습니다.",
+                candidate.project
+            ));
+        }
+        let route = matching_routes[0];
+        if route.surface != candidate.execution_surface
+            || route.capacity_pool != candidate.capacity_pool
+            || route.executor_profile != candidate.executor_profile
+        {
+            return Err(format!(
+                "{} 후보와 실행 경로의 surface·capacity·profile 계약이 다릅니다.",
+                candidate.project
+            ));
+        }
+        let drafts = plan
+            .run_drafts
+            .iter()
+            .filter(|draft| {
+                draft.candidate_rank == candidate.rank
+                    && draft.project == candidate.project
+                    && draft.route_id == candidate.execution_route_id
+                    && draft.workspace == candidate.cwd
+                    && draft.goal == candidate.goal
+                    && draft.native_session_id == candidate.native_session_id
+                    && draft.run_mode
+                        == if candidate.resume_existing {
+                            model::RunMode::ResumeExisting
+                        } else {
+                            model::RunMode::NewSession
+                        }
+                    && draft.dispatch_supported
+                        == night_contract::supports_dispatch(
+                            candidate.execution_surface,
+                            candidate.resume_existing,
+                        )
+                    && (draft.time_budget_hours - candidate.estimated_hours).abs() < 0.001
+            })
+            .collect::<Vec<_>>();
+        if drafts.len() != 1 {
+            return Err(format!(
+                "{} 후보와 정확히 일치하는 실행 초안이 없습니다.",
+                candidate.project
+            ));
+        }
+        let draft = drafts[0];
+        if !used_draft_ids.insert(draft.id.as_str()) {
+            return Err(format!(
+                "{} 후보가 다른 후보의 실행 초안을 재사용합니다.",
+                candidate.project
+            ));
+        }
+        let matching_slots = slots
+            .iter()
+            .filter(|(_, _, lane, slot)| {
+                lane.capacity_pool == candidate.capacity_pool
+                    && slot.candidate_rank == candidate.rank
+                    && slot.project == candidate.project
+                    && slot.route_id == candidate.execution_route_id
+                    && (slot.time_budget_hours - candidate.estimated_hours).abs() < 0.001
+            })
+            .collect::<Vec<_>>();
+        if matching_slots.len() != 1 {
+            return Err(format!(
+                "{} 후보와 정확히 일치하는 야간 일정이 없습니다.",
+                candidate.project
+            ));
+        }
+        let (lane_index, slot_index, _, _) = matching_slots[0];
+        if !used_slot_positions.insert((*lane_index, *slot_index)) {
+            return Err(format!(
+                "{} 후보가 다른 후보의 야간 일정을 재사용합니다.",
+                candidate.project
+            ));
+        }
+        let preflights = plan
+            .dispatch_preflights
+            .iter()
+            .filter(|preflight| preflight.draft_id == draft.id)
+            .collect::<Vec<_>>();
+        if preflights.len() != 1 || preflights[0].surface != candidate.execution_surface {
+            return Err(format!(
+                "{} 실행 초안과 정확히 일치하는 사전점검이 없습니다.",
+                candidate.project
+            ));
+        }
+        let preflight = preflights[0];
+        if !used_preflight_ids.insert(preflight.draft_id.as_str())
+            || !preflight.read_only
+            || preflight.execution_enabled
+        {
+            return Err(format!(
+                "{} 사전점검이 유일한 읽기 전용 승인 계약이 아닙니다.",
+                candidate.project
+            ));
+        }
+    }
+    if used_draft_ids.len() != plan.run_drafts.len()
+        || used_slot_positions.len() != slots.len()
+        || used_preflight_ids.len() != plan.dispatch_preflights.len()
+    {
+        return Err("야간 계획에 후보와 연결되지 않은 계약 항목이 남아 있습니다.".to_owned());
+    }
+    Ok(())
 }
 
 fn load_exact_route_inventory(route_id: &str) -> ExecutionRouteInventory {
@@ -632,12 +1315,15 @@ pub fn run() {
             load_night_run_detail,
             prewarm_overnight_evidence,
             generate_overnight_plan,
+            open_chat_plan_handoff,
             prepare_dispatch_approval,
             prepare_portfolio_approval,
+            invalidate_approval_plan,
             cancel_dispatch_approval,
             dispatch_approved_hermes,
             dispatch_approved_codex,
             dispatch_approved_claude,
+            dispatch_approved_grok,
             dispatch_approved_portfolio
         ])
         .run(tauri::generate_context!())
@@ -658,6 +1344,46 @@ mod live_tests {
 
     use super::*;
     use crate::model::{CapacityPool, HumanGateKind, Provider, WorkItemOrigin, WorkItemState};
+
+    #[test]
+    #[ignore = "uses the current user's Codex subscription and reads local project context"]
+    fn local_subscription_model_judges_current_portfolio_read_only() {
+        let store = operator_chat::ChatStore::open(operator_chat_database_path())
+            .expect("open current operator chat store");
+        let advisor = PortfolioAdvisorSelection {
+            provider: ChatProvider::CodexSubscription,
+            model: None,
+            effort: None,
+            language: "en".to_owned(),
+            plan_overrides: Default::default(),
+        };
+        let plan = build_overnight_plan_with_advisor(8.0, &advisor, Some(&store))
+            .expect("subscription model judgment");
+
+        assert_eq!(plan.sleep_hours, 8.0);
+        assert!(
+            plan.advisor.is_some() || (plan.candidates.is_empty() && !plan.exclusions.is_empty()),
+            "safe options must be judged, while an empty safe set must fail closed as an explained no-run"
+        );
+        validate_overnight_plan_contract(&plan).expect("validated host-owned plan contract");
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "advisor": plan.advisor,
+                "projects_considered": plan.projects_considered,
+                "sessions_considered": plan.sessions_considered,
+                "selected": plan.candidates.iter().map(|candidate| serde_json::json!({
+                    "rank": candidate.rank,
+                    "project": candidate.project,
+                    "goal": candidate.goal,
+                    "reason": candidate.evidence.last(),
+                    "route": candidate.execution_route_id,
+                })).collect::<Vec<_>>(),
+                "exclusions": plan.exclusions,
+            }))
+            .expect("live judgment summary")
+        );
+    }
 
     #[test]
     #[ignore = "reads the current user's installed provider metadata"]
@@ -746,15 +1472,11 @@ mod live_tests {
             .expect("configured Hermes route");
         assert_eq!(hermes_route.model_provider, Some(Provider::Grok));
         assert_eq!(hermes_route.capacity_pool, CapacityPool::GrokSubscription);
-        assert!(!plan.candidates.is_empty());
         assert_eq!(plan.run_drafts.len(), plan.candidates.len());
         assert!(plan.run_drafts.iter().all(|draft| {
             draft.approval_required
                 && !draft.external_side_effects_allowed
-                && (draft.dispatch_supported
-                    == (draft.format == crate::model::RunDraftFormat::HermesGoal
-                        || (matches!(draft.route_id.as_str(), "codex:native" | "claude:native")
-                            && draft.run_mode == crate::model::RunMode::ResumeExisting)))
+                && draft.dispatch_supported
         }));
         assert!(plan
             .schedule
@@ -780,10 +1502,18 @@ mod live_tests {
                     .protocol_requests
                     .iter()
                     .any(|request| request.method == "turn/start"),
-                Provider::Claude => preflight
-                    .commands
-                    .iter()
-                    .any(|command| command.step == "fork_claude_session"),
+                Provider::Claude => preflight.commands.iter().any(|command| {
+                    matches!(
+                        command.step.as_str(),
+                        "fork_claude_session" | "start_claude_session"
+                    )
+                }),
+                Provider::Grok => preflight.commands.iter().any(|command| {
+                    matches!(
+                        command.step.as_str(),
+                        "fork_grok_session" | "start_grok_session"
+                    )
+                }),
                 _ => false,
             }
         }));
@@ -793,10 +1523,19 @@ mod live_tests {
             .all(|candidate| !candidate.evidence.is_empty()
                 && !candidate.verification.is_empty()
                 && !candidate.risks.is_empty()));
-        assert!(plan.candidates.iter().any(|candidate| candidate
-            .evidence
-            .iter()
-            .any(|evidence| evidence.contains("오늘 대화"))));
+        if plan.candidates.is_empty() {
+            assert!(plan.dispatch_preflights.is_empty());
+            assert!(plan.exclusions.iter().any(|exclusion| {
+                exclusion.reason.contains("사용량")
+                    || exclusion.reason.contains("실행 경로")
+                    || exclusion.reason.contains("승인")
+            }));
+        } else {
+            assert!(plan.candidates.iter().any(|candidate| candidate
+                .evidence
+                .iter()
+                .any(|evidence| evidence.contains("오늘 대화"))));
+        }
     }
 
     #[test]

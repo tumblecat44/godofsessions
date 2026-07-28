@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
@@ -9,7 +9,10 @@ use wait_timeout::ChildExt;
 
 use crate::{
     chat,
-    model::{ChatProvider, ProviderConnection, ProviderLoginResult, ProviderLoginState},
+    model::{
+        ConnectionProvider, Provider, ProviderConnection, ProviderLoginResult, ProviderLoginState,
+        ResourceBudget, ResourceState,
+    },
 };
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(12);
@@ -19,6 +22,7 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 pub(crate) struct ProviderAuthRegistry {
     codex: Option<LoginProcess>,
     claude: Option<LoginProcess>,
+    grok: Option<LoginProcess>,
 }
 
 struct LoginProcess {
@@ -27,20 +31,21 @@ struct LoginProcess {
 }
 
 pub(crate) fn connections() -> Vec<ProviderConnection> {
-    vec![codex_connection(), claude_connection()]
+    vec![codex_connection(), claude_connection(), grok_connection()]
 }
 
-pub(crate) fn connection(provider: ChatProvider) -> ProviderConnection {
+pub(crate) fn connection(provider: ConnectionProvider) -> ProviderConnection {
     match provider {
-        ChatProvider::CodexSubscription => codex_connection(),
-        ChatProvider::ClaudeSubscription => claude_connection(),
+        ConnectionProvider::CodexSubscription => codex_connection(),
+        ConnectionProvider::ClaudeSubscription => claude_connection(),
+        ConnectionProvider::GrokSubscription => grok_connection(),
     }
 }
 
 fn codex_connection() -> ProviderConnection {
     if chat::codex_binary().is_none() {
         return ProviderConnection {
-            provider: ChatProvider::CodexSubscription,
+            provider: ConnectionProvider::CodexSubscription,
             installed: false,
             authenticated: false,
             auth_method: None,
@@ -52,7 +57,7 @@ fn codex_connection() -> ProviderConnection {
 
     match chat::read_codex_account() {
         Ok(account) => ProviderConnection {
-            provider: ChatProvider::CodexSubscription,
+            provider: ConnectionProvider::CodexSubscription,
             installed: true,
             authenticated: account.authenticated,
             auth_method: account.auth_method,
@@ -65,7 +70,7 @@ fn codex_connection() -> ProviderConnection {
             },
         },
         Err(error) => ProviderConnection {
-            provider: ChatProvider::CodexSubscription,
+            provider: ConnectionProvider::CodexSubscription,
             installed: true,
             authenticated: false,
             auth_method: None,
@@ -79,7 +84,7 @@ fn codex_connection() -> ProviderConnection {
 fn claude_connection() -> ProviderConnection {
     let Some(binary) = find_executable("claude") else {
         return ProviderConnection {
-            provider: ChatProvider::ClaudeSubscription,
+            provider: ConnectionProvider::ClaudeSubscription,
             installed: false,
             authenticated: false,
             auth_method: None,
@@ -99,7 +104,7 @@ fn claude_connection() -> ProviderConnection {
         Ok(child) => child,
         Err(_) => {
             return ProviderConnection {
-                provider: ChatProvider::ClaudeSubscription,
+                provider: ConnectionProvider::ClaudeSubscription,
                 installed: true,
                 authenticated: false,
                 auth_method: None,
@@ -133,7 +138,7 @@ fn claude_connection() -> ProviderConnection {
         .map(title_case);
 
     ProviderConnection {
-        provider: ChatProvider::ClaudeSubscription,
+        provider: ConnectionProvider::ClaudeSubscription,
         installed: true,
         authenticated,
         auth_method,
@@ -149,6 +154,60 @@ fn claude_connection() -> ProviderConnection {
     }
 }
 
+fn grok_connection() -> ProviderConnection {
+    let Some(binary) = grok_binary() else {
+        return ProviderConnection {
+            provider: ConnectionProvider::GrokSubscription,
+            installed: false,
+            authenticated: false,
+            auth_method: None,
+            plan: None,
+            route_label: "Grok Build CLI".to_owned(),
+            message: "Grok Build CLI was not found.".to_owned(),
+        };
+    };
+    let authentication = grok_authenticated(&binary, None);
+    let authenticated = authentication
+        .as_ref()
+        .is_ok_and(|authenticated| *authenticated);
+    ProviderConnection {
+        provider: ConnectionProvider::GrokSubscription,
+        installed: true,
+        authenticated,
+        auth_method: authenticated.then(|| "Grok OAuth".to_owned()),
+        plan: None,
+        route_label: "Grok Build CLI".to_owned(),
+        message: match authentication {
+            Err(message) => message,
+            Ok(true) => "Connected through the official Grok Build credential store.".to_owned(),
+            Ok(false) => "Sign in with Grok OAuth to use your Grok subscription.".to_owned(),
+        },
+    }
+}
+
+pub(crate) fn grok_authenticated(
+    binary: &Path,
+    current_dir: Option<&Path>,
+) -> Result<bool, String> {
+    if !binary.is_file() {
+        return Err("Grok Build CLI was not found.".to_owned());
+    }
+    let environment = crate::grok_dispatch::filtered_environment(std::env::vars());
+    let budget = crate::usage::grok::load_with_safe_environment(binary, current_dir, &environment);
+    Ok(grok_budget_proves_authentication(&budget))
+}
+
+fn grok_budget_proves_authentication(budget: &ResourceBudget) -> bool {
+    budget.provider == Provider::Grok
+        && budget.state == ResourceState::Ready
+        && !budget.windows.is_empty()
+        && budget
+            .plan
+            .as_deref()
+            .is_some_and(|plan| !plan.trim().is_empty())
+        && budget.source_label == "Grok ACP billing"
+}
+
 fn claude_subscription_authenticated(value: &Value) -> bool {
     value.get("loggedIn").and_then(Value::as_bool) == Some(true)
         && value.get("authMethod").and_then(Value::as_str) == Some("claude.ai")
@@ -160,9 +219,32 @@ fn claude_subscription_authenticated(value: &Value) -> bool {
 }
 
 pub(crate) fn start_login(
-    provider: ChatProvider,
+    provider: ConnectionProvider,
     registry: &mut ProviderAuthRegistry,
 ) -> Result<ProviderLoginResult, String> {
+    if provider == ConnectionProvider::ClaudeSubscription {
+        let status = claude_connection();
+        return Ok(ProviderLoginResult {
+            provider,
+            state: if status.authenticated {
+                ProviderLoginState::Connected
+            } else {
+                ProviderLoginState::Error
+            },
+            message: if status.authenticated {
+                "The existing official Claude Code login was verified.".to_owned()
+            } else {
+                concat!(
+                    "Morrow does not initiate a Claude.ai consumer login on behalf of a ",
+                    "third-party app. Run the official Claude Code login in Terminal, then recheck."
+                )
+                .to_owned()
+            },
+            fallback_command: fallback_command(provider).to_owned(),
+            connection: Some(status),
+        });
+    }
+
     let slot = registry.slot_mut(provider);
     if let Some(process) = slot.as_mut() {
         if process.child.try_wait().ok().flatten().is_none() {
@@ -172,14 +254,15 @@ pub(crate) fn start_login(
     }
 
     let (binary, arguments): (PathBuf, &[&str]) = match provider {
-        ChatProvider::CodexSubscription => {
+        ConnectionProvider::CodexSubscription => {
             let binary = chat::codex_binary()
                 .ok_or_else(|| "The official Codex runtime was not found.".to_owned())?;
             (binary, &["login"])
         }
-        ChatProvider::ClaudeSubscription => (
-            find_executable("claude").ok_or_else(|| "Claude Code CLI was not found.".to_owned())?,
-            &["auth", "login", "--claudeai"],
+        ConnectionProvider::ClaudeSubscription => unreachable!("handled above"),
+        ConnectionProvider::GrokSubscription => (
+            grok_binary().ok_or_else(|| "Grok Build CLI was not found.".to_owned())?,
+            &["login", "--oauth"],
         ),
     };
 
@@ -198,7 +281,7 @@ pub(crate) fn start_login(
 }
 
 pub(crate) fn poll_login(
-    provider: ChatProvider,
+    provider: ConnectionProvider,
     registry: &mut ProviderAuthRegistry,
 ) -> ProviderLoginResult {
     let status = connection(provider);
@@ -249,19 +332,20 @@ pub(crate) fn poll_login(
     waiting(provider)
 }
 
-pub(crate) fn cancel_login(provider: ChatProvider, registry: &mut ProviderAuthRegistry) {
+pub(crate) fn cancel_login(provider: ConnectionProvider, registry: &mut ProviderAuthRegistry) {
     registry.clear(provider);
 }
 
 impl ProviderAuthRegistry {
-    fn slot_mut(&mut self, provider: ChatProvider) -> &mut Option<LoginProcess> {
+    fn slot_mut(&mut self, provider: ConnectionProvider) -> &mut Option<LoginProcess> {
         match provider {
-            ChatProvider::CodexSubscription => &mut self.codex,
-            ChatProvider::ClaudeSubscription => &mut self.claude,
+            ConnectionProvider::CodexSubscription => &mut self.codex,
+            ConnectionProvider::ClaudeSubscription => &mut self.claude,
+            ConnectionProvider::GrokSubscription => &mut self.grok,
         }
     }
 
-    fn clear(&mut self, provider: ChatProvider) {
+    fn clear(&mut self, provider: ConnectionProvider) {
         if let Some(mut process) = self.slot_mut(provider).take() {
             let _ = process.child.kill();
             let _ = process.child.wait();
@@ -271,21 +355,25 @@ impl ProviderAuthRegistry {
 
 impl Drop for ProviderAuthRegistry {
     fn drop(&mut self) {
-        self.clear(ChatProvider::CodexSubscription);
-        self.clear(ChatProvider::ClaudeSubscription);
+        self.clear(ConnectionProvider::CodexSubscription);
+        self.clear(ConnectionProvider::ClaudeSubscription);
+        self.clear(ConnectionProvider::GrokSubscription);
     }
 }
 
-fn waiting(provider: ChatProvider) -> ProviderLoginResult {
+fn waiting(provider: ConnectionProvider) -> ProviderLoginResult {
     ProviderLoginResult {
         provider,
         state: ProviderLoginState::Waiting,
         message: match provider {
-            ChatProvider::CodexSubscription => {
+            ConnectionProvider::CodexSubscription => {
                 "Complete the ChatGPT sign-in in the browser window.".to_owned()
             }
-            ChatProvider::ClaudeSubscription => {
+            ConnectionProvider::ClaudeSubscription => {
                 "Complete the Claude.ai sign-in in the browser window.".to_owned()
+            }
+            ConnectionProvider::GrokSubscription => {
+                "Complete the Grok sign-in in the browser window.".to_owned()
             }
         },
         fallback_command: fallback_command(provider).to_owned(),
@@ -293,10 +381,11 @@ fn waiting(provider: ChatProvider) -> ProviderLoginResult {
     }
 }
 
-fn fallback_command(provider: ChatProvider) -> &'static str {
+fn fallback_command(provider: ConnectionProvider) -> &'static str {
     match provider {
-        ChatProvider::CodexSubscription => "codex login",
-        ChatProvider::ClaudeSubscription => "claude auth login --claudeai",
+        ConnectionProvider::CodexSubscription => "codex login",
+        ConnectionProvider::ClaudeSubscription => "claude auth login --claudeai",
+        ConnectionProvider::GrokSubscription => "grok login --oauth",
     }
 }
 
@@ -327,20 +416,38 @@ fn find_executable(name: &str) -> Option<PathBuf> {
     })
 }
 
+fn grok_binary() -> Option<PathBuf> {
+    crate::execution_routes::resolve_grok_binary()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn fallback_commands_use_official_subscription_login_flows() {
+    fn fallback_commands_use_official_provider_tools() {
         assert_eq!(
-            fallback_command(ChatProvider::CodexSubscription),
+            fallback_command(ConnectionProvider::CodexSubscription),
             "codex login"
         );
         assert_eq!(
-            fallback_command(ChatProvider::ClaudeSubscription),
+            fallback_command(ConnectionProvider::ClaudeSubscription),
             "claude auth login --claudeai"
         );
+        assert_eq!(
+            fallback_command(ConnectionProvider::GrokSubscription),
+            "grok login --oauth"
+        );
+    }
+
+    #[test]
+    fn claude_login_is_never_spawned_by_the_third_party_app() {
+        let mut registry = ProviderAuthRegistry::default();
+        let result = start_login(ConnectionProvider::ClaudeSubscription, &mut registry)
+            .expect("Claude login guidance");
+        assert!(registry.claude.is_none());
+        assert!(!matches!(result.state, ProviderLoginState::Waiting));
+        assert_eq!(result.fallback_command, "claude auth login --claudeai");
     }
 
     #[test]
@@ -370,19 +477,42 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "reads the current user's official Codex and Claude login status"]
+    fn grok_authentication_requires_a_positive_live_billing_response() {
+        let mut budget = crate::usage::grok::tests::sample_budget_for_auth_test();
+        assert!(grok_budget_proves_authentication(&budget));
+        budget.state = ResourceState::Degraded;
+        assert!(!grok_budget_proves_authentication(&budget));
+        budget.state = ResourceState::Ready;
+        budget.windows.clear();
+        assert!(!grok_budget_proves_authentication(&budget));
+        budget.windows.push(crate::model::UsageWindow {
+            label: "7일".to_owned(),
+            used_percent: 10.0,
+            resets_at: None,
+        });
+        budget.plan = None;
+        assert!(!grok_budget_proves_authentication(&budget));
+    }
+
+    #[test]
+    #[ignore = "reads the current user's official Codex, Claude, and Grok login status"]
     fn installed_subscription_logins_are_detected_without_reading_tokens() {
         let connections = connections();
         let codex = connections
             .iter()
-            .find(|connection| connection.provider == ChatProvider::CodexSubscription)
+            .find(|connection| connection.provider == ConnectionProvider::CodexSubscription)
             .expect("Codex connection");
         let claude = connections
             .iter()
-            .find(|connection| connection.provider == ChatProvider::ClaudeSubscription)
+            .find(|connection| connection.provider == ConnectionProvider::ClaudeSubscription)
             .expect("Claude connection");
+        let grok = connections
+            .iter()
+            .find(|connection| connection.provider == ConnectionProvider::GrokSubscription)
+            .expect("Grok connection");
         assert!(codex.installed && codex.authenticated);
         assert!(claude.installed && claude.authenticated);
+        assert!(grok.installed && grok.authenticated);
         assert!(codex.auth_method.is_some());
         assert!(claude.auth_method.is_some());
     }

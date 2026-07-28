@@ -1,7 +1,8 @@
 mod cache;
 mod claude;
 mod codex;
-mod grok;
+pub(crate) mod grok;
+mod plans;
 mod transport;
 
 use std::{
@@ -11,7 +12,9 @@ use std::{
 
 use chrono::Utc;
 
-use crate::model::{Provider, ResourceBudget, ResourceState, UsageWindow};
+use crate::model::{
+    Provider, ResourceBudget, ResourceState, SubscriptionPlanOverrides, UsageWindow,
+};
 
 const PLAN_EVIDENCE_TTL: Duration = Duration::from_secs(60);
 
@@ -36,6 +39,12 @@ pub fn load_budgets() -> Vec<ResourceBudget> {
         loaded_at: Instant::now(),
         budgets: budgets.clone(),
     });
+    budgets
+}
+
+pub fn load_budgets_for(overrides: &SubscriptionPlanOverrides) -> Vec<ResourceBudget> {
+    let mut budgets = load_budgets();
+    plans::apply_profiles(&mut budgets, overrides);
     budgets
 }
 
@@ -68,7 +77,9 @@ fn load_budgets_uncached() -> Vec<ResourceBudget> {
             }),
         )
     });
-    cache::merge_with_cache(vec![claude, codex, grok])
+    let mut budgets = cache::merge_with_cache(vec![claude, codex, grok]);
+    plans::apply_profiles(&mut budgets, &SubscriptionPlanOverrides::default());
+    budgets
 }
 
 fn cached_plan_evidence(
@@ -81,7 +92,7 @@ fn cached_plan_evidence(
 }
 
 pub(crate) fn load_budget(provider: Provider) -> ResourceBudget {
-    let budget = match provider {
+    match provider {
         Provider::Claude => claude::load(),
         Provider::Codex => codex::load(),
         Provider::Grok => grok::load(),
@@ -90,17 +101,7 @@ pub(crate) fn load_budget(provider: Provider) -> ResourceBudget {
             "unsupported usage adapter",
             "이 공급자의 구독 사용량 어댑터가 없습니다.",
         ),
-    };
-    cache::merge_with_cache(vec![budget])
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| {
-            unavailable(
-                provider,
-                "usage cache",
-                "공급자 사용량 결과를 만들지 못했습니다.",
-            )
-        })
+    }
 }
 
 fn unavailable(provider: Provider, source_label: &str, message: &str) -> ResourceBudget {
@@ -108,6 +109,7 @@ fn unavailable(provider: Provider, source_label: &str, message: &str) -> Resourc
         provider,
         state: ResourceState::Unavailable,
         plan: None,
+        plan_capacity: None,
         windows: Vec::new(),
         credits: None,
         observed_at: Utc::now().to_rfc3339(),

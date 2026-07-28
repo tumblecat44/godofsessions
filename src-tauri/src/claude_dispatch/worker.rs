@@ -46,7 +46,8 @@ pub(super) const DEFAULT_MAX_TURNS: u32 = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClaudeWorkerRequest {
-    source_session_id: String,
+    run_mode: RunMode,
+    source_session_id: Option<String>,
     workspace: String,
     prompt: String,
     idempotency_key: String,
@@ -57,7 +58,7 @@ struct ClaudeWorkerRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClaudeWorkerReply {
     kind: String,
-    source_session_id: String,
+    source_session_id: Option<String>,
     worker_pid: u32,
     claude_pid: Option<u32>,
     error: Option<String>,
@@ -104,7 +105,8 @@ pub(super) fn marked_prompt(prompt: &str, idempotency_key: &str) -> String {
 }
 
 pub(super) fn claude_arguments(
-    source_session_id: &str,
+    run_mode: RunMode,
+    source_session_id: Option<&str>,
     workspace: &Path,
     max_turns: u32,
 ) -> Vec<String> {
@@ -168,7 +170,7 @@ pub(super) fn claude_arguments(
         }
     })
     .to_string();
-    vec![
+    let mut arguments = vec![
         "--safe-mode".to_owned(),
         "--no-chrome".to_owned(),
         "--strict-mcp-config".to_owned(),
@@ -186,11 +188,16 @@ pub(super) fn claude_arguments(
         max_turns.to_string(),
         "--output-format".to_owned(),
         "json".to_owned(),
-        "--resume".to_owned(),
-        source_session_id.to_owned(),
-        "--fork-session".to_owned(),
-        "-p".to_owned(),
-    ]
+    ];
+    if run_mode == RunMode::ResumeExisting {
+        arguments.extend([
+            "--resume".to_owned(),
+            source_session_id.unwrap_or_default().to_owned(),
+            "--fork-session".to_owned(),
+        ]);
+    }
+    arguments.push("-p".to_owned());
+    arguments
 }
 
 pub(crate) fn execute_approved(
@@ -200,19 +207,24 @@ pub(crate) fn execute_approved(
     if route.surface != Provider::Claude || approved.preflight.surface != Provider::Claude {
         return Err("승인한 실행 경로가 Claude가 아닙니다.".to_owned());
     }
-    if approved.draft.run_mode != RunMode::ResumeExisting {
-        return Err("첫 Claude 어댑터는 출처가 확인된 기존 session만 fork합니다.".to_owned());
-    }
     let sources = RouteSources::local();
     let environment = local_environment(&approved.draft, &sources);
     let current = preview(&approved.draft, route, &environment);
     validate_approved_preflight(&approved.preflight, &current)?;
-    let source_session_id = approved
-        .draft
-        .native_session_id
-        .clone()
-        .ok_or_else(|| "fork할 Claude session id가 없습니다.".to_owned())?;
+    let source_session_id = approved.draft.native_session_id.clone();
+    match approved.draft.run_mode {
+        RunMode::ResumeExisting if source_session_id.is_none() => {
+            return Err("fork할 Claude session id가 없습니다.".to_owned());
+        }
+        RunMode::NewSession if source_session_id.is_some() => {
+            return Err(
+                "새 Claude session 계약에는 출처 session id를 넣을 수 없습니다.".to_owned(),
+            );
+        }
+        _ => {}
+    }
     let request = ClaudeWorkerRequest {
+        run_mode: approved.draft.run_mode,
         source_session_id: source_session_id.clone(),
         workspace: current.scope_value.clone(),
         prompt: marked_prompt(&approved.draft.prompt, &current.idempotency_key),
@@ -253,9 +265,13 @@ pub(crate) fn execute_approved(
                 &approved,
                 DispatchReceiptState::Started,
                 reply.claude_pid.map(i64::from).or(Some(worker_pid)),
-                format!(
-                    "Claude가 기존 session 컨텍스트를 안전한 fork로 시작했습니다. source={source_session_id}"
-                ),
+                if let Some(source_session_id) = source_session_id {
+                    format!(
+                        "Claude가 기존 session 컨텍스트를 안전한 fork로 시작했습니다. source={source_session_id}"
+                    )
+                } else {
+                    "Claude가 승인한 작업공간에 새 durable session을 시작했습니다.".to_owned()
+                },
             ))
         }
         Err(_) => Ok(receipt(
@@ -320,7 +336,7 @@ pub(crate) fn run_night_worker_from_stdin() {
         Err(error) => {
             let reply = ClaudeWorkerReply {
                 kind: "error".to_owned(),
-                source_session_id: String::new(),
+                source_session_id: None,
                 worker_pid: std::process::id(),
                 claude_pid: None,
                 error: Some(error),
@@ -405,8 +421,15 @@ fn read_worker_request() -> Result<ClaudeWorkerRequest, String> {
     }
     let request = serde_json::from_slice::<ClaudeWorkerRequest>(&encoded)
         .map_err(|_| "Claude 야간 계약 형식이 올바르지 않습니다.".to_owned())?;
+    let session_contract_valid = match request.run_mode {
+        RunMode::ResumeExisting => request
+            .source_session_id
+            .as_deref()
+            .is_some_and(|session| !session.is_empty()),
+        RunMode::NewSession => request.source_session_id.is_none(),
+    };
     if !request.idempotency_key.starts_with("gos-claude-")
-        || request.source_session_id.is_empty()
+        || !session_contract_valid
         || request.prompt.trim().is_empty()
         || request.prompt.len() > MAX_PROMPT_BYTES
         || !(3_600..=16 * 3_600).contains(&request.max_runtime_seconds)
@@ -428,35 +451,45 @@ fn start_claude(request: ClaudeWorkerRequest) -> Result<StartedClaude, String> {
     if !sources.claude_binary.is_file() {
         return Err("Claude Code 실행기를 찾지 못했습니다.".to_owned());
     }
-    let home = dirs::home_dir().ok_or_else(|| "홈 폴더를 찾지 못했습니다.".to_owned())?;
-    let agents = super::probe_agents(&sources.claude_binary);
-    let identity = super::ledger::inspect_session(
-        &home.join(".claude/projects"),
-        Some(&request.source_session_id),
-        &agents,
-    )?;
-    let session_workspace = identity
-        .cwd
-        .as_deref()
-        .and_then(|path| path.canonicalize().ok());
-    if !identity.exists
-        || identity.active
-        || session_workspace.as_deref() != Some(workspace.as_path())
-    {
-        return Err(
-            "Claude 출처 session이 실행 중이거나 작업공간이 승인 시점과 달라졌습니다.".to_owned(),
-        );
-    }
-    let transcript = identity
-        .transcript_path
-        .as_deref()
-        .ok_or_else(|| "Claude 출처 transcript를 찾지 못했습니다.".to_owned())?;
-    if super::ledger::marker_exists(transcript, &request.idempotency_key) {
-        return Err("같은 Claude 야간 계약 marker가 이미 있어 중복 실행을 막았습니다.".to_owned());
+    if request.run_mode == RunMode::ResumeExisting {
+        let source_session_id = request
+            .source_session_id
+            .as_deref()
+            .ok_or_else(|| "Claude 출처 session id가 없습니다.".to_owned())?;
+        let home = dirs::home_dir().ok_or_else(|| "홈 폴더를 찾지 못했습니다.".to_owned())?;
+        let agents = super::probe_agents(&sources.claude_binary);
+        let identity = super::ledger::inspect_session(
+            &home.join(".claude/projects"),
+            Some(source_session_id),
+            &agents,
+        )?;
+        let session_workspace = identity
+            .cwd
+            .as_deref()
+            .and_then(|path| path.canonicalize().ok());
+        if !identity.exists
+            || identity.active
+            || session_workspace.as_deref() != Some(workspace.as_path())
+        {
+            return Err(
+                "Claude 출처 session이 실행 중이거나 작업공간이 승인 시점과 달라졌습니다."
+                    .to_owned(),
+            );
+        }
+        let transcript = identity
+            .transcript_path
+            .as_deref()
+            .ok_or_else(|| "Claude 출처 transcript를 찾지 못했습니다.".to_owned())?;
+        if super::ledger::marker_exists(transcript, &request.idempotency_key) {
+            return Err(
+                "같은 Claude 야간 계약 marker가 이미 있어 중복 실행을 막았습니다.".to_owned(),
+            );
+        }
     }
 
     let mut receipt = super::ledger::ClaudeRunReceipt::accepted(
         request.idempotency_key.clone(),
+        request.run_mode,
         request.source_session_id.clone(),
         request.workspace.clone(),
         request.prompt.clone(),
@@ -467,7 +500,8 @@ fn start_claude(request: ClaudeWorkerRequest) -> Result<StartedClaude, String> {
     let mut command = Command::new(&sources.claude_binary);
     command
         .args(claude_arguments(
-            &request.source_session_id,
+            request.run_mode,
+            request.source_session_id.as_deref(),
             &workspace,
             request.max_turns,
         ))
@@ -586,13 +620,16 @@ fn apply_claude_result(
         .and_then(|item| item.get("is_error"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    if process_succeeded && value.is_some() && !provider_error {
+    if process_succeeded && value.is_some() && !provider_error && receipt.fork_session_id.is_some()
+    {
         receipt.state = "completed".to_owned();
     } else {
         receipt.state = "failed".to_owned();
         receipt.error = receipt.result.clone().or_else(|| {
             Some(if value.is_none() {
                 "Claude Code의 구조화된 종료 영수증을 읽지 못했습니다.".to_owned()
+            } else if receipt.fork_session_id.is_none() {
+                "Claude Code 종료 영수증에 durable session id가 없습니다.".to_owned()
             } else {
                 "Claude Code가 성공 상태로 종료되지 않았습니다.".to_owned()
             })
@@ -648,7 +685,12 @@ mod tests {
 
     #[test]
     fn command_never_places_the_prompt_in_process_arguments() {
-        let arguments = claude_arguments("session-1", Path::new("/tmp/project"), 20);
+        let arguments = claude_arguments(
+            RunMode::ResumeExisting,
+            Some("session-1"),
+            Path::new("/tmp/project"),
+            20,
+        );
 
         assert!(arguments.contains(&"--safe-mode".to_owned()));
         assert!(arguments.contains(&"--strict-mcp-config".to_owned()));
@@ -680,9 +722,19 @@ mod tests {
     }
 
     #[test]
+    fn new_session_command_omits_resume_and_fork_flags() {
+        let arguments = claude_arguments(RunMode::NewSession, None, Path::new("/tmp/project"), 20);
+
+        assert!(!arguments.contains(&"--resume".to_owned()));
+        assert!(!arguments.contains(&"--fork-session".to_owned()));
+        assert_eq!(arguments.last().map(String::as_str), Some("-p"));
+    }
+
+    #[test]
     fn worker_contract_rejects_unbounded_or_wrong_provider_requests() {
         let invalid = ClaudeWorkerRequest {
-            source_session_id: "session-1".to_owned(),
+            run_mode: RunMode::ResumeExisting,
+            source_session_id: Some("session-1".to_owned()),
             workspace: "/tmp/project".to_owned(),
             prompt: "goal".to_owned(),
             idempotency_key: "gos-codex-wrong".to_owned(),
@@ -701,7 +753,8 @@ mod tests {
     fn provider_json_updates_only_bounded_safe_receipt_fields() {
         let mut receipt = super::super::ledger::ClaudeRunReceipt::accepted(
             format!("gos-claude-{}", "b".repeat(64)),
-            "source-session".to_owned(),
+            RunMode::ResumeExisting,
+            Some("source-session".to_owned()),
             "/tmp/project".to_owned(),
             "Overnight goal\n완성".to_owned(),
             3_600,
@@ -726,7 +779,8 @@ mod tests {
     fn provider_error_never_becomes_a_completed_receipt() {
         let mut receipt = super::super::ledger::ClaudeRunReceipt::accepted(
             format!("gos-claude-{}", "c".repeat(64)),
-            "source-session".to_owned(),
+            RunMode::ResumeExisting,
+            Some("source-session".to_owned()),
             "/tmp/project".to_owned(),
             "Overnight goal\n완성".to_owned(),
             3_600,
@@ -749,7 +803,8 @@ mod tests {
     fn missing_structured_result_fails_closed() {
         let mut receipt = super::super::ledger::ClaudeRunReceipt::accepted(
             format!("gos-claude-{}", "d".repeat(64)),
-            "source-session".to_owned(),
+            RunMode::ResumeExisting,
+            Some("source-session".to_owned()),
             "/tmp/project".to_owned(),
             "Overnight goal\n완성".to_owned(),
             3_600,
@@ -789,5 +844,57 @@ mod tests {
         let keys = filtered.into_iter().map(|(key, _)| key).collect::<Vec<_>>();
 
         assert_eq!(keys, vec!["HOME", "PATH"]);
+    }
+
+    #[test]
+    #[ignore = "uses the installed Claude subscription for one durable sandboxed session"]
+    fn installed_claude_new_session_completes_one_bounded_workspace_turn() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(directory.path().join(".git")).expect("git");
+        let workspace = directory.path().canonicalize().expect("workspace");
+        let binary = RouteSources::local().claude_binary;
+        let mut child = Command::new(binary)
+            .args(claude_arguments(RunMode::NewSession, None, &workspace, 3))
+            .current_dir(&workspace)
+            .env_clear()
+            .envs(filtered_environment(std::env::vars()))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Claude new session");
+        let mut stdin = child.stdin.take().expect("stdin");
+        stdin
+            .write_all(
+                b"Use the Write tool immediately to create claude_canary.txt in the current workspace with exactly GOS_CLAUDE_CANARY_OK and a trailing newline. Then reply done. Do not change anything else.",
+            )
+            .expect("prompt");
+        drop(stdin);
+        let status = child
+            .wait_timeout(Duration::from_secs(120))
+            .expect("wait")
+            .expect("Claude completed");
+        let mut output = Vec::new();
+        child
+            .stdout
+            .take()
+            .expect("stdout")
+            .read_to_end(&mut output)
+            .expect("result");
+        let value = parse_claude_output(&output).expect("structured result");
+
+        assert!(
+            status.success(),
+            "Claude output: {}",
+            String::from_utf8_lossy(&output)
+        );
+        assert!(value
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|session| !session.is_empty()));
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("claude_canary.txt")).expect("canary output"),
+            "GOS_CLAUDE_CANARY_OK\n"
+        );
     }
 }

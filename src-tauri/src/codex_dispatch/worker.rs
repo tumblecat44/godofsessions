@@ -28,7 +28,8 @@ const WORKER_FLAG: &str = "--codex-night-worker";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CodexWorkerRequest {
-    thread_id: String,
+    run_mode: RunMode,
+    thread_id: Option<String>,
     workspace: String,
     prompt: String,
     idempotency_key: String,
@@ -92,9 +93,6 @@ pub(crate) fn execute_approved(
     if route.surface != Provider::Codex || approved.preflight.surface != Provider::Codex {
         return Err("승인한 실행 경로가 Codex가 아닙니다.".to_owned());
     }
-    if approved.draft.run_mode != RunMode::ResumeExisting {
-        return Err("첫 Codex 어댑터는 출처가 확인된 기존 thread만 재개합니다.".to_owned());
-    }
     let sources = RouteSources::local();
     let environment = local_environment(
         &approved.draft,
@@ -104,12 +102,18 @@ pub(crate) fn execute_approved(
     );
     let current = preview(&approved.draft, route, &environment);
     validate_approved_preflight(&approved.preflight, &current)?;
-    let thread_id = approved
-        .draft
-        .native_session_id
-        .clone()
-        .ok_or_else(|| "재개할 Codex thread id가 없습니다.".to_owned())?;
+    let thread_id = approved.draft.native_session_id.clone();
+    match approved.draft.run_mode {
+        RunMode::ResumeExisting if thread_id.is_none() => {
+            return Err("재개할 Codex thread id가 없습니다.".to_owned());
+        }
+        RunMode::NewSession if thread_id.is_some() => {
+            return Err("새 Codex thread 계약에는 기존 thread id를 넣을 수 없습니다.".to_owned());
+        }
+        _ => {}
+    }
     let request = CodexWorkerRequest {
+        run_mode: approved.draft.run_mode,
         thread_id,
         workspace: current.scope_value.clone(),
         prompt: approved.draft.prompt.clone(),
@@ -144,8 +148,13 @@ pub(crate) fn execute_approved(
             }
             let returned_thread = reply
                 .thread_id
-                .filter(|value| value == &request.thread_id)
-                .ok_or_else(|| "Codex가 승인한 thread와 다른 thread를 반환했습니다.".to_owned())?;
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "Codex 시작 영수증에 thread id가 없습니다.".to_owned())?;
+            if request.run_mode == RunMode::ResumeExisting
+                && request.thread_id.as_deref() != Some(returned_thread.as_str())
+            {
+                return Err("Codex가 승인한 thread와 다른 thread를 반환했습니다.".to_owned());
+            }
             let turn_id = reply
                 .turn_id
                 .filter(|value| !value.is_empty())
@@ -157,21 +166,34 @@ pub(crate) fn execute_approved(
                 &returned_thread,
                 &turn_id,
                 Some(i64::from(reply.worker_pid)),
-                "Codex가 승인한 기존 thread에 야간 turn을 시작했습니다.".to_owned(),
+                if request.run_mode == RunMode::ResumeExisting {
+                    "Codex가 승인한 기존 thread에 야간 turn을 시작했습니다."
+                } else {
+                    "Codex가 승인한 작업공간에 새 durable thread와 야간 turn을 시작했습니다."
+                }
+                .to_owned(),
             ))
         }
         Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
-            let marker = environment
-                .thread
-                .rollout_path
-                .as_deref()
-                .map(|path| scan_rollout_marker(path, &request.idempotency_key))
-                .transpose()?
-                .flatten();
+            let marker = if request.run_mode == RunMode::ResumeExisting {
+                environment
+                    .thread
+                    .rollout_path
+                    .as_deref()
+                    .map(|path| scan_rollout_marker(path, &request.idempotency_key))
+                    .transpose()?
+                    .flatten()
+            } else {
+                None
+            };
             if let Some(marker) = marker {
+                let source_thread = request
+                    .thread_id
+                    .as_deref()
+                    .ok_or_else(|| "복구할 Codex thread id가 없습니다.".to_owned())?;
                 return Ok(receipt_from_marker(
                     &approved,
-                    &request.thread_id,
+                    source_thread,
                     marker,
                     Some(worker_pid),
                     "작업자 응답은 잃었지만 Codex rollout에서 같은 계약을 복구했습니다. 자동 재시도하지 않습니다.",
@@ -181,7 +203,7 @@ pub(crate) fn execute_approved(
                 &approved,
                 DispatchReceiptState::Uncertain,
                 "unknown",
-                &request.thread_id,
+                request.thread_id.as_deref().unwrap_or("thread-start-pending"),
                 "",
                 Some(worker_pid),
                 "작업자를 시작했지만 Codex 영수증을 확인하지 못했습니다. 중복 위험 때문에 자동 재시도하지 않습니다."
@@ -298,8 +320,15 @@ fn read_worker_request() -> Result<CodexWorkerRequest, String> {
     }
     let request = serde_json::from_slice::<CodexWorkerRequest>(&encoded)
         .map_err(|_| "야간 계약 형식이 올바르지 않습니다.".to_owned())?;
+    let thread_contract_valid = match request.run_mode {
+        RunMode::ResumeExisting => request
+            .thread_id
+            .as_deref()
+            .is_some_and(|thread_id| !thread_id.is_empty()),
+        RunMode::NewSession => request.thread_id.is_none(),
+    };
     if !request.idempotency_key.starts_with("gos-codex-")
-        || request.thread_id.is_empty()
+        || !thread_contract_valid
         || request.prompt.trim().is_empty()
         || !(3_600..=16 * 3_600).contains(&request.max_runtime_seconds)
     {
@@ -315,31 +344,42 @@ fn start_worker(request: CodexWorkerRequest) -> Result<RunningCodexTurn, String>
     if !workspace.join(".git").exists() || workspace.display().to_string() != request.workspace {
         return Err("승인한 정규 Git 작업공간 경계가 달라졌습니다.".to_owned());
     }
-    let identity = inspect_thread(Some(&request.thread_id))?;
-    let thread_workspace = identity
-        .cwd
-        .as_deref()
-        .and_then(|path| path.canonicalize().ok());
-    if !identity.exists
-        || identity.archived
-        || identity.active
-        || thread_workspace.as_deref() != Some(workspace.as_path())
-    {
-        return Err("기존 Codex thread의 상태나 작업공간이 승인 시점과 달라졌습니다.".to_owned());
-    }
-    let rollout = identity
-        .rollout_path
-        .as_deref()
-        .ok_or_else(|| "기존 Codex thread의 provider rollout을 찾지 못했습니다.".to_owned())?;
-    if scan_rollout_marker(rollout, &request.idempotency_key)?.is_some() {
-        return Err(
-            "같은 Night Contract가 Codex rollout에 이미 있어 재실행하지 않습니다.".to_owned(),
-        );
-    }
+    let resume_identity = if request.run_mode == RunMode::ResumeExisting {
+        let source_thread = request
+            .thread_id
+            .as_deref()
+            .ok_or_else(|| "재개할 Codex thread id가 없습니다.".to_owned())?;
+        let identity = inspect_thread(Some(source_thread))?;
+        let thread_workspace = identity
+            .cwd
+            .as_deref()
+            .and_then(|path| path.canonicalize().ok());
+        if !identity.exists
+            || identity.archived
+            || identity.active
+            || thread_workspace.as_deref() != Some(workspace.as_path())
+        {
+            return Err(
+                "기존 Codex thread의 상태나 작업공간이 승인 시점과 달라졌습니다.".to_owned(),
+            );
+        }
+        let rollout = identity
+            .rollout_path
+            .as_deref()
+            .ok_or_else(|| "기존 Codex thread의 provider rollout을 찾지 못했습니다.".to_owned())?;
+        if scan_rollout_marker(rollout, &request.idempotency_key)?.is_some() {
+            return Err(
+                "같은 Night Contract가 Codex rollout에 이미 있어 재실행하지 않습니다.".to_owned(),
+            );
+        }
+        Some(identity)
+    } else {
+        None
+    };
 
     let binary = RouteSources::local().codex_binary;
     let (mut child, mut stdin, receiver) = start_app_server(&binary)?;
-    let startup = (|| -> Result<String, String> {
+    let startup = (|| -> Result<(String, String), String> {
         send_request(
             &mut stdin,
             1,
@@ -350,36 +390,59 @@ fn start_worker(request: CodexWorkerRequest) -> Result<RunningCodexTurn, String>
                     "title": "God of Sessions",
                     "version": env!("CARGO_PKG_VERSION")
                 },
-                "capabilities": {}
+                "capabilities": {
+                    "experimentalApi": true,
+                    "requestAttestation": false
+                }
             }),
         )?;
         receive_response(&mut stdin, &receiver, 1, RPC_TIMEOUT)?;
         send_notification(&mut stdin, "initialized", json!({}))?;
-        send_request(
-            &mut stdin,
-            2,
-            "thread/resume",
-            json!({
-                "threadId": request.thread_id,
-                "cwd": request.workspace,
-                "approvalPolicy": "never",
-                "approvalsReviewer": "user",
-                "sandbox": "workspace-write",
-                "runtimeWorkspaceRoots": [request.workspace],
-                "excludeTurns": true
-            }),
-        )?;
-        let resumed = receive_response(&mut stdin, &receiver, 2, RPC_TIMEOUT)?;
-        validate_resume_response(&resumed, &request.thread_id, &workspace)?;
-        if scan_rollout_marker(rollout, &request.idempotency_key)?.is_some() {
-            return Err("thread 재개 중 같은 계약이 나타나 turn을 시작하지 않았습니다.".to_owned());
+        let (method, params) = match request.run_mode {
+            RunMode::ResumeExisting => (
+                "thread/resume",
+                json!({
+                    "threadId": request.thread_id,
+                    "cwd": request.workspace,
+                    "approvalPolicy": "never",
+                    "approvalsReviewer": "user",
+                    "sandbox": "workspace-write",
+                    "runtimeWorkspaceRoots": [request.workspace],
+                    "excludeTurns": true
+                }),
+            ),
+            RunMode::NewSession => (
+                "thread/start",
+                json!({
+                    "cwd": request.workspace,
+                    "approvalPolicy": "never",
+                    "sandbox": "workspace-write",
+                    "runtimeWorkspaceRoots": [request.workspace],
+                    "ephemeral": false
+                }),
+            ),
+        };
+        send_request(&mut stdin, 2, method, params)?;
+        let opened = receive_response(&mut stdin, &receiver, 2, RPC_TIMEOUT)?;
+        let thread_id =
+            validate_thread_response(&opened, request.thread_id.as_deref(), &workspace)?;
+        if let Some(identity) = resume_identity.as_ref() {
+            let rollout = identity
+                .rollout_path
+                .as_deref()
+                .ok_or_else(|| "기존 Codex rollout을 찾지 못했습니다.".to_owned())?;
+            if scan_rollout_marker(rollout, &request.idempotency_key)?.is_some() {
+                return Err(
+                    "thread 재개 중 같은 계약이 나타나 turn을 시작하지 않았습니다.".to_owned(),
+                );
+            }
         }
         send_request(
             &mut stdin,
             3,
             "turn/start",
             json!({
-                "threadId": request.thread_id,
+                "threadId": thread_id,
                 "clientUserMessageId": request.idempotency_key,
                 "input": [{"type": "text", "text": request.prompt}],
                 "cwd": request.workspace,
@@ -397,15 +460,16 @@ fn start_worker(request: CodexWorkerRequest) -> Result<RunningCodexTurn, String>
             }),
         )?;
         let started = receive_response(&mut stdin, &receiver, 3, RPC_TIMEOUT)?;
-        started
+        let turn_id = started
             .pointer("/result/turn/id")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
-            .ok_or_else(|| "Codex turn/start 응답에 turn id가 없습니다.".to_owned())
+            .ok_or_else(|| "Codex turn/start 응답에 turn id가 없습니다.".to_owned())?;
+        Ok((thread_id, turn_id))
     })();
-    let turn_id = match startup {
-        Ok(turn_id) => turn_id,
+    let (thread_id, turn_id) = match startup {
+        Ok(ids) => ids,
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
@@ -421,13 +485,15 @@ fn start_worker(request: CodexWorkerRequest) -> Result<RunningCodexTurn, String>
         child,
         stdin,
         receiver,
-        thread_id: request.thread_id,
+        thread_id,
         turn_id,
         max_runtime: Duration::from_secs(request.max_runtime_seconds),
     })
 }
 
-fn start_app_server(binary: &Path) -> Result<(Child, ChildStdin, Receiver<String>), String> {
+pub(super) fn start_app_server(
+    binary: &Path,
+) -> Result<(Child, ChildStdin, Receiver<String>), String> {
     if !binary.is_file() {
         return Err("Codex 앱 번들 실행기를 찾지 못했습니다.".to_owned());
     }
@@ -459,7 +525,7 @@ fn start_app_server(binary: &Path) -> Result<(Child, ChildStdin, Receiver<String
     Ok((child, stdin, receiver))
 }
 
-fn send_request(
+pub(super) fn send_request(
     stdin: &mut ChildStdin,
     id: i64,
     method: &str,
@@ -471,7 +537,11 @@ fn send_request(
     )
 }
 
-fn send_notification(stdin: &mut ChildStdin, method: &str, params: Value) -> Result<(), String> {
+pub(super) fn send_notification(
+    stdin: &mut ChildStdin,
+    method: &str,
+    params: Value,
+) -> Result<(), String> {
     send_value(stdin, &json!({"method": method, "params": params}))
 }
 
@@ -485,7 +555,7 @@ fn send_value(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> {
         .map_err(|_| "Codex 요청 통로가 닫혔습니다.".to_owned())
 }
 
-fn receive_response(
+pub(super) fn receive_response(
     stdin: &mut ChildStdin,
     receiver: &Receiver<String>,
     request_id: i64,
@@ -547,11 +617,11 @@ pub(super) fn server_request_denial(request: &Value) -> Value {
     })
 }
 
-pub(super) fn validate_resume_response(
+pub(super) fn validate_thread_response(
     response: &Value,
-    expected_thread_id: &str,
+    expected_thread_id: Option<&str>,
     expected_workspace: &Path,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let thread_id = response
         .pointer("/result/thread/id")
         .and_then(Value::as_str);
@@ -568,7 +638,8 @@ pub(super) fn validate_resume_response(
     let network_access = response
         .pointer("/result/sandbox/networkAccess")
         .and_then(Value::as_bool);
-    if thread_id != Some(expected_thread_id)
+    if thread_id.is_none_or(str::is_empty)
+        || expected_thread_id.is_some_and(|expected| thread_id != Some(expected))
         || cwd.as_deref() != Some(expected_workspace)
         || approval_policy != Some("never")
         || sandbox_type != Some("workspaceWrite")
@@ -578,7 +649,7 @@ pub(super) fn validate_resume_response(
             "Codex가 반환한 thread id, cwd, 승인 정책 또는 sandbox가 계약과 다릅니다.".to_owned(),
         );
     }
-    Ok(())
+    Ok(thread_id.unwrap_or_default().to_owned())
 }
 
 fn monitor_turn(running: &mut RunningCodexTurn) -> Result<(), String> {

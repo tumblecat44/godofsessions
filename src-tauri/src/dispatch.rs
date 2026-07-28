@@ -90,6 +90,7 @@ pub fn build_preflights(
         .collect::<Vec<_>>();
     preflights.extend(crate::codex_dispatch::build_preflights(drafts, inventory));
     preflights.extend(crate::claude_dispatch::build_preflights(drafts, inventory));
+    preflights.extend(crate::grok_dispatch::build_preflights(drafts, inventory));
     preflights.sort_by_key(|preflight| {
         drafts
             .iter()
@@ -368,6 +369,9 @@ pub fn load_night_run_history() -> NightRunHistory {
     let (mut claude_runs, claude_warnings) = crate::claude_dispatch::load_night_run_history();
     runs.append(&mut claude_runs);
     warnings.extend(claude_warnings);
+    let (mut grok_runs, grok_warnings) = crate::grok_dispatch::load_night_run_history();
+    runs.append(&mut grok_runs);
+    warnings.extend(grok_warnings);
     runs.sort_by(|left, right| {
         let left_time = left
             .completed_at
@@ -389,7 +393,7 @@ pub fn load_night_run_history() -> NightRunHistory {
         runs,
         warnings,
         read_only: true,
-        methodology: "Hermes 전용 보드, Codex provider rollout, Claude fork transcript와 로컬 실행 영수증을 읽기 전용으로 결합했습니다."
+        methodology: "Hermes 전용 보드, Codex provider rollout, Claude·Grok provider transcript와 로컬 실행 영수증을 읽기 전용으로 결합했습니다."
             .to_owned(),
     }
 }
@@ -413,6 +417,7 @@ pub(crate) fn load_night_run_record(
             crate::codex_dispatch::load_night_run_record(thread_id, idempotency_key)
         }
         Provider::Claude => crate::claude_dispatch::load_night_run_record(idempotency_key),
+        Provider::Grok => crate::grok_dispatch::load_night_run_record(idempotency_key),
         _ => Err(format!(
             "{} 공급자의 정확한 야간 실행 증거 조회는 지원하지 않습니다.",
             surface.as_str()

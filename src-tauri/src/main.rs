@@ -7,6 +7,10 @@ fn main() {
         god_of_sessions_lib::run_claude_night_worker();
         return;
     }
+    if std::env::args().nth(1).as_deref() == Some("--grok-night-worker") {
+        god_of_sessions_lib::run_grok_night_worker();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--night-coordinator-worker") {
         god_of_sessions_lib::run_night_coordinator_worker();
         return;

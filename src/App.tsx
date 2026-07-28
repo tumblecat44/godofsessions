@@ -17,7 +17,11 @@ import { Sidebar } from "./components/Sidebar";
 import { SettingsView } from "./components/SettingsView";
 import { OvernightView } from "./components/OvernightView";
 import { fallbackTitle, relativeTime } from "./lib/format";
-import { loadPreferences, savePreferences } from "./lib/preferences";
+import {
+  loadPreferences,
+  planOverrides,
+  savePreferences,
+} from "./lib/preferences";
 import { localizePreviewFixture } from "./lib/preview-localization";
 import { previewWorkspaceOverview } from "./preview-data";
 import type {
@@ -75,6 +79,9 @@ function App() {
   );
   const [query, setQuery] = useState("");
   const [activeView, setActiveView] = useState<WorkspaceView>("chat");
+  const [overnightHandoffId, setOvernightHandoffId] = useState<string | null>(
+    null,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const ko = preferences.language === "ko";
@@ -82,6 +89,16 @@ function App() {
   const updatePreferences = useCallback((next: AppPreferences) => {
     setPreferences(next);
     savePreferences(next);
+  }, []);
+
+  const navigate = useCallback((view: WorkspaceView) => {
+    if (view === "overnight") setOvernightHandoffId(null);
+    setActiveView(view);
+  }, []);
+
+  const reviewOvernightPlan = useCallback((handoffId: string) => {
+    setOvernightHandoffId(handoffId);
+    setActiveView("overnight");
   }, []);
 
   const load = useCallback(async () => {
@@ -203,14 +220,15 @@ function App() {
         total={state.overview.snapshot.sessions.length}
         privacyNote={state.overview.snapshot.privacy_note}
         activeView={activeView}
-        onSelectView={setActiveView}
+        onSelectView={navigate}
         language={preferences.language}
       />
 
       {activeView === "chat" ? (
         <ChatView
           overview={state.overview}
-          onNavigate={setActiveView}
+          onNavigate={navigate}
+          onReviewOvernightPlan={reviewOvernightPlan}
           preferences={preferences}
           onPreferencesChange={updatePreferences}
         />
@@ -223,7 +241,25 @@ function App() {
           language={preferences.language}
         />
       ) : activeView === "overnight" ? (
-        <OvernightView language={preferences.language} />
+        <OvernightView
+          language={preferences.language}
+          handoffId={overnightHandoffId}
+          defaultSleepHours={preferences.default_overnight_hours}
+          advisor={{
+            provider: preferences.default_chat_provider,
+            model:
+              preferences.default_chat_models[
+                preferences.default_chat_provider
+              ] ?? null,
+            effort:
+              preferences.default_chat_efforts[
+                preferences.default_chat_provider
+              ] ?? null,
+            language: preferences.language,
+            plan_overrides: planOverrides(preferences),
+          }}
+          onOpenSettings={() => navigate("settings")}
+        />
       ) : activeView === "settings" ? (
         <SettingsView
           preferences={preferences}

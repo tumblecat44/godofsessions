@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use chrono::Utc;
 use serde_json::Value;
 
@@ -5,23 +7,47 @@ use crate::model::{Provider, ResourceBudget, UsageWindow};
 
 use super::{
     state_for_windows,
-    transport::{find_json_value, run_streaming_protocol},
+    transport::{find_json_value, run_streaming_protocol, run_streaming_protocol_with_environment},
     unavailable,
 };
 
 const SOURCE_LABEL: &str = "Grok ACP billing";
 
 pub(super) fn load() -> ResourceBudget {
-    let Some(binary) = dirs::home_dir()
-        .map(|home| home.join(".grok/bin/grok"))
-        .filter(|path| path.is_file())
-    else {
+    let Some(binary) = default_binary() else {
         return unavailable(
             Provider::Grok,
             SOURCE_LABEL,
             "Grok 실행기를 찾지 못했습니다.",
         );
     };
+    load_from_binary(&binary, None, None)
+}
+
+pub(crate) fn load_with_safe_environment(
+    binary: &Path,
+    current_dir: Option<&Path>,
+    environment: &[(String, String)],
+) -> ResourceBudget {
+    if !binary.is_file() {
+        return unavailable(
+            Provider::Grok,
+            SOURCE_LABEL,
+            "Grok 실행기를 찾지 못했습니다.",
+        );
+    }
+    load_from_binary(binary, current_dir, Some(environment))
+}
+
+fn default_binary() -> Option<PathBuf> {
+    crate::execution_routes::resolve_grok_binary()
+}
+
+fn load_from_binary(
+    binary: &Path,
+    current_dir: Option<&Path>,
+    environment: Option<&[(String, String)]>,
+) -> ResourceBudget {
     let input = concat!(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
         "{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":",
@@ -31,19 +57,33 @@ pub(super) fn load() -> ResourceBudget {
         "\"clientVersion\":\"0.1.0\"}}}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"_x.ai/billing\",\"params\":{}}\n"
     );
-    run_streaming_protocol(
-        &binary,
-        &["agent", "--no-leader", "stdio"],
-        input,
-        |output| {
-            find_json_value(output, |value| {
-                value.get("id").and_then(Value::as_i64) == Some(2)
-            })
-            .is_some()
-        },
-    )
-    .and_then(|output| parse(&output))
-    .unwrap_or_else(|message| unavailable(Provider::Grok, SOURCE_LABEL, &message))
+    let response_received = |output: &str| {
+        find_json_value(output, |value| {
+            value.get("id").and_then(Value::as_i64) == Some(2)
+        })
+        .is_some()
+    };
+    environment
+        .map(|environment| {
+            run_streaming_protocol_with_environment(
+                binary,
+                &["agent", "--no-leader", "stdio"],
+                input,
+                Some(environment),
+                current_dir,
+                response_received,
+            )
+        })
+        .unwrap_or_else(|| {
+            run_streaming_protocol(
+                binary,
+                &["agent", "--no-leader", "stdio"],
+                input,
+                response_received,
+            )
+        })
+        .and_then(|output| parse(&output))
+        .unwrap_or_else(|message| unavailable(Provider::Grok, SOURCE_LABEL, &message))
 }
 
 fn parse(output: &str) -> Result<ResourceBudget, String> {
@@ -98,6 +138,7 @@ fn parse(output: &str) -> Result<ResourceBudget, String> {
             .or_else(|| result.get("subscriptionTier"))
             .and_then(Value::as_str)
             .map(str::to_owned),
+        plan_capacity: None,
         windows,
         credits,
         observed_at: Utc::now().to_rfc3339(),
@@ -107,8 +148,15 @@ fn parse(output: &str) -> Result<ResourceBudget, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn sample_budget_for_auth_test() -> ResourceBudget {
+        parse(
+            r#"{"id":2,"result":{"config":{"creditUsagePercent":28.0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-07-26T00:02:14Z"},"prepaidBalance":{"val":0}},"subscription_tier":"SuperGrok Heavy"}}"#,
+        )
+        .expect("Grok auth budget")
+    }
 
     #[test]
     fn parser_reads_weekly_credit_window() {

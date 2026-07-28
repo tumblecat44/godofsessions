@@ -6,9 +6,11 @@ use crate::model::{
 const HERMES_CONTINUATION_TURN_BUDGET: u32 = 20;
 const MAX_FIELD_CHARS: usize = 1_200;
 
-pub(crate) fn supports_dispatch(surface: Provider, resume_existing: bool) -> bool {
-    surface == Provider::Hermes
-        || (resume_existing && matches!(surface, Provider::Codex | Provider::Claude))
+pub(crate) fn supports_dispatch(surface: Provider, _resume_existing: bool) -> bool {
+    matches!(
+        surface,
+        Provider::Hermes | Provider::Codex | Provider::Claude | Provider::Grok
+    )
 }
 
 pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
@@ -177,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn native_draft_resumes_without_claiming_hermes_goal_support() {
+    fn native_grok_draft_resumes_with_its_own_dispatch_contract() {
         let draft = build(&candidate(Provider::Grok, true));
 
         assert_eq!(draft.format, RunDraftFormat::StructuredPrompt);
@@ -185,27 +187,27 @@ mod tests {
         assert_eq!(draft.native_session_id.as_deref(), Some("session-1"));
         assert_eq!(draft.continuation_turn_budget, None);
         assert!(!draft.prompt.starts_with("/goal "));
-        assert!(!draft.dispatch_supported);
+        assert!(draft.dispatch_supported);
     }
 
     #[test]
-    fn codex_existing_thread_is_dispatchable_but_new_thread_is_not() {
+    fn codex_existing_and_new_threads_are_dispatchable() {
         let resumed = build(&candidate(Provider::Codex, true));
         let fresh = build(&candidate(Provider::Codex, false));
 
         assert!(resumed.dispatch_supported);
         assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
-        assert!(!fresh.dispatch_supported);
+        assert!(fresh.dispatch_supported);
     }
 
     #[test]
-    fn claude_existing_session_is_dispatchable_but_new_session_is_not() {
+    fn claude_existing_and_new_sessions_are_dispatchable() {
         let resumed = build(&candidate(Provider::Claude, true));
         let fresh = build(&candidate(Provider::Claude, false));
 
         assert!(resumed.dispatch_supported);
         assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
-        assert!(!fresh.dispatch_supported);
+        assert!(fresh.dispatch_supported);
     }
 
     #[test]

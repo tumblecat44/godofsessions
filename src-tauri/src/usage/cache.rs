@@ -1,6 +1,10 @@
 use std::{fs, path::PathBuf};
 
+use chrono::{DateTime, Duration, Utc};
+
 use crate::model::{ResourceBudget, ResourceState};
+
+const RECENT_SUCCESS_GRACE_MINUTES: i64 = 60;
 
 pub(super) fn merge_with_cache(fresh: Vec<ResourceBudget>) -> Vec<ResourceBudget> {
     let cached = load();
@@ -32,12 +36,35 @@ fn fallback_to_last_success(
         return budget;
     };
     let mut fallback = previous.clone();
-    fallback.state = ResourceState::Degraded;
-    fallback.source_label = format!("{} · 마지막 성공값", previous.source_label);
+    let recent_success = DateTime::parse_from_rfc3339(&previous.observed_at)
+        .ok()
+        .map(|observed_at| {
+            Utc::now().signed_duration_since(observed_at.with_timezone(&Utc))
+                <= Duration::minutes(RECENT_SUCCESS_GRACE_MINUTES)
+        })
+        .unwrap_or(false);
+    fallback.state = if recent_success {
+        ResourceState::Ready
+    } else {
+        ResourceState::Degraded
+    };
+    fallback.source_label = if recent_success {
+        format!("{} · 최근 성공값", previous.source_label)
+    } else {
+        format!("{} · 마지막 성공값", previous.source_label)
+    };
     fallback.message = Some(
         budget
             .message
-            .map(|message| format!("실시간 조회 실패: {message}"))
+            .map(|message| {
+                if recent_success {
+                    format!(
+                        "실시간 조회 실패: {message} 60분 이내 성공값으로 추천하되 실행 직전에 다시 확인합니다."
+                    )
+                } else {
+                    format!("실시간 조회 실패: {message}")
+                }
+            })
             .unwrap_or_else(|| "실시간 사용량을 확인하지 못했습니다.".to_owned()),
     );
     fallback
@@ -89,18 +116,54 @@ mod tests {
     use crate::usage::unavailable;
 
     #[test]
-    fn failed_live_budget_uses_last_successful_window_as_degraded() {
+    fn failed_live_budget_uses_recent_successful_window_for_recommendation() {
         let cached = vec![ResourceBudget {
             provider: Provider::Claude,
             state: ResourceState::Ready,
             plan: None,
+            plan_capacity: None,
             windows: vec![UsageWindow {
                 label: "5시간".to_owned(),
                 used_percent: 12.0,
                 resets_at: None,
             }],
             credits: None,
-            observed_at: "2026-07-24T20:00:00Z".to_owned(),
+            observed_at: Utc::now().to_rfc3339(),
+            source_label: "cached-source".to_owned(),
+            message: None,
+        }];
+        let unavailable = unavailable(Provider::Claude, "live-source", "이번 조회에 실패했습니다.");
+
+        let mut next_cache = cached.clone();
+        let merged = fallback_to_last_success(unavailable, &cached, &mut next_cache);
+
+        assert_eq!(merged.state, ResourceState::Ready);
+        assert_eq!(merged.windows[0].used_percent, 12.0);
+        assert!(merged.source_label.contains("최근 성공값"));
+        assert!(merged
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("이번 조회에 실패")));
+        assert!(merged
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("실행 직전에 다시 확인")));
+    }
+
+    #[test]
+    fn failed_live_budget_keeps_stale_successful_window_degraded() {
+        let cached = vec![ResourceBudget {
+            provider: Provider::Claude,
+            state: ResourceState::Ready,
+            plan: None,
+            plan_capacity: None,
+            windows: vec![UsageWindow {
+                label: "5시간".to_owned(),
+                used_percent: 12.0,
+                resets_at: None,
+            }],
+            credits: None,
+            observed_at: (Utc::now() - Duration::minutes(61)).to_rfc3339(),
             source_label: "cached-source".to_owned(),
             message: None,
         }];
@@ -110,11 +173,6 @@ mod tests {
         let merged = fallback_to_last_success(unavailable, &cached, &mut next_cache);
 
         assert_eq!(merged.state, ResourceState::Degraded);
-        assert_eq!(merged.windows[0].used_percent, 12.0);
         assert!(merged.source_label.contains("마지막 성공값"));
-        assert!(merged
-            .message
-            .as_deref()
-            .is_some_and(|message| message.contains("이번 조회에 실패")));
     }
 }

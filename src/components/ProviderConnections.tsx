@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import type {
   AppLanguage,
-  ChatProvider,
+  ConnectionProvider,
   ProviderConnection,
   ProviderLoginResult,
 } from "../types";
@@ -36,6 +36,15 @@ const previewConnections: ProviderConnection[] = [
     route_label: "Claude Code CLI",
     message: "Sign in with Claude.ai to use a Claude subscription.",
   },
+  {
+    provider: "grok_subscription",
+    installed: true,
+    authenticated: false,
+    auth_method: null,
+    plan: null,
+    route_label: "Grok Build CLI",
+    message: "Sign in with Grok OAuth to use your Grok subscription.",
+  },
 ];
 
 interface ProviderConnectionsProps {
@@ -44,14 +53,17 @@ interface ProviderConnectionsProps {
   onChange?: (connections: ProviderConnection[]) => void;
 }
 
-function providerName(provider: ChatProvider) {
-  return provider === "codex_subscription" ? "Codex" : "Claude";
+function providerName(provider: ConnectionProvider) {
+  if (provider === "codex_subscription") return "Codex";
+  if (provider === "claude_subscription") return "Claude";
+  return "Grok";
 }
 
-function fallbackCommand(provider: ChatProvider) {
-  return provider === "codex_subscription"
-    ? "codex login"
-    : "claude auth login --claudeai";
+function fallbackCommand(provider: ConnectionProvider) {
+  if (provider === "codex_subscription") return "codex login";
+  if (provider === "claude_subscription")
+    return "claude auth login --claudeai";
+  return "grok login --oauth";
 }
 
 export function ProviderConnections({
@@ -64,7 +76,7 @@ export function ProviderConnections({
     useState<ProviderConnection[]>(previewConnections);
   const [loading, setLoading] = useState(true);
   const [login, setLogin] = useState<
-    Partial<Record<ChatProvider, ProviderLoginResult>>
+    Partial<Record<ConnectionProvider, ProviderLoginResult>>
   >({});
   const mounted = useRef(true);
 
@@ -90,7 +102,7 @@ export function ProviderConnections({
     };
   }, [load]);
 
-  async function poll(provider: ChatProvider) {
+  async function poll(provider: ConnectionProvider) {
     if (!isTauri()) {
       window.setTimeout(() => {
         setConnections((current) => {
@@ -102,8 +114,15 @@ export function ProviderConnections({
                   auth_method:
                     provider === "codex_subscription"
                       ? "ChatGPT OAuth"
-                      : "claude.ai",
-                  plan: provider === "codex_subscription" ? "Plus" : "Max",
+                      : provider === "claude_subscription"
+                        ? "claude.ai"
+                        : "Grok OAuth",
+                  plan:
+                    provider === "codex_subscription"
+                      ? "Plus"
+                      : provider === "claude_subscription"
+                        ? "Max"
+                        : "Grok",
                   message: "Subscription login verified.",
                 }
               : connection,
@@ -137,7 +156,7 @@ export function ProviderConnections({
     }
   }
 
-  async function connect(provider: ChatProvider) {
+  async function connect(provider: ConnectionProvider) {
     try {
       const result = isTauri()
         ? await invoke<ProviderLoginResult>("start_provider_login", { provider })
@@ -183,6 +202,8 @@ export function ProviderConnections({
             <div className="provider-connection__mark">
               {connection.provider === "codex_subscription" ? (
                 <OperatorMark size={28} />
+              ) : connection.provider === "grok_subscription" ? (
+                <span>GK</span>
               ) : (
                 <span>CL</span>
               )}
@@ -290,6 +311,10 @@ export function ProviderConnections({
                     ? ko
                       ? "대기 중"
                       : "Waiting"
+                    : connection.provider === "claude_subscription"
+                      ? ko
+                        ? "로그인 안내"
+                        : "Login steps"
                     : ko
                       ? "구독 연결"
                       : "Connect subscription"}

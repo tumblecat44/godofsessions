@@ -177,10 +177,20 @@ where
 fn observe(item: &CoordinatorItem) -> Observation {
     let draft = &item.approved.dispatch.draft;
     let idempotency_key = &item.approved.dispatch.preflight.idempotency_key;
+    let provider_session_id = item
+        .receipt
+        .as_ref()
+        .and_then(|receipt| {
+            receipt
+                .thread_id
+                .as_deref()
+                .or(receipt.session_id.as_deref())
+        })
+        .or(draft.native_session_id.as_deref());
     match crate::dispatch::load_night_run_record(
         item.approved.dispatch.preflight.surface,
         idempotency_key,
-        draft.native_session_id.as_deref(),
+        provider_session_id,
     ) {
         Ok(Some(record)) => {
             let detail = load_detail(&record);
@@ -221,6 +231,7 @@ fn load_detail(record: &NightRunRecord) -> Result<NightRunDetail, String> {
             crate::codex_dispatch::load_night_run_detail(&record.task_id, thread_id)
         }
         Provider::Claude => crate::claude_dispatch::load_night_run_detail(&record.task_id),
+        Provider::Grok => crate::grok_dispatch::load_night_run_detail(&record.task_id),
         _ => Err("이 공급자의 아침 상세 근거 조회는 지원하지 않습니다.".to_owned()),
     }
 }
