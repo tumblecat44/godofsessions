@@ -70,8 +70,8 @@ const englishPreviewCopy = new Map<string, string>([
     "Only today’s bounded user and response excerpts are read in memory, with no separate database persistence.",
   ],
   [
-    "Hermes 전용 보드의 task/task_run과 Codex provider rollout의 clientUserMessageId turn을 읽기 전용으로 결합했습니다.",
-    "Read-only evidence combines task/task_run records from a dedicated Hermes board with clientUserMessageId turns from the Codex provider rollout.",
+    "Hermes 전용 보드의 task/task_run과 Codex provider rollout의 native Goal marker·terminal status를 읽기 전용으로 결합했습니다.",
+    "Read-only evidence combines task/task_run records from a dedicated Hermes board with native Goal markers and terminal statuses from the Codex provider rollout.",
   ],
   [
     "Overnight goal\nCodex 야간 실행 복구와 Morning Review 연결\n\nOutcome\nCodex turn을 provider rollout에서 복구해 통합 아침 화면에 표시한다.\n\nVerification\n관련 Rust 테스트와 UI 빌드를 통과한다.\n\nConstraints\n외부 부작용과 자동 재시도를 금지한다.",
@@ -88,8 +88,8 @@ const englishPreviewCopy = new Map<string, string>([
   ["Night Contract가 provider turn에 기록됨", "Night Contract recorded in the provider turn"],
   ["통합 아침 화면과 검증을 완료했습니다.", "Completed the unified morning view and verification."],
   [
-    "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. clientUserMessageId가 God of Sessions 계약 출처를 증명합니다.",
-    "Read-only evidence combines the Codex thread index and provider rollout. clientUserMessageId proves the God of Sessions contract provenance.",
+    "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. native Goal objective의 marker와 terminal status가 계약과 실행 수명주기를 증명합니다.",
+    "Read-only evidence combines the Codex thread index and provider rollout. The native Goal marker and terminal status prove contract provenance and execution lifecycle.",
   ],
   [
     "Hermes task, task_runs, task_events를 읽기 전용으로 결합했습니다. 완료 이벤트는 실행 수명주기를 증명하지만 결과의 정확성까지 자동 증명하지는 않습니다.",

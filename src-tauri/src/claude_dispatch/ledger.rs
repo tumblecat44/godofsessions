@@ -42,6 +42,8 @@ pub(super) struct ClaudeRunReceipt {
     pub(super) exit_code: Option<i32>,
     pub(super) result: Option<String>,
     pub(super) error: Option<String>,
+    #[serde(default)]
+    pub(super) goal_status: Option<String>,
 }
 
 impl ClaudeRunReceipt {
@@ -73,6 +75,7 @@ impl ClaudeRunReceipt {
             exit_code: None,
             result: None,
             error: None,
+            goal_status: None,
         }
     }
 }
@@ -188,14 +191,143 @@ pub(super) fn marker_exists(path: &Path, idempotency_key: &str) -> bool {
     let Ok(file) = File::open(path) else {
         return false;
     };
-    BufReader::new(file).split(b'\n').any(|line| {
-        line.ok().is_some_and(|line| {
-            line.len() <= MAX_MARKER_LINE_BYTES
-                && line
+    let mut reader = BufReader::new(file);
+    loop {
+        match read_bounded_transcript_line(&mut reader) {
+            Ok(Some(line)) => {
+                if line
                     .windows(idempotency_key.len())
                     .any(|window| window == idempotency_key.as_bytes())
-        })
-    })
+                {
+                    return true;
+                }
+            }
+            Ok(None) => return false,
+            Err(_) => return false,
+        }
+    }
+}
+
+pub(super) fn latest_goal_status(
+    session_id: &str,
+    idempotency_key: &str,
+) -> Result<Option<String>, String> {
+    let projects_root = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude/projects");
+    latest_goal_status_at(&projects_root, session_id, idempotency_key)
+}
+
+fn latest_goal_status_at(
+    projects_root: &Path,
+    session_id: &str,
+    idempotency_key: &str,
+) -> Result<Option<String>, String> {
+    let identity = inspect_session(projects_root, Some(session_id), &[])?;
+    let Some(transcript_path) = identity.transcript_path else {
+        return Ok(None);
+    };
+    transcript_goal_status(&transcript_path, idempotency_key)
+}
+
+fn transcript_goal_status(
+    transcript_path: &Path,
+    idempotency_key: &str,
+) -> Result<Option<String>, String> {
+    let file = File::open(transcript_path)
+        .map_err(|_| "Claude fork transcript를 열지 못했습니다.".to_owned())?;
+    let mut reader = BufReader::new(file);
+    let mut latest = None;
+    while let Some(line) = read_bounded_transcript_line(&mut reader)? {
+        if !line
+            .windows(idempotency_key.len())
+            .any(|window| window == idempotency_key.as_bytes())
+            || !line
+                .windows(b"goal_status".len())
+                .any(|window| window == b"goal_status")
+        {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        visit_goal_status_attachments(&value, idempotency_key, &mut latest);
+    }
+    Ok(latest)
+}
+
+fn read_bounded_transcript_line(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>, String> {
+    let mut line = Vec::new();
+    let mut limited = (&mut *reader).take(MAX_MARKER_LINE_BYTES as u64 + 1);
+    let read = limited
+        .read_until(b'\n', &mut line)
+        .map_err(|_| "Claude fork transcript를 읽지 못했습니다.".to_owned())?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if read > MAX_MARKER_LINE_BYTES {
+        if line.last() != Some(&b'\n') {
+            discard_until_newline(reader)?;
+        }
+        line.clear();
+    }
+    Ok(Some(line))
+}
+
+fn discard_until_newline(reader: &mut impl BufRead) -> Result<(), String> {
+    loop {
+        let buffer = reader
+            .fill_buf()
+            .map_err(|_| "큰 Claude transcript 행을 건너뛰지 못했습니다.".to_owned())?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(buffer.len(), |index| index + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(());
+        }
+    }
+}
+
+fn visit_goal_status_attachments(
+    value: &Value,
+    idempotency_key: &str,
+    latest: &mut Option<String>,
+) {
+    match value {
+        Value::Object(object) => {
+            let is_matching_goal_status = object.get("type").and_then(Value::as_str)
+                == Some("goal_status")
+                && object
+                    .get("condition")
+                    .and_then(Value::as_str)
+                    .is_some_and(|condition| condition.contains(idempotency_key))
+                && object.get("sentinel").and_then(Value::as_bool) != Some(true);
+            if is_matching_goal_status {
+                *latest = Some(
+                    if object.get("met").and_then(Value::as_bool) == Some(true) {
+                        "complete"
+                    } else if object.get("failed").and_then(Value::as_bool) == Some(true) {
+                        "failed"
+                    } else {
+                        "active"
+                    }
+                    .to_owned(),
+                );
+            }
+            for child in object.values() {
+                visit_goal_status_attachments(child, idempotency_key, latest);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                visit_goal_status_attachments(child, idempotency_key, latest);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn receipt_exists(idempotency_key: &str) -> bool {
@@ -368,6 +500,10 @@ fn validate_receipt(receipt: &ClaudeRunReceipt) -> Result<(), String> {
         || receipt.prompt.is_empty()
         || !(3_600..=16 * 3_600).contains(&receipt.max_runtime_seconds)
         || !(1..=100).contains(&receipt.max_turns)
+        || receipt
+            .goal_status
+            .as_deref()
+            .is_some_and(|status| !matches!(status, "active" | "failed" | "complete"))
     {
         return Err("Claude 영수증 계약이 안전 경계를 만족하지 않습니다.".to_owned());
     }
@@ -443,6 +579,7 @@ fn provider_evidence(receipt: &ClaudeRunReceipt, projects_root: &Path) -> (bool,
 
 fn history_record(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunRecord {
     let (provenance_verified, _) = provider_evidence(receipt, projects_root);
+    let terminal_goal_verified = receipt.goal_status.as_deref() == Some("complete");
     let stale = receipt_is_stale(receipt, chrono::Utc::now());
     NightRunRecord {
         surface: Provider::Claude,
@@ -455,7 +592,8 @@ fn history_record(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunR
             .to_owned(),
         workspace: Some(receipt.workspace.clone()),
         status: match receipt.state.as_str() {
-            "completed" if provenance_verified => "done",
+            "completed" if provenance_verified && terminal_goal_verified => "done",
+            "completed" => "blocked",
             "failed" | "timed_out" => "blocked",
             "accepted" | "running" if stale => "blocked",
             _ => "running",
@@ -478,7 +616,10 @@ fn history_record(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunR
         thread_id: None,
         turn_id: None,
         outcome: match receipt.state.as_str() {
-            "completed" if provenance_verified => Some("completed".to_owned()),
+            "completed" if provenance_verified && terminal_goal_verified => {
+                Some("completed".to_owned())
+            }
+            "completed" => Some("blocked".to_owned()),
             "failed" | "timed_out" => Some("blocked".to_owned()),
             _ => None,
         },
@@ -495,6 +636,7 @@ fn history_record(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunR
 
 fn history_detail(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunDetail {
     let (provenance_verified, transcript_path) = provider_evidence(receipt, projects_root);
+    let terminal_goal_verified = receipt.goal_status.as_deref() == Some("complete");
     let stale = receipt_is_stale(receipt, chrono::Utc::now());
     let duration_seconds = receipt
         .started_at
@@ -508,7 +650,10 @@ fn history_detail(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunD
         )
         .map(|(start, end)| (end - start).num_seconds().max(0));
     let outcome = match receipt.state.as_str() {
-        "completed" if provenance_verified => Some("completed".to_owned()),
+        "completed" if provenance_verified && terminal_goal_verified => {
+            Some("completed".to_owned())
+        }
+        "completed" => Some("blocked".to_owned()),
         "failed" | "timed_out" => Some("blocked".to_owned()),
         _ => None,
     };
@@ -575,14 +720,16 @@ fn history_detail(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunD
             NightRunVerdict::InProgress,
             "Claude 야간 작업자가 실행 중이거나 아직 종결 영수증을 남기지 않았습니다.".to_owned(),
         ),
-        "completed" if provenance_verified && receipt.result.is_some() => (
+        "completed"
+            if provenance_verified && terminal_goal_verified && receipt.result.is_some() =>
+        (
             NightRunVerdict::ReadyToReview,
-            "Claude 종료 영수증과 fork transcript의 계약 marker가 모두 있습니다. 실제 변경과 검증은 사람이 확인해야 합니다."
+            "Claude의 terminal Goal 완료 증거, 종료 영수증, fork transcript 계약 marker가 모두 있습니다. 실제 변경과 검증은 사람이 확인해야 합니다."
                 .to_owned(),
         ),
         "completed" => (
             NightRunVerdict::NeedsAttention,
-            "Claude 프로세스는 완료됐지만 fork transcript marker나 최종 인계 결과를 확인하지 못했습니다."
+            "Claude 프로세스는 종료됐지만 terminal Goal 완료 증거, fork transcript marker, 또는 최종 인계 결과를 확인하지 못했습니다."
                 .to_owned(),
         ),
         "failed" | "timed_out" => (
@@ -606,6 +753,12 @@ fn history_detail(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunD
     }
     if transcript_path.is_none() && receipt.fork_session_id.is_some() {
         warnings.push("기록된 Claude fork session의 transcript를 찾지 못했습니다.".to_owned());
+    }
+    if !terminal_goal_verified {
+        warnings.push(
+            "Claude provider transcript에서 이 계약의 terminal Goal 완료 상태(met: true)를 확인하지 못했습니다."
+                .to_owned(),
+        );
     }
     if stale {
         warnings.push(
@@ -634,7 +787,7 @@ fn history_detail(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunD
         body: Some(unmarked_prompt(&receipt.prompt).to_owned()),
         assignee: None,
         max_runtime_seconds: Some(receipt.max_runtime_seconds as i64),
-        goal_mode: false,
+        goal_mode: receipt.prompt.starts_with("/goal "),
         goal_max_turns: Some(i64::from(receipt.max_turns)),
         max_retries: Some(0),
         idempotency_key: receipt.idempotency_key.clone(),
@@ -645,7 +798,7 @@ fn history_detail(receipt: &ClaudeRunReceipt, projects_root: &Path) -> NightRunD
         events,
         warnings,
         read_only: true,
-        methodology: "God of Sessions의 원자적 실행 영수증과 fork된 Claude provider transcript를 결합했습니다. 로컬 영수증은 프로세스 수명주기를, transcript marker는 공급자 측 계약 출처를 증명합니다."
+        methodology: "God of Sessions의 원자적 실행 영수증과 fork된 Claude provider transcript를 결합했습니다. 로컬 영수증은 프로세스 수명주기를, transcript marker는 공급자 측 계약 출처를, goal_status(met: true)는 공급자 평가기가 목표를 완료했다고 판정했음을 증명합니다."
             .to_owned(),
     }
 }
@@ -669,23 +822,32 @@ fn receipt_is_stale(receipt: &ClaudeRunReceipt, now: chrono::DateTime<chrono::Ut
 }
 
 fn night_goal_title(prompt: &str) -> Option<String> {
+    let prompt = unmarked_prompt(prompt);
     let mut lines = prompt
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty());
+    let mut first_content = None;
     while let Some(line) = lines.next() {
+        first_content.get_or_insert(line);
+        if let Some(goal) = line.strip_prefix("/goal ") {
+            if !goal.starts_with("<god-of-sessions-night") {
+                return Some(goal.chars().take(240).collect());
+            }
+        }
         if line.eq_ignore_ascii_case("Overnight goal") {
             return lines.next().map(|value| value.chars().take(240).collect());
         }
     }
-    None
+    first_content.map(|value| value.chars().take(240).collect())
 }
 
 fn unmarked_prompt(prompt: &str) -> &str {
-    prompt
-        .split_once("</god-of-sessions-night>")
-        .map(|(_, body)| body.trim_start())
-        .unwrap_or(prompt)
+    if let Some((_, body)) = prompt.split_once("</god-of-sessions-night>") {
+        body.trim_start()
+    } else {
+        prompt
+    }
 }
 
 #[cfg(test)]
@@ -717,6 +879,7 @@ mod tests {
             exit_code: None,
             result: None,
             error: None,
+            goal_status: None,
         }
     }
 
@@ -731,6 +894,17 @@ mod tests {
 
         assert!(marker_exists(file.path(), "gos-claude-exact"));
         assert!(!marker_exists(file.path(), "gos-claude-other"));
+    }
+
+    #[test]
+    fn oversized_transcript_row_is_discarded_before_a_valid_marker() {
+        let file = tempfile::NamedTempFile::new().expect("file");
+        let oversized = vec![b'x'; MAX_MARKER_LINE_BYTES + 17];
+        let mut contents = oversized;
+        contents.extend_from_slice(b"\n{\"message\":\"gos-claude-exact\"}\n");
+        std::fs::write(file.path(), contents).expect("write");
+
+        assert!(marker_exists(file.path(), "gos-claude-exact"));
     }
 
     #[test]
@@ -780,6 +954,7 @@ mod tests {
         receipt.completed_at = Some("2026-07-24T09:01:00Z".to_owned());
         receipt.fork_session_id = Some("fork-session".to_owned());
         receipt.result = Some("테스트 통과".to_owned());
+        receipt.goal_status = Some("complete".to_owned());
 
         let unverified = history_detail(&receipt, &projects);
         assert!(!unverified.provenance_verified);
@@ -801,6 +976,91 @@ mod tests {
         assert_eq!(verified.verdict, NightRunVerdict::ReadyToReview);
         assert_eq!(record.status, "done");
         assert_eq!(record.summary.as_deref(), Some("테스트 통과"));
+    }
+
+    #[test]
+    fn goal_status_uses_exact_contract_and_latest_non_sentinel_attachment() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let projects = directory.path().join("projects");
+        let transcript_dir = projects.join("project");
+        std::fs::create_dir_all(&transcript_dir).expect("project");
+        let key = format!("gos-claude-{}", "a".repeat(64));
+        let other_key = format!("gos-claude-{}", "b".repeat(64));
+        let transcript = [
+            serde_json::json!({
+                "type": "attachment",
+                "attachment": {
+                    "type": "goal_status",
+                    "condition": format!("{} finish", key),
+                    "sentinel": true
+                }
+            }),
+            serde_json::json!({
+                "type": "attachment",
+                "attachment": {
+                    "type": "goal_status",
+                    "condition": format!("{} finish", other_key),
+                    "met": true
+                }
+            }),
+            serde_json::json!({
+                "type": "attachment",
+                "attachment": {
+                    "type": "goal_status",
+                    "condition": format!("{} finish", key),
+                    "met": false,
+                    "reason": "tests remain"
+                }
+            }),
+            serde_json::json!({
+                "type": "attachment",
+                "attachment": {
+                    "type": "goal_status",
+                    "condition": format!("{} finish", key),
+                    "met": true
+                }
+            }),
+        ]
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+        std::fs::write(
+            transcript_dir.join("fork-session.jsonl"),
+            format!("{transcript}\n"),
+        )
+        .expect("transcript");
+
+        let status = latest_goal_status_at(&projects, "fork-session", &key).expect("status");
+
+        assert_eq!(status.as_deref(), Some("complete"));
+    }
+
+    #[test]
+    fn completed_process_without_terminal_goal_evidence_needs_attention() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let projects = directory.path().join("projects");
+        let transcript_dir = projects.join("project");
+        std::fs::create_dir_all(&transcript_dir).expect("project");
+        let mut receipt = receipt(directory.path());
+        receipt.state = "completed".to_owned();
+        receipt.started_at = Some("2026-07-24T08:01:00Z".to_owned());
+        receipt.completed_at = Some("2026-07-24T09:01:00Z".to_owned());
+        receipt.fork_session_id = Some("fork-session".to_owned());
+        receipt.result = Some("프로세스 결과".to_owned());
+        std::fs::write(
+            transcript_dir.join("fork-session.jsonl"),
+            format!("{{\"message\":\"{}\"}}\n", receipt.idempotency_key),
+        )
+        .expect("transcript");
+
+        let detail = history_detail(&receipt, &projects);
+        let record = history_record(&receipt, &projects);
+
+        assert!(detail.provenance_verified);
+        assert_eq!(detail.verdict, NightRunVerdict::NeedsAttention);
+        assert_eq!(record.status, "blocked");
+        assert_eq!(record.outcome.as_deref(), Some("blocked"));
     }
 
     #[test]

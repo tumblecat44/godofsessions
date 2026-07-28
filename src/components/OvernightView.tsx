@@ -1524,8 +1524,14 @@ function CandidateCard({
               <strong>{copy("승인 전 실행 계약", "PRE-APPROVAL RUN CONTRACT")}</strong>
               <small>
                 {draft.format === "hermes_goal"
-                  ? copy("Hermes /goal 형식", "Hermes /goal format")
-                  : copy("구조화 프롬프트", "Structured prompt")}
+                  ? copy("Hermes /goal 루프", "Hermes /goal loop")
+                  : draft.format === "codex_goal"
+                    ? copy("Codex 네이티브 Goal 루프", "Codex native Goal loop")
+                    : draft.format === "claude_goal"
+                      ? copy("Claude /goal 루프", "Claude /goal loop")
+                      : draft.format === "grok_goal"
+                        ? copy("Grok /goal 루프", "Grok /goal loop")
+                        : copy("레거시 단일 프롬프트", "Legacy single prompt")}
               </small>
             </span>
             <em>{copy("아직 실행되지 않음", "NOT STARTED")}</em>

@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wait_timeout::ChildExt;
 
@@ -27,7 +27,7 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
-const ADAPTER_VERSION: &str = "claude-resume-new-print-v2";
+const ADAPTER_VERSION: &str = "claude-native-goal-v3";
 const MIN_SANDBOX_VERSION: (u32, u32, u32) = (2, 1, 216);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_PROBE_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -56,7 +56,15 @@ struct ClaudeDispatchEnvironment {
     auth: ClaudeAuthProbe,
     workspace_canonical: Option<PathBuf>,
     workspace_is_git: bool,
+    workspace_trusted: bool,
     session: ledger::ClaudeSessionIdentity,
+    goal_policy: ClaudeGoalPolicyProbe,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct ClaudeGoalPolicyProbe {
+    allowed: bool,
+    message: String,
 }
 
 pub fn build_preflights(
@@ -111,6 +119,9 @@ fn local_environment(draft: &NightRunDraft, sources: &RouteSources) -> ClaudeDis
     let workspace_is_git = workspace_canonical
         .as_deref()
         .is_some_and(|path| path.join(".git").exists());
+    let workspace_trusted = workspace_canonical
+        .as_deref()
+        .is_some_and(probe_workspace_trust);
     ClaudeDispatchEnvironment {
         binary: sources.claude_binary.clone(),
         version,
@@ -118,7 +129,9 @@ fn local_environment(draft: &NightRunDraft, sources: &RouteSources) -> ClaudeDis
         auth,
         workspace_canonical,
         workspace_is_git,
+        workspace_trusted,
         session,
+        goal_policy: probe_goal_policy(),
     }
 }
 
@@ -195,6 +208,13 @@ fn preview(
                 .unwrap_or("claude.ai 구독 로그인 상태를 확인하지 못했습니다."),
         ),
         check(
+            "goal_policy",
+            environment.goal_policy.allowed,
+            "Claude /goal 정책",
+            &environment.goal_policy.message,
+            &environment.goal_policy.message,
+        ),
+        check(
             "session",
             if draft.run_mode == RunMode::ResumeExisting {
                 environment.session.exists
@@ -224,6 +244,13 @@ fn preview(
             "작업공간이 없거나 Git 저장소 루트가 아닙니다.",
         ),
         check(
+            "workspace_trust",
+            environment.workspace_trusted,
+            "Claude 작업공간 신뢰",
+            "Claude Code에서 이 작업공간 신뢰를 이미 승인했습니다.",
+            "Claude /goal은 신뢰한 작업공간에서만 실행됩니다. Claude Code로 이 폴더를 한 번 열고 신뢰를 승인하세요.",
+        ),
+        check(
             "idempotency",
             source_marker_absent && receipt_absent,
             "영수증·공급자 원장 중복 방지",
@@ -232,7 +259,9 @@ fn preview(
         ),
         check(
             "contract",
-            draft.format == RunDraftFormat::StructuredPrompt
+            draft.format == RunDraftFormat::ClaudeGoal
+                && draft.prompt.starts_with("/goal ")
+                && draft.continuation_turn_budget == Some(worker::DEFAULT_MAX_TURNS)
                 && match draft.run_mode {
                     RunMode::ResumeExisting => draft.native_session_id.is_some(),
                     RunMode::NewSession => draft.native_session_id.is_none(),
@@ -291,7 +320,7 @@ fn preview(
             DispatchPreflightState::Blocked
         },
         surface: Provider::Claude,
-        adapter: "Claude Code durable print worker".to_owned(),
+        adapter: "Claude Code native goal worker".to_owned(),
         scope_label: "쓰기 가능한 Git 작업공간".to_owned(),
         scope_value: workspace.display().to_string(),
         executor_label: if draft.run_mode == RunMode::ResumeExisting {
@@ -307,11 +336,98 @@ fn preview(
         commands,
         protocol_requests: Vec::new(),
         expected_receipt:
-            "worker pid + 새/fork된 Claude session id + provider transcript의 marker/result"
+            "worker pid + 새/fork된 Claude session id + /goal evaluator terminal result + provider transcript marker"
                 .to_owned(),
         read_only: true,
         execution_enabled: false,
     }
+}
+
+fn probe_goal_policy() -> ClaudeGoalPolicyProbe {
+    let mut paths = vec![PathBuf::from(
+        "/Library/Application Support/ClaudeCode/managed-settings.json",
+    )];
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".claude/managed-settings.json"));
+    }
+    for path in paths {
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(metadata) = path.metadata() else {
+            return ClaudeGoalPolicyProbe {
+                allowed: false,
+                message: format!("{} 정책 파일을 확인하지 못했습니다.", path.display()),
+            };
+        };
+        if metadata.len() > 1024 * 1024 {
+            return ClaudeGoalPolicyProbe {
+                allowed: false,
+                message: format!("{} 정책 파일이 1MB 경계를 넘습니다.", path.display()),
+            };
+        }
+        let Ok(file) = std::fs::File::open(&path) else {
+            return ClaudeGoalPolicyProbe {
+                allowed: false,
+                message: format!("{} 정책 파일을 읽지 못했습니다.", path.display()),
+            };
+        };
+        let Ok(settings) = serde_json::from_reader::<_, serde_json::Value>(file) else {
+            return ClaudeGoalPolicyProbe {
+                allowed: false,
+                message: format!("{} 정책 파일 형식이 올바르지 않습니다.", path.display()),
+            };
+        };
+        if settings
+            .get("disableAllHooks")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            || settings
+                .get("allowManagedHooksOnly")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        {
+            return ClaudeGoalPolicyProbe {
+                allowed: false,
+                message:
+                    "관리자 hook 정책이 Claude /goal evaluator를 비활성화해 실행을 막았습니다."
+                        .to_owned(),
+            };
+        }
+    }
+    ClaudeGoalPolicyProbe {
+        allowed: true,
+        message: "Claude /goal을 막는 managed hook 정책이 없습니다.".to_owned(),
+    }
+}
+
+fn probe_workspace_trust(workspace: &Path) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    workspace_trusted_from_config(&home.join(".claude.json"), workspace)
+}
+
+fn workspace_trusted_from_config(path: &Path, workspace: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() > 16 * 1024 * 1024 {
+        return false;
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_reader::<_, serde_json::Value>(file) else {
+        return false;
+    };
+    let workspace_key = workspace.display().to_string();
+    config
+        .get("projects")
+        .and_then(|projects| projects.get(&workspace_key))
+        .and_then(|project| project.get("hasTrustDialogAccepted"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
 }
 
 fn idempotency_key(draft: &NightRunDraft, route: &ExecutionRoute) -> String {
@@ -504,12 +620,12 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "claude:native".to_owned(),
-            format: RunDraftFormat::StructuredPrompt,
+            format: RunDraftFormat::ClaudeGoal,
             run_mode: RunMode::ResumeExisting,
             native_session_id: Some("session-1".to_owned()),
             workspace: workspace.display().to_string(),
             time_budget_hours: 4.0,
-            continuation_turn_budget: None,
+            continuation_turn_budget: Some(worker::DEFAULT_MAX_TURNS),
             goal: "검증 가능한 변경 완성".to_owned(),
             contract: GoalContract {
                 outcome: "change".to_owned(),
@@ -518,7 +634,7 @@ mod tests {
                 boundaries: "workspace".to_owned(),
                 stop_when: "blocked".to_owned(),
             },
-            prompt: "Overnight goal\n검증 가능한 변경 완성".to_owned(),
+            prompt: "/goal 검증 가능한 변경 완성".to_owned(),
             permission_profile: PermissionProfile::WorkspaceWrite,
             external_side_effects_allowed: false,
             approval_required: true,
@@ -556,6 +672,32 @@ mod tests {
     }
 
     #[test]
+    fn claude_goal_requires_explicit_workspace_trust() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let workspace = directory.path().join("repo");
+        std::fs::create_dir(&workspace).expect("workspace");
+        let config = directory.path().join(".claude.json");
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "projects": {
+                    (workspace.display().to_string()): {
+                        "hasTrustDialogAccepted": true
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("config");
+
+        assert!(workspace_trusted_from_config(&config, &workspace));
+        assert!(!workspace_trusted_from_config(
+            &config,
+            &directory.path().join("other")
+        ));
+    }
+
+    #[test]
     fn ready_preview_forks_with_strict_noninteractive_boundaries() {
         let directory = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir(directory.path().join(".git")).expect("git dir");
@@ -576,11 +718,16 @@ mod tests {
             },
             workspace_canonical: Some(workspace.clone()),
             workspace_is_git: true,
+            workspace_trusted: true,
             session: ledger::ClaudeSessionIdentity {
                 exists: true,
                 cwd: Some(workspace.clone()),
                 transcript_path: Some(transcript),
                 active: false,
+            },
+            goal_policy: ClaudeGoalPolicyProbe {
+                allowed: true,
+                message: "test".to_owned(),
             },
         };
 

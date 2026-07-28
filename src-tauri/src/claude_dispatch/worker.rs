@@ -97,10 +97,14 @@ pub(super) fn command_preview() -> DispatchCommandPreview {
 }
 
 pub(super) fn marked_prompt(prompt: &str, idempotency_key: &str) -> String {
-    format!(
+    let marker = format!(
         "<god-of-sessions-night id=\"{idempotency_key}\">\n\
          This marker identifies one accepted contract. Do not repeat or alter it.\n\
-         </god-of-sessions-night>\n\n{prompt}"
+         </god-of-sessions-night>"
+    );
+    prompt.strip_prefix("/goal ").map_or_else(
+        || format!("{marker}\n\n{prompt}"),
+        |objective| format!("/goal {marker}\n\n{objective}"),
     )
 }
 
@@ -311,7 +315,6 @@ pub(crate) fn run_night_worker_from_stdin() {
                         .recv_timeout(RESULT_READ_TIMEOUT)
                         .unwrap_or_default();
                     apply_claude_result(&mut receipt, status.success(), &output);
-                    let _ = super::ledger::update_receipt(&receipt);
                 }
                 Ok(None) => {
                     let _ = child.kill();
@@ -321,7 +324,6 @@ pub(crate) fn run_night_worker_from_stdin() {
                     receipt.error = Some(
                         "승인한 최대 실행 시간에 도달해 Claude 프로세스를 중단했습니다.".to_owned(),
                     );
-                    let _ = super::ledger::update_receipt(&receipt);
                 }
                 Err(error) => {
                     let _ = child.kill();
@@ -329,9 +331,10 @@ pub(crate) fn run_night_worker_from_stdin() {
                     receipt.state = "failed".to_owned();
                     receipt.completed_at = Some(chrono::Utc::now().to_rfc3339());
                     receipt.error = Some(format!("Claude 프로세스 상태 확인 실패: {error}"));
-                    let _ = super::ledger::update_receipt(&receipt);
                 }
             }
+            reconcile_terminal_goal_evidence(&mut receipt);
+            let _ = super::ledger::update_receipt(&receipt);
         }
         Err(error) => {
             let reply = ClaudeWorkerReply {
@@ -430,7 +433,8 @@ fn read_worker_request() -> Result<ClaudeWorkerRequest, String> {
     };
     if !request.idempotency_key.starts_with("gos-claude-")
         || !session_contract_valid
-        || request.prompt.trim().is_empty()
+        || !request.prompt.starts_with("/goal ")
+        || request.prompt.chars().count() > 4_000
         || request.prompt.len() > MAX_PROMPT_BYTES
         || !(3_600..=16 * 3_600).contains(&request.max_runtime_seconds)
         || !(1..=100).contains(&request.max_turns)
@@ -622,6 +626,8 @@ fn apply_claude_result(
         .unwrap_or(false);
     if process_succeeded && value.is_some() && !provider_error && receipt.fork_session_id.is_some()
     {
+        // This state is provisional until the provider-owned transcript proves
+        // that Claude's independent Goal evaluator emitted met: true.
         receipt.state = "completed".to_owned();
     } else {
         receipt.state = "failed".to_owned();
@@ -634,6 +640,38 @@ fn apply_claude_result(
                 "Claude Code가 성공 상태로 종료되지 않았습니다.".to_owned()
             })
         });
+    }
+}
+
+fn reconcile_terminal_goal_evidence(receipt: &mut super::ledger::ClaudeRunReceipt) {
+    let Some(session_id) = receipt.fork_session_id.as_deref() else {
+        return;
+    };
+    match super::ledger::latest_goal_status(session_id, &receipt.idempotency_key) {
+        Ok(status) => reconcile_observed_goal_status(receipt, status),
+        Err(error) => {
+            receipt.goal_status = None;
+            if receipt.state == "completed" {
+                receipt.state = "failed".to_owned();
+                receipt.error = Some(format!(
+                    "Claude terminal Goal 증거를 읽지 못해 완료로 인정하지 않았습니다: {error}"
+                ));
+            }
+        }
+    }
+}
+
+fn reconcile_observed_goal_status(
+    receipt: &mut super::ledger::ClaudeRunReceipt,
+    status: Option<String>,
+) {
+    receipt.goal_status = status;
+    if receipt.state == "completed" && receipt.goal_status.as_deref() != Some("complete") {
+        let observed = receipt.goal_status.as_deref().unwrap_or("missing");
+        receipt.state = "failed".to_owned();
+        receipt.error = Some(format!(
+            "Claude 프로세스는 종료됐지만 terminal Goal 완료 증거가 없습니다 (goal_status={observed})."
+        ));
     }
 }
 
@@ -682,6 +720,18 @@ fn receipt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marker_keeps_goal_as_the_first_slash_command() {
+        let marked = marked_prompt(
+            "/goal finish the bounded change",
+            "gos-claude-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+
+        assert!(marked.starts_with("/goal <god-of-sessions-night "));
+        assert_eq!(marked.matches("/goal ").count(), 1);
+        assert!(marked.contains("finish the bounded change"));
+    }
 
     #[test]
     fn command_never_places_the_prompt_in_process_arguments() {
@@ -772,6 +822,51 @@ mod tests {
         assert_eq!(receipt.state, "completed");
         assert_eq!(receipt.fork_session_id.as_deref(), Some("fork-session"));
         assert_eq!(receipt.result.as_deref(), Some("검증 완료"));
+        assert!(receipt.error.is_none());
+    }
+
+    #[test]
+    fn provisional_success_without_terminal_goal_evidence_fails_closed() {
+        let mut receipt = super::super::ledger::ClaudeRunReceipt::accepted(
+            format!("gos-claude-{}", "e".repeat(64)),
+            RunMode::ResumeExisting,
+            Some("source-session".to_owned()),
+            "/tmp/project".to_owned(),
+            "Overnight goal\n완성".to_owned(),
+            3_600,
+            20,
+        );
+        receipt.state = "completed".to_owned();
+        receipt.fork_session_id = Some("fork-session".to_owned());
+
+        reconcile_observed_goal_status(&mut receipt, Some("active".to_owned()));
+
+        assert_eq!(receipt.state, "failed");
+        assert_eq!(receipt.goal_status.as_deref(), Some("active"));
+        assert!(receipt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("terminal Goal")));
+    }
+
+    #[test]
+    fn provider_terminal_goal_evidence_preserves_completion() {
+        let mut receipt = super::super::ledger::ClaudeRunReceipt::accepted(
+            format!("gos-claude-{}", "f".repeat(64)),
+            RunMode::NewSession,
+            None,
+            "/tmp/project".to_owned(),
+            "Overnight goal\n완성".to_owned(),
+            3_600,
+            20,
+        );
+        receipt.state = "completed".to_owned();
+        receipt.fork_session_id = Some("fork-session".to_owned());
+
+        reconcile_observed_goal_status(&mut receipt, Some("complete".to_owned()));
+
+        assert_eq!(receipt.state, "completed");
+        assert_eq!(receipt.goal_status.as_deref(), Some("complete"));
         assert!(receipt.error.is_none());
     }
 

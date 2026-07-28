@@ -25,7 +25,7 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
-const ADAPTER_VERSION: &str = "grok-durable-print-v1";
+const ADAPTER_VERSION: &str = "grok-native-goal-v2";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const MIN_SUPPORTED_VERSION: (u32, u32, u32) = (0, 2, 100);
 const SAFE_ENVIRONMENT_KEYS: &[&str] = &[
@@ -236,7 +236,9 @@ fn preview(
         ),
         check(
             "contract",
-            draft.format == RunDraftFormat::StructuredPrompt
+            draft.format == RunDraftFormat::GrokGoal
+                && draft.prompt.starts_with("/goal ")
+                && draft.continuation_turn_budget == Some(worker::DEFAULT_MAX_TURNS)
                 && match draft.run_mode {
                     RunMode::ResumeExisting => draft.native_session_id.is_some(),
                     RunMode::NewSession => draft.native_session_id.is_none(),
@@ -272,7 +274,7 @@ fn preview(
             DispatchPreflightState::Blocked
         },
         surface: Provider::Grok,
-        adapter: "Grok Build durable print worker".to_owned(),
+        adapter: "Grok Build native goal worker".to_owned(),
         scope_label: "쓰기 가능한 Git 작업공간".to_owned(),
         scope_value: workspace.display().to_string(),
         executor_label: if draft.run_mode == RunMode::ResumeExisting {
@@ -313,7 +315,7 @@ fn preview(
         ],
         protocol_requests: Vec::new(),
         expected_receipt:
-            "worker pid + 결정된 Grok target session id + provider transcript marker + JSON result"
+            "worker pid + 결정된 target session id + provider goal_updated terminal status + transcript marker + JSON result"
                 .to_owned(),
         read_only: true,
         execution_enabled: false,
@@ -411,13 +413,13 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "grok:native".to_owned(),
-            format: RunDraftFormat::StructuredPrompt,
+            format: RunDraftFormat::GrokGoal,
             run_mode: mode,
             native_session_id: (mode == RunMode::ResumeExisting)
                 .then(|| "source-session".to_owned()),
             workspace: workspace.display().to_string(),
             time_budget_hours: 4.0,
-            continuation_turn_budget: None,
+            continuation_turn_budget: Some(worker::DEFAULT_MAX_TURNS),
             goal: "검증 가능한 변경 완성".to_owned(),
             contract: GoalContract {
                 outcome: "change".to_owned(),
@@ -426,7 +428,7 @@ mod tests {
                 boundaries: "workspace".to_owned(),
                 stop_when: "blocked".to_owned(),
             },
-            prompt: "Overnight goal\n검증 가능한 변경 완성".to_owned(),
+            prompt: "/goal 검증 가능한 변경 완성".to_owned(),
             permission_profile: PermissionProfile::WorkspaceWrite,
             external_side_effects_allowed: false,
             approval_required: true,

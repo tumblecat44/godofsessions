@@ -216,7 +216,12 @@ export interface ExecutionRouteInventory {
 
 export type RecommendationConfidence = "high" | "medium" | "low";
 
-export type RunDraftFormat = "hermes_goal" | "structured_prompt";
+export type RunDraftFormat =
+  | "hermes_goal"
+  | "codex_goal"
+  | "claude_goal"
+  | "grok_goal"
+  | "structured_prompt";
 export type RunMode = "resume_existing" | "new_session";
 export type PermissionProfile = "workspace_write";
 

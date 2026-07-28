@@ -3,8 +3,12 @@ use crate::model::{
     RunMode,
 };
 
-const HERMES_CONTINUATION_TURN_BUDGET: u32 = 20;
-const MAX_FIELD_CHARS: usize = 1_200;
+const CONTINUATION_TURN_BUDGET: u32 = 20;
+const MAX_NATIVE_GOAL_CHARS: usize = 4_000;
+const MAX_GOAL_CHARS: usize = 700;
+const MAX_OUTCOME_CHARS: usize = 650;
+const MAX_VERIFICATION_CHARS: usize = 650;
+const MAX_WORKSPACE_CHARS: usize = 500;
 
 pub(crate) fn supports_dispatch(surface: Provider, _resume_existing: bool) -> bool {
     matches!(
@@ -14,8 +18,8 @@ pub(crate) fn supports_dispatch(surface: Provider, _resume_existing: bool) -> bo
 }
 
 pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
-    let outcome = clean(&candidate.expected_outcome);
-    let verification = clean(&candidate.verification.join(" / "));
+    let outcome = clean_to(&candidate.expected_outcome, MAX_OUTCOME_CHARS);
+    let verification = clean_to(&candidate.verification.join(" / "), MAX_VERIFICATION_CHARS);
     let constraints = concat!(
         "기존 동작과 사용자의 관련 없는 변경을 보존할 것. ",
         "외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것. ",
@@ -24,7 +28,7 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
     .to_owned();
     let boundaries = format!(
         "{} 작업공간 안의 이 목표와 직접 관련된 파일·테스트·로컬 도구만 사용",
-        clean(&candidate.cwd)
+        clean_to(&candidate.cwd, MAX_WORKSPACE_CHARS)
     );
     let stop_when = concat!(
         "자격 증명·사람의 결정·외부 시스템 변경·파괴적 작업이 필요하거나, ",
@@ -39,16 +43,23 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         boundaries,
         stop_when,
     };
-    let format = if candidate.execution_surface == Provider::Hermes {
-        RunDraftFormat::HermesGoal
-    } else {
-        RunDraftFormat::StructuredPrompt
+    let format = match candidate.execution_surface {
+        Provider::Hermes => RunDraftFormat::HermesGoal,
+        Provider::Codex => RunDraftFormat::CodexGoal,
+        Provider::Claude => RunDraftFormat::ClaudeGoal,
+        Provider::Grok => RunDraftFormat::GrokGoal,
+        _ => RunDraftFormat::StructuredPrompt,
     };
-    let goal = clean(&candidate.goal);
+    let goal = clean_to(&candidate.goal, MAX_GOAL_CHARS);
     let prompt = match format {
         RunDraftFormat::HermesGoal => render_hermes_goal(&goal, &contract),
+        RunDraftFormat::CodexGoal => render_codex_goal(&goal, &contract),
+        RunDraftFormat::ClaudeGoal | RunDraftFormat::GrokGoal => {
+            render_slash_goal(&goal, &contract)
+        }
         RunDraftFormat::StructuredPrompt => render_structured_prompt(&goal, &contract),
     };
+    debug_assert!(prompt.chars().count() <= MAX_NATIVE_GOAL_CHARS);
 
     NightRunDraft {
         id: format!(
@@ -67,8 +78,11 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         native_session_id: candidate.native_session_id.clone(),
         workspace: candidate.cwd.clone(),
         time_budget_hours: candidate.estimated_hours,
-        continuation_turn_budget: (format == RunDraftFormat::HermesGoal)
-            .then_some(HERMES_CONTINUATION_TURN_BUDGET),
+        continuation_turn_budget: matches!(
+            format,
+            RunDraftFormat::HermesGoal | RunDraftFormat::ClaudeGoal | RunDraftFormat::GrokGoal
+        )
+        .then_some(CONTINUATION_TURN_BUDGET),
         goal,
         contract,
         prompt,
@@ -98,6 +112,30 @@ fn render_hermes_goal(goal: &str, contract: &GoalContract) -> String {
     )
 }
 
+fn render_slash_goal(goal: &str, contract: &GoalContract) -> String {
+    format!("/goal {}", render_goal_objective(goal, contract))
+}
+
+fn render_codex_goal(goal: &str, contract: &GoalContract) -> String {
+    render_goal_objective(goal, contract)
+}
+
+fn render_goal_objective(goal: &str, contract: &GoalContract) -> String {
+    format!(
+        "{goal}\n\n\
+         Authority boundaries (non-negotiable)\n{}\n{}\n\n\
+         Stop conditions\n{}\n\n\
+         Required outcome\n{}\n\n\
+         Verification\n{}\n\n\
+         Completion report\n변경 범위, 검증 결과, 남은 위험과 막힌 점을 사실대로 요약할 것.",
+        contract.constraints,
+        contract.boundaries,
+        contract.stop_when,
+        contract.outcome,
+        contract.verification,
+    )
+}
+
 fn render_structured_prompt(goal: &str, contract: &GoalContract) -> String {
     format!(
         "Overnight goal\n{goal}\n\n\
@@ -115,9 +153,9 @@ fn render_structured_prompt(goal: &str, contract: &GoalContract) -> String {
     )
 }
 
-fn clean(value: &str) -> String {
+fn clean_to(value: &str, max_chars: usize) -> String {
     let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    compact.chars().take(MAX_FIELD_CHARS).collect()
+    compact.chars().take(max_chars).collect()
 }
 
 #[cfg(test)]
@@ -182,11 +220,11 @@ mod tests {
     fn native_grok_draft_resumes_with_its_own_dispatch_contract() {
         let draft = build(&candidate(Provider::Grok, true));
 
-        assert_eq!(draft.format, RunDraftFormat::StructuredPrompt);
+        assert_eq!(draft.format, RunDraftFormat::GrokGoal);
         assert_eq!(draft.run_mode, RunMode::ResumeExisting);
         assert_eq!(draft.native_session_id.as_deref(), Some("session-1"));
-        assert_eq!(draft.continuation_turn_budget, None);
-        assert!(!draft.prompt.starts_with("/goal "));
+        assert_eq!(draft.continuation_turn_budget, Some(20));
+        assert!(draft.prompt.starts_with("/goal "));
         assert!(draft.dispatch_supported);
     }
 
@@ -195,6 +233,9 @@ mod tests {
         let resumed = build(&candidate(Provider::Codex, true));
         let fresh = build(&candidate(Provider::Codex, false));
 
+        assert_eq!(resumed.format, RunDraftFormat::CodexGoal);
+        assert!(!resumed.prompt.starts_with("/goal "));
+        assert_eq!(resumed.continuation_turn_budget, None);
         assert!(resumed.dispatch_supported);
         assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
         assert!(fresh.dispatch_supported);
@@ -205,6 +246,9 @@ mod tests {
         let resumed = build(&candidate(Provider::Claude, true));
         let fresh = build(&candidate(Provider::Claude, false));
 
+        assert_eq!(resumed.format, RunDraftFormat::ClaudeGoal);
+        assert!(resumed.prompt.starts_with("/goal "));
+        assert_eq!(resumed.continuation_turn_budget, Some(20));
         assert!(resumed.dispatch_supported);
         assert_eq!(resumed.run_mode, RunMode::ResumeExisting);
         assert!(fresh.dispatch_supported);
@@ -229,5 +273,31 @@ mod tests {
 
         assert!(draft.goal.contains("목표 constraints:"));
         assert_eq!(draft.prompt.matches("\nconstraints:").count(), 1);
+    }
+
+    #[test]
+    fn every_native_goal_fits_the_provider_objective_limit() {
+        for provider in [
+            Provider::Hermes,
+            Provider::Codex,
+            Provider::Claude,
+            Provider::Grok,
+        ] {
+            let mut oversized = candidate(provider, false);
+            oversized.goal = "목표 ".repeat(2_000);
+            oversized.expected_outcome = "결과 ".repeat(2_000);
+            oversized.verification = vec!["검증 ".repeat(2_000)];
+            oversized.cwd = format!("/work/{}", "a".repeat(2_000));
+
+            let draft = build(&oversized);
+
+            assert!(
+                draft.prompt.chars().count() <= MAX_NATIVE_GOAL_CHARS,
+                "{provider:?} objective was {} chars",
+                draft.prompt.chars().count()
+            );
+            assert!(draft.prompt.contains("외부 메시지 전송"));
+            assert!(draft.prompt.contains("새 일을 만들지 말 것"));
+        }
     }
 }

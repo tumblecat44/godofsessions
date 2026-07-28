@@ -319,7 +319,7 @@ export const previewNightRunHistory: NightRunHistory = {
   read_only: true,
   warnings: [],
   methodology:
-    "Hermes 전용 보드의 task/task_run과 Codex provider rollout의 clientUserMessageId turn을 읽기 전용으로 결합했습니다.",
+    "Hermes 전용 보드의 task/task_run과 Codex provider rollout의 native Goal marker·terminal status를 읽기 전용으로 결합했습니다.",
   runs: [
     {
       surface: "codex",
@@ -332,7 +332,7 @@ export const previewNightRunHistory: NightRunHistory = {
       started_at: new Date(now - 7 * 60 * 60_000).toISOString(),
       completed_at: new Date(now - 4 * 60 * 60_000).toISOString(),
       run_id: null,
-      run_status: "completed",
+      run_status: "complete",
       worker_pid: null,
       session_id: "co1",
       thread_id: "co1",
@@ -551,12 +551,12 @@ const previewNightRunDetails: Record<string, NightRunDetail> = {
     title: "Codex 야간 실행 복구와 Morning Review 연결",
     project: "godofsessions",
     workspace: "/Users/you/projects/godofsessions",
-    task_status: "completed",
+    task_status: "complete",
     body:
       "Overnight goal\nCodex 야간 실행 복구와 Morning Review 연결\n\nOutcome\nCodex turn을 provider rollout에서 복구해 통합 아침 화면에 표시한다.\n\nVerification\n관련 Rust 테스트와 UI 빌드를 통과한다.\n\nConstraints\n외부 부작용과 자동 재시도를 금지한다.",
     assignee: null,
     max_runtime_seconds: null,
-    goal_mode: false,
+    goal_mode: true,
     goal_max_turns: null,
     max_retries: null,
     idempotency_key: "gos-codex-preview-done",
@@ -568,7 +568,7 @@ const previewNightRunDetails: Record<string, NightRunDetail> = {
       {
         run_id: 1,
         profile: "Codex app-server",
-        status: "completed",
+        status: "complete",
         outcome: "completed",
         started_at: new Date(now - 7 * 60 * 60_000).toISOString(),
         ended_at: new Date(now - 4 * 60 * 60_000).toISOString(),
@@ -583,9 +583,9 @@ const previewNightRunDetails: Record<string, NightRunDetail> = {
       {
         event_id: 1,
         run_id: 1,
-        kind: "submitted",
+        kind: "goal_set",
         created_at: new Date(now - 7 * 60 * 60_000).toISOString(),
-        note: "Night Contract가 provider turn에 기록됨",
+        note: "Night Contract가 Codex provider-native Goal로 기록됨",
       },
       {
         event_id: 2,
@@ -597,7 +597,7 @@ const previewNightRunDetails: Record<string, NightRunDetail> = {
       {
         event_id: 3,
         run_id: 1,
-        kind: "completed",
+        kind: "goal_complete",
         created_at: new Date(now - 4 * 60 * 60_000).toISOString(),
         note: null,
       },
@@ -605,7 +605,7 @@ const previewNightRunDetails: Record<string, NightRunDetail> = {
     warnings: [],
     read_only: true,
     methodology:
-      "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. clientUserMessageId가 God of Sessions 계약 출처를 증명합니다.",
+      "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. native Goal objective의 marker와 terminal status가 계약과 실행 수명주기를 증명합니다.",
   },
   "task-night-running": {
     generated_at: new Date().toISOString(),
@@ -1182,7 +1182,7 @@ export const previewOvernightPlan: OvernightPlan = {
       candidate_rank: 1,
       project: "godofsessions",
       route_id: "codex:native",
-      format: "structured_prompt",
+      format: "codex_goal",
       run_mode: "resume_existing",
       native_session_id: "co1",
       workspace: "/Users/you/projects/godofsessions",
@@ -1202,7 +1202,7 @@ export const previewOvernightPlan: OvernightPlan = {
           "자격 증명·사람의 결정·외부 시스템 변경·파괴적 작업이 필요하거나 관련 없는 기존 실패 때문에 검증할 수 없으면 막힌 이유를 남길 것. 목표가 일찍 끝나면 시간을 채우기 위한 새 일을 만들지 말 것.",
       },
       prompt:
-        "Overnight goal\nOvernight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행\n\nOutcome\n범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고\n\nVerification\n프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것\n\nConstraints\n외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것.\n\nBoundaries\n/Users/you/projects/godofsessions\n\nStop and report when\n사람의 결정이나 외부 시스템 변경이 필요할 때",
+        "Overnight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행\n\nAuthority boundaries (non-negotiable)\n외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것.\n/Users/you/projects/godofsessions 작업공간 안의 관련 파일과 로컬 검증만 사용\n\nStop conditions\n사람의 결정이나 외부 시스템 변경이 필요하면 막힌 이유를 남길 것.\n\nRequired outcome\n범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고\n\nVerification\n프로젝트의 관련 테스트·타입 검사·빌드를 통과할 것",
       permission_profile: "workspace_write",
       external_side_effects_allowed: false,
       approval_required: true,
@@ -1242,12 +1242,12 @@ export const previewOvernightPlan: OvernightPlan = {
       candidate_rank: 3,
       project: "malgun-app",
       route_id: "claude:native",
-      format: "structured_prompt",
+      format: "claude_goal",
       run_mode: "resume_existing",
       native_session_id: "cl1",
       workspace: "/Users/you/projects/malgun-app",
       time_budget_hours: 2,
-      continuation_turn_budget: null,
+      continuation_turn_budget: 20,
       goal: "첫 사용 예약 흐름의 회귀를 고치고 검증 가능한 상태로 마무리",
       contract: {
         outcome:
@@ -1262,7 +1262,7 @@ export const previewOvernightPlan: OvernightPlan = {
           "사람의 결정, 외부 시스템, 자격 증명, 파괴적 작업이 필요하면 이유를 남기고 멈출 것.",
       },
       prompt:
-        "Overnight goal\n첫 사용 예약 흐름의 회귀를 고치고 검증 가능한 상태로 마무리\n\nOutcome\n관련 화면의 회귀 수정과 테스트 결과\n\nVerification\n관련 테스트와 타입 검사를 통과할 것\n\nConstraints\n외부 메시지, 배포, push, merge, 삭제를 하지 말 것.\n\nBoundaries\n/Users/you/projects/malgun-app\n\nStop and report when\n사람의 결정이나 외부 시스템 변경이 필요할 때",
+        "/goal 첫 사용 예약 흐름의 회귀를 고치고 검증 가능한 상태로 마무리\n\nAuthority boundaries (non-negotiable)\n외부 메시지, 배포, push, merge, 삭제를 하지 말 것.\n/Users/you/projects/malgun-app 작업공간 안의 관련 파일과 로컬 검증만 사용\n\nStop conditions\n사람의 결정이나 외부 시스템 변경이 필요하면 막힌 이유를 남길 것.\n\nRequired outcome\n관련 화면의 회귀 수정과 테스트 결과\n\nVerification\n관련 테스트와 타입 검사를 통과할 것",
       permission_profile: "workspace_write",
       external_side_effects_allowed: false,
       approval_required: true,
@@ -1323,7 +1323,7 @@ export const previewOvernightPlan: OvernightPlan = {
       draft_id: "night:1:godofsessions:codex:native",
       state: "ready_for_approval",
       surface: "codex",
-      adapter: "Codex app-server v2",
+      adapter: "Codex app-server native Goal",
       scope_label: "writable root",
       scope_value: "/Users/you/projects/godofsessions",
       executor_label: "기존 thread",
@@ -1383,7 +1383,7 @@ export const previewOvernightPlan: OvernightPlan = {
           level: "pass",
           label: "중복 실행 방지",
           message:
-            "provider rollout에 같은 clientUserMessageId가 없습니다.",
+            "provider rollout에 같은 Night Contract Goal marker가 없습니다.",
         },
       ],
       commands: [
@@ -1401,7 +1401,13 @@ export const previewOvernightPlan: OvernightPlan = {
         {
           step: "start_app_server",
           program: "/Applications/ChatGPT.app/Contents/Resources/codex",
-          arguments: ["app-server", "--listen", "stdio://"],
+          arguments: [
+            "app-server",
+            "--enable",
+            "goals",
+            "--listen",
+            "stdio://",
+          ],
           mutates_local_state: false,
           summary: "로컬 Codex app-server 전용 프로세스 시작",
         },
@@ -1416,7 +1422,10 @@ export const previewOvernightPlan: OvernightPlan = {
               title: "God of Sessions",
               version: "0.1.0",
             },
-            capabilities: {},
+            capabilities: {
+              experimentalApi: true,
+              requestAttestation: false,
+            },
           },
           mutates_local_state: false,
           summary: "안정 API로 클라이언트 초기화",
@@ -1444,37 +1453,20 @@ export const previewOvernightPlan: OvernightPlan = {
           summary: "승인한 기존 thread를 같은 cwd로 재개",
         },
         {
-          step: "start_turn",
-          method: "turn/start",
+          step: "set_goal",
+          method: "thread/goal/set",
           params: {
             threadId: "co1",
-            clientUserMessageId: "gos-codex-89ca72cc88a44f313b17b294",
-            input: [
-              {
-                type: "text",
-                text: "Overnight goal\nOvernight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행",
-              },
-            ],
-            cwd: "/Users/you/projects/godofsessions",
-            approvalPolicy: "never",
-            approvalsReviewer: "user",
-            sandboxPolicy: {
-              type: "workspaceWrite",
-              writableRoots: ["/Users/you/projects/godofsessions"],
-              networkAccess: false,
-              excludeSlashTmp: true,
-              excludeTmpdirEnvVar: true,
-            },
-            runtimeWorkspaceRoots: ["/Users/you/projects/godofsessions"],
-            environments: [],
+            objective:
+              "[God of Sessions contract: gos-codex-89ca72cc88a44f313b17b294]\nThis marker identifies one approved contract. Do not repeat or alter it.\n\nOvernight 추천 수직 슬라이스 — 검증 가능한 결과까지 진행",
+            status: "active",
           },
           mutates_local_state: true,
-          summary:
-            "외부 승인·네트워크 없이 정확한 Night Contract turn 시작",
+          summary: "고정된 Night Contract를 provider-native durable goal로 설정",
         },
       ],
       expected_receipt:
-        "thread/resume의 threadId + turn/start의 turnId + item 이벤트 + turn/completed 최종 상태",
+        "thread/resume의 threadId + thread/goal/set 응답 + thread/goal/updated의 terminal status",
       read_only: true,
       execution_enabled: false,
     },

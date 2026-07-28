@@ -36,6 +36,7 @@ pub(super) struct RunMarker {
     pub(super) final_text: Option<String>,
     pub(super) error: Option<String>,
     pub(super) events: Vec<MarkerEvent>,
+    pub(super) goal_mode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -224,16 +225,75 @@ pub(super) fn scan_with_root(path: &Path, sessions_root: &Path) -> Result<Vec<Ru
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             if let Some(turn_id) = current_turn.as_deref() {
-                if let Some((index, marker)) = markers
-                    .iter_mut()
-                    .enumerate()
-                    .rev()
-                    .find(|(_, marker)| marker.turn_id.is_none())
+                if let Some((index, marker)) =
+                    markers.iter_mut().enumerate().rev().find(|(_, marker)| {
+                        (marker.goal_mode && marker.status == "active") || marker.turn_id.is_none()
+                    })
                 {
-                    marker.turn_id = Some(turn_id.to_owned());
+                    if marker.goal_mode || marker.turn_id.is_none() {
+                        marker.turn_id = Some(turn_id.to_owned());
+                    }
                     marker_by_turn.insert(turn_id.to_owned(), index);
                 }
             }
+        }
+        if payload_type == Some("thread_goal_updated") {
+            let objective = value
+                .pointer("/payload/goal/objective")
+                .and_then(Value::as_str);
+            let Some(idempotency_key) = objective.and_then(extract_idempotency_key) else {
+                continue;
+            };
+            let provider_status = value
+                .pointer("/payload/goal/status")
+                .and_then(Value::as_str)
+                .unwrap_or("active");
+            let turn_id = value
+                .pointer("/payload/turn_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| current_turn.clone());
+            let existing = markers
+                .iter()
+                .position(|marker| marker.idempotency_key == idempotency_key);
+            let index = existing.unwrap_or_else(|| {
+                markers.push(RunMarker {
+                    idempotency_key: idempotency_key.clone(),
+                    status: "active".to_owned(),
+                    started_at: timestamp.clone(),
+                    prompt: objective.and_then(|value| bounded_verbatim(value.to_owned(), 12_000)),
+                    events: vec![MarkerEvent {
+                        kind: "goal_set".to_owned(),
+                        created_at: timestamp.clone(),
+                        note: Some(
+                            "Night Contract가 Codex provider-native goal로 기록됨".to_owned(),
+                        ),
+                    }],
+                    goal_mode: true,
+                    ..RunMarker::default()
+                });
+                markers.len() - 1
+            });
+            let marker = &mut markers[index];
+            marker.status = provider_status.to_owned();
+            if marker.goal_mode && turn_id.is_some() || marker.turn_id.is_none() {
+                marker.turn_id.clone_from(&turn_id);
+            }
+            if let Some(turn_id) = turn_id {
+                marker_by_turn.insert(turn_id, index);
+            }
+            if matches!(
+                provider_status,
+                "complete" | "blocked" | "paused" | "usageLimited" | "budgetLimited"
+            ) {
+                marker.completed_at.clone_from(&timestamp);
+            }
+            marker.events.push(MarkerEvent {
+                kind: format!("goal_{provider_status}"),
+                created_at: timestamp,
+                note: None,
+            });
+            continue;
         }
         if let Some(idempotency_key) = (payload_type == Some("user_message"))
             .then(|| value.pointer("/payload/client_id").and_then(Value::as_str))
@@ -293,10 +353,17 @@ pub(super) fn scan_with_root(path: &Path, sessions_root: &Path) -> Result<Vec<Ru
                 });
             }
             Some("task_complete") => {
-                found.status = "completed".to_owned();
-                found.completed_at.clone_from(&timestamp);
+                if !found.goal_mode {
+                    found.status = "completed".to_owned();
+                    found.completed_at.clone_from(&timestamp);
+                }
                 found.events.push(MarkerEvent {
-                    kind: "completed".to_owned(),
+                    kind: if found.goal_mode {
+                        "turn_completed"
+                    } else {
+                        "completed"
+                    }
+                    .to_owned(),
                     created_at: timestamp,
                     note: None,
                 });
@@ -375,6 +442,15 @@ fn bounded_text(value: Option<String>, max_chars: usize) -> Option<String> {
 fn bounded_verbatim(value: String, max_chars: usize) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.chars().take(max_chars).collect())
+}
+
+fn extract_idempotency_key(value: &str) -> Option<String> {
+    const PREFIX: &str = "gos-codex-";
+    let start = value.find(PREFIX)?;
+    let suffix = &value[start + PREFIX.len()..];
+    let hash: String = suffix.chars().take(24).collect();
+    (hash.len() == 24 && hash.chars().all(|character| character.is_ascii_hexdigit()))
+        .then(|| format!("{PREFIX}{hash}"))
 }
 
 pub(crate) fn load_history() -> (Vec<NightRunRecord>, Vec<String>) {
@@ -515,8 +591,8 @@ pub(super) fn history_record(source: &ThreadRunSource, marker: RunMarker) -> Nig
         .unwrap_or("이름 없는 프로젝트")
         .to_owned();
     let status = match marker.status.as_str() {
-        "completed" => "done",
-        "failed" => "blocked",
+        "completed" | "complete" => "done",
+        "failed" | "blocked" | "paused" | "usageLimited" | "budgetLimited" => "blocked",
         _ => "running",
     }
     .to_owned();
@@ -537,8 +613,10 @@ pub(super) fn history_record(source: &ThreadRunSource, marker: RunMarker) -> Nig
         thread_id: Some(source.thread_id.clone()),
         turn_id: marker.turn_id,
         outcome: match marker.status.as_str() {
-            "completed" => Some("completed".to_owned()),
-            "failed" => Some("blocked".to_owned()),
+            "completed" | "complete" => Some("completed".to_owned()),
+            "failed" | "blocked" | "paused" | "usageLimited" | "budgetLimited" => {
+                Some("blocked".to_owned())
+            }
             _ => None,
         },
         summary: marker.final_text,
@@ -571,8 +649,10 @@ pub(super) fn history_detail(source: &ThreadRunSource, marker: RunMarker) -> Nig
         )
         .map(|(start, end)| (end - start).num_seconds().max(0));
     let outcome = match marker.status.as_str() {
-        "completed" => Some("completed".to_owned()),
-        "failed" => Some("blocked".to_owned()),
+        "completed" | "complete" => Some("completed".to_owned()),
+        "failed" | "blocked" | "paused" | "usageLimited" | "budgetLimited" => {
+            Some("blocked".to_owned())
+        }
         _ => None,
     };
     let attempts = vec![NightRunAttempt {
@@ -619,7 +699,7 @@ pub(super) fn history_detail(source: &ThreadRunSource, marker: RunMarker) -> Nig
         body: marker.prompt,
         assignee: None,
         max_runtime_seconds: None,
-        goal_mode: false,
+        goal_mode: marker.goal_mode,
         goal_max_turns: None,
         max_retries: None,
         idempotency_key: marker.idempotency_key,
@@ -630,7 +710,7 @@ pub(super) fn history_detail(source: &ThreadRunSource, marker: RunMarker) -> Nig
         events,
         warnings,
         read_only: true,
-        methodology: "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. clientUserMessageId가 God of Sessions 계약 출처를 증명하며 완료 이벤트는 결과의 정확성까지 자동 증명하지 않습니다."
+        methodology: "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. provider-native Goal objective의 marker와 terminal status가 God of Sessions 계약과 실행 수명주기를 증명하며, 결과의 정확성은 별도 검토합니다."
             .to_owned(),
     }
 }
@@ -640,6 +720,7 @@ fn marker_task_id(marker: &RunMarker) -> &str {
 }
 
 fn night_goal_title(prompt: &str) -> Option<String> {
+    let prompt = unmarked_prompt(prompt);
     let mut lines = prompt
         .lines()
         .map(str::trim)
@@ -653,23 +734,34 @@ fn night_goal_title(prompt: &str) -> Option<String> {
     Some(title.chars().take(240).collect())
 }
 
+fn unmarked_prompt(prompt: &str) -> &str {
+    if prompt.starts_with("[God of Sessions contract:") {
+        prompt
+            .split_once("\n\n")
+            .map(|(_, body)| body)
+            .unwrap_or(prompt)
+    } else {
+        prompt
+    }
+}
+
 fn verdict(marker: &RunMarker) -> (NightRunVerdict, String) {
     match marker.status.as_str() {
-        "inProgress" => (
+        "inProgress" | "active" => (
             NightRunVerdict::InProgress,
             "Codex provider rollout에 아직 완료되지 않은 turn으로 기록되어 있습니다."
                 .to_owned(),
         ),
-        "completed" if marker.final_text.is_some() => (
+        "completed" | "complete" if marker.final_text.is_some() => (
             NightRunVerdict::ReadyToReview,
             "Codex 완료 수명주기와 최종 응답이 모두 있습니다. 실제 변경과 검증은 사람이 확인해야 합니다."
                 .to_owned(),
         ),
-        "completed" => (
+        "completed" | "complete" => (
             NightRunVerdict::NeedsAttention,
             "Codex turn은 완료됐지만 최종 인계 응답을 복구하지 못했습니다.".to_owned(),
         ),
-        "failed" => (
+        "failed" | "blocked" | "paused" | "usageLimited" | "budgetLimited" => (
             NightRunVerdict::NeedsAttention,
             "Codex turn이 중단 또는 실패로 끝나 원본 오류와 작업공간 확인이 필요합니다."
                 .to_owned(),

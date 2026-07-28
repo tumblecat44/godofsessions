@@ -50,8 +50,16 @@ struct RunningCodexTurn {
     stdin: ChildStdin,
     receiver: Receiver<String>,
     thread_id: String,
-    turn_id: String,
+    turn_id: Option<String>,
     max_runtime: Duration,
+}
+
+pub(super) fn marked_objective(objective: &str, idempotency_key: &str) -> String {
+    format!(
+        "[God of Sessions contract: {idempotency_key}]\n\
+         This marker identifies one approved contract. Do not repeat or alter it.\n\n\
+         {objective}"
+    )
 }
 
 impl RunningCodexTurn {
@@ -116,7 +124,7 @@ pub(crate) fn execute_approved(
         run_mode: approved.draft.run_mode,
         thread_id,
         workspace: current.scope_value.clone(),
-        prompt: approved.draft.prompt.clone(),
+        prompt: marked_objective(&approved.draft.prompt, &current.idempotency_key),
         idempotency_key: current.idempotency_key.clone(),
         max_runtime_seconds: (approved.draft.time_budget_hours * 3_600.0).round() as u64,
     };
@@ -155,21 +163,17 @@ pub(crate) fn execute_approved(
             {
                 return Err("Codex가 승인한 thread와 다른 thread를 반환했습니다.".to_owned());
             }
-            let turn_id = reply
-                .turn_id
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| "Codex 시작 영수증에 turn id가 없습니다.".to_owned())?;
             Ok(codex_receipt(
                 &approved,
                 DispatchReceiptState::Started,
                 "inProgress",
                 &returned_thread,
-                &turn_id,
+                reply.turn_id.as_deref().unwrap_or(""),
                 Some(i64::from(reply.worker_pid)),
                 if request.run_mode == RunMode::ResumeExisting {
-                    "Codex가 승인한 기존 thread에 야간 turn을 시작했습니다."
+                    "Codex가 승인한 기존 thread에 provider-native 야간 goal을 시작했습니다."
                 } else {
-                    "Codex가 승인한 작업공간에 새 durable thread와 야간 turn을 시작했습니다."
+                    "Codex가 승인한 작업공간에 새 durable thread와 provider-native 야간 goal을 시작했습니다."
                 }
                 .to_owned(),
             ))
@@ -219,13 +223,13 @@ pub(crate) fn run_night_worker_from_stdin() {
             let reply = CodexWorkerReply {
                 kind: "started".to_owned(),
                 thread_id: Some(running.thread_id.clone()),
-                turn_id: Some(running.turn_id.clone()),
+                turn_id: running.turn_id.clone(),
                 worker_pid: std::process::id(),
                 error: None,
             };
             println!("{}", serde_json::to_string(&reply).unwrap_or_default());
             let _ = std::io::stdout().flush();
-            let _ = monitor_turn(&mut running);
+            let _ = monitor_goal(&mut running);
             running.shutdown();
             return;
         }
@@ -330,6 +334,7 @@ fn read_worker_request() -> Result<CodexWorkerRequest, String> {
     if !request.idempotency_key.starts_with("gos-codex-")
         || !thread_contract_valid
         || request.prompt.trim().is_empty()
+        || request.prompt.chars().count() > 4_000
         || !(3_600..=16 * 3_600).contains(&request.max_runtime_seconds)
     {
         return Err("야간 계약의 식별자나 시간 경계가 올바르지 않습니다.".to_owned());
@@ -379,7 +384,7 @@ fn start_worker(request: CodexWorkerRequest) -> Result<RunningCodexTurn, String>
 
     let binary = RouteSources::local().codex_binary;
     let (mut child, mut stdin, receiver) = start_app_server(&binary)?;
-    let startup = (|| -> Result<(String, String), String> {
+    let startup = (|| -> Result<(String, Option<String>), String> {
         send_request(
             &mut stdin,
             1,
@@ -433,40 +438,23 @@ fn start_worker(request: CodexWorkerRequest) -> Result<RunningCodexTurn, String>
                 .ok_or_else(|| "기존 Codex rollout을 찾지 못했습니다.".to_owned())?;
             if scan_rollout_marker(rollout, &request.idempotency_key)?.is_some() {
                 return Err(
-                    "thread 재개 중 같은 계약이 나타나 turn을 시작하지 않았습니다.".to_owned(),
+                    "thread 재개 중 같은 계약이 나타나 goal을 시작하지 않았습니다.".to_owned(),
                 );
             }
         }
         send_request(
             &mut stdin,
             3,
-            "turn/start",
+            "thread/goal/set",
             json!({
                 "threadId": thread_id,
-                "clientUserMessageId": request.idempotency_key,
-                "input": [{"type": "text", "text": request.prompt}],
-                "cwd": request.workspace,
-                "approvalPolicy": "never",
-                "approvalsReviewer": "user",
-                "sandboxPolicy": {
-                    "type": "workspaceWrite",
-                    "writableRoots": [request.workspace],
-                    "networkAccess": false,
-                    "excludeSlashTmp": true,
-                    "excludeTmpdirEnvVar": true
-                },
-                "runtimeWorkspaceRoots": [request.workspace],
-                "environments": []
+                "objective": request.prompt,
+                "status": "active"
             }),
         )?;
         let started = receive_response(&mut stdin, &receiver, 3, RPC_TIMEOUT)?;
-        let turn_id = started
-            .pointer("/result/turn/id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .ok_or_else(|| "Codex turn/start 응답에 turn id가 없습니다.".to_owned())?;
-        Ok((thread_id, turn_id))
+        validate_goal_response(&started, &thread_id, &request.prompt)?;
+        Ok((thread_id, None))
     })();
     let (thread_id, turn_id) = match startup {
         Ok(ids) => ids,
@@ -498,7 +486,7 @@ pub(super) fn start_app_server(
         return Err("Codex 앱 번들 실행기를 찾지 못했습니다.".to_owned());
     }
     let mut child = Command::new(binary)
-        .args(["app-server", "--listen", "stdio://"])
+        .args(["app-server", "--enable", "goals", "--listen", "stdio://"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -652,7 +640,45 @@ pub(super) fn validate_thread_response(
     Ok(thread_id.unwrap_or_default().to_owned())
 }
 
-fn monitor_turn(running: &mut RunningCodexTurn) -> Result<(), String> {
+pub(super) fn validate_goal_response(
+    response: &Value,
+    expected_thread_id: &str,
+    expected_objective: &str,
+) -> Result<(), String> {
+    let goal = response
+        .pointer("/result/goal")
+        .ok_or_else(|| "Codex thread/goal/set 응답에 goal이 없습니다.".to_owned())?;
+    if goal.get("threadId").and_then(Value::as_str) != Some(expected_thread_id)
+        || goal.get("objective").and_then(Value::as_str) != Some(expected_objective)
+        || goal.get("status").and_then(Value::as_str) != Some("active")
+    {
+        return Err(
+            "Codex가 반환한 goal의 thread, objective 또는 active 상태가 계약과 다릅니다."
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn goal_update(value: &Value, thread_id: &str) -> Option<(String, Option<String>)> {
+    if value.get("method").and_then(Value::as_str) != Some("thread/goal/updated")
+        || value.pointer("/params/threadId").and_then(Value::as_str) != Some(thread_id)
+    {
+        return None;
+    }
+    let status = value
+        .pointer("/params/goal/status")
+        .and_then(Value::as_str)?
+        .to_owned();
+    let turn_id = value
+        .pointer("/params/turnId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    Some((status, turn_id))
+}
+
+fn monitor_goal(running: &mut RunningCodexTurn) -> Result<(), String> {
     let started = Instant::now();
     while started.elapsed() < running.max_runtime {
         match running.receiver.recv_timeout(Duration::from_millis(500)) {
@@ -667,18 +693,44 @@ fn monitor_turn(running: &mut RunningCodexTurn) -> Result<(), String> {
                         .unwrap_or("unknown")
                         .to_owned();
                     let _ = deny_server_request(&mut running.stdin, &value);
-                    interrupt_turn(running);
+                    stop_goal(running, "blocked");
                     return Err(format!(
-                        "대화형 요청 {method}을 거부하고 turn을 중단했습니다."
+                        "대화형 요청 {method}을 거부하고 goal을 중단했습니다."
                     ));
                 }
-                if is_completed_turn(&value, &running.thread_id, &running.turn_id) {
-                    return Ok(());
+                if value.get("method").and_then(Value::as_str) == Some("turn/started")
+                    && value.pointer("/params/threadId").and_then(Value::as_str)
+                        == Some(running.thread_id.as_str())
+                {
+                    running.turn_id = value
+                        .pointer("/params/turn/id")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned);
+                }
+                if let Some((status, turn_id)) = goal_update(&value, &running.thread_id) {
+                    if turn_id.is_some() {
+                        running.turn_id = turn_id;
+                    }
+                    match status.as_str() {
+                        "complete" => return Ok(()),
+                        "blocked" | "paused" | "usageLimited" | "budgetLimited" => {
+                            return Err(format!(
+                                "Codex provider-native goal이 {status} 상태로 멈췄습니다."
+                            ))
+                        }
+                        "active" => {}
+                        _ => {
+                            return Err(format!(
+                                "Codex가 알 수 없는 goal 상태 {status}를 반환했습니다."
+                            ))
+                        }
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if running.child.try_wait().ok().flatten().is_some() {
-                    return Err("Codex app-server가 turn 완료 전에 종료되었습니다.".to_owned());
+                    return Err("Codex app-server가 goal 종결 전에 종료되었습니다.".to_owned());
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -686,24 +738,42 @@ fn monitor_turn(running: &mut RunningCodexTurn) -> Result<(), String> {
             }
         }
     }
-    interrupt_turn(running);
-    Err("Night Contract 시간 예산이 끝나 Codex turn을 중단했습니다.".to_owned())
+    stop_goal(running, "paused");
+    Err("Night Contract 시간 예산이 끝나 Codex goal을 일시중지했습니다.".to_owned())
 }
 
+#[cfg(test)]
 pub(super) fn is_completed_turn(value: &Value, thread_id: &str, turn_id: &str) -> bool {
     value.get("method").and_then(Value::as_str) == Some("turn/completed")
         && value.pointer("/params/threadId").and_then(Value::as_str) == Some(thread_id)
         && value.pointer("/params/turn/id").and_then(Value::as_str) == Some(turn_id)
 }
 
-fn interrupt_turn(running: &mut RunningCodexTurn) {
+fn stop_goal(running: &mut RunningCodexTurn, status: &str) {
     let _ = send_request(
         &mut running.stdin,
         90,
+        "thread/goal/set",
+        json!({
+            "threadId": running.thread_id,
+            "status": status
+        }),
+    );
+    let _ = running.receiver.recv_timeout(Duration::from_secs(5));
+    interrupt_turn(running);
+}
+
+fn interrupt_turn(running: &mut RunningCodexTurn) {
+    let Some(turn_id) = running.turn_id.as_deref() else {
+        return;
+    };
+    let _ = send_request(
+        &mut running.stdin,
+        91,
         "turn/interrupt",
         json!({
             "threadId": running.thread_id,
-            "turnId": running.turn_id
+            "turnId": turn_id
         }),
     );
     let _ = running.receiver.recv_timeout(Duration::from_secs(5));

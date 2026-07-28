@@ -32,7 +32,7 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
-const ADAPTER_VERSION: &str = "codex-app-server-resume-new-v2";
+const ADAPTER_VERSION: &str = "codex-app-server-native-goal-v3";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Clone, Default)]
@@ -168,7 +168,7 @@ fn preview(
         ),
         check(
             "contract",
-            draft.format == RunDraftFormat::StructuredPrompt
+            draft.format == RunDraftFormat::CodexGoal
                 && draft.permission_profile == PermissionProfile::WorkspaceWrite
                 && draft.approval_required
                 && draft.dispatch_supported
@@ -198,7 +198,7 @@ fn preview(
             DispatchPreflightState::ReadyForApproval
         },
         surface: Provider::Codex,
-        adapter: "Codex app-server v2".to_owned(),
+        adapter: "Codex app-server native Goal".to_owned(),
         scope_label: "writable root".to_owned(),
         scope_value: workspace.display().to_string(),
         executor_label: if draft.run_mode == RunMode::ResumeExisting {
@@ -221,6 +221,8 @@ fn preview(
                 program: environment.binary.display().to_string(),
                 arguments: vec![
                     "app-server".to_owned(),
+                    "--enable".to_owned(),
+                    "goals".to_owned(),
                     "--listen".to_owned(),
                     "stdio://".to_owned(),
                 ],
@@ -230,7 +232,7 @@ fn preview(
         ],
         protocol_requests,
         expected_receipt:
-            "thread/start 또는 thread/resume의 threadId + turn/start의 turnId + item 이벤트 + turn/completed 최종 상태"
+            "thread/start 또는 thread/resume의 threadId + thread/goal/set 응답 + thread/goal/updated의 terminal status"
                 .to_owned(),
         read_only: true,
         execution_enabled: false,
@@ -255,7 +257,7 @@ fn idempotency_check(rollout_path: Option<&Path>, idempotency_key: &str) -> Pref
         Ok(_) => pass(
             "idempotency",
             "중복 실행 방지",
-            "provider rollout에 같은 clientUserMessageId가 없습니다.",
+            "provider rollout에 같은 Night Contract Goal marker가 없습니다.",
         ),
         Err(error) => PreflightCheck {
             key: "idempotency".to_owned(),
@@ -377,27 +379,15 @@ fn protocol_preview(
         .to_owned(),
     });
     requests.push(DispatchProtocolPreview {
-        step: "start_turn".to_owned(),
-        method: "turn/start".to_owned(),
+        step: "set_goal".to_owned(),
+        method: "thread/goal/set".to_owned(),
         params: json!({
             "threadId": draft.native_session_id.as_deref().unwrap_or("<thread/start response>"),
-            "clientUserMessageId": idempotency_key,
-            "input": [{"type": "text", "text": draft.prompt}],
-            "cwd": workspace_value,
-            "approvalPolicy": "never",
-            "approvalsReviewer": "user",
-            "sandboxPolicy": {
-                "type": "workspaceWrite",
-                "writableRoots": [workspace_value],
-                "networkAccess": false,
-                "excludeSlashTmp": true,
-                "excludeTmpdirEnvVar": true
-            },
-            "runtimeWorkspaceRoots": [workspace_value],
-            "environments": []
+            "objective": worker::marked_objective(&draft.prompt, idempotency_key),
+            "status": "active"
         }),
         mutates_local_state: true,
-        summary: "외부 승인·네트워크 없이 정확한 Night Contract turn 시작".to_owned(),
+        summary: "고정된 Night Contract를 provider-native durable goal로 설정".to_owned(),
     });
     requests
 }
@@ -420,7 +410,7 @@ fn probe_protocol(binary: &Path) -> CodexProtocolProbe {
 
 fn run_probe(binary: &Path) -> Result<CodexProtocolProbe, String> {
     let mut child = Command::new(binary)
-        .args(["app-server", "--listen", "stdio://"])
+        .args(["app-server", "--enable", "goals", "--listen", "stdio://"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -548,8 +538,9 @@ mod tests {
         MarkerEvent as CodexMarkerEvent, ThreadRunSource as CodexThreadRunSource,
     };
     use super::worker::{
-        is_completed_turn, is_server_request, receive_response, send_notification, send_request,
-        server_request_denial, start_app_server, validate_thread_response,
+        goal_update, is_completed_turn, is_server_request, receive_response, send_notification,
+        send_request, server_request_denial, start_app_server, validate_goal_response,
+        validate_thread_response,
     };
     use super::*;
 
@@ -584,7 +575,7 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "codex:native".to_owned(),
-            format: RunDraftFormat::StructuredPrompt,
+            format: RunDraftFormat::CodexGoal,
             run_mode: RunMode::ResumeExisting,
             native_session_id: Some("thread-1".to_owned()),
             workspace: workspace.display().to_string(),
@@ -598,7 +589,7 @@ mod tests {
                 boundaries: workspace.display().to_string(),
                 stop_when: "사람 결정 필요".to_owned(),
             },
-            prompt: "Overnight goal\n기능을 완성하고 검증".to_owned(),
+            prompt: "기능을 완성하고 검증".to_owned(),
             permission_profile: PermissionProfile::WorkspaceWrite,
             external_side_effects_allowed: false,
             approval_required: true,
@@ -643,19 +634,16 @@ mod tests {
         assert_eq!(preflight.commands.len(), 2);
         assert_eq!(preflight.protocol_requests.len(), 4);
         assert_eq!(preflight.protocol_requests[2].method, "thread/resume");
-        assert_eq!(preflight.protocol_requests[3].method, "turn/start");
+        assert_eq!(preflight.protocol_requests[3].method, "thread/goal/set");
         assert_eq!(
-            preflight.protocol_requests[3]
-                .params
-                .pointer("/sandboxPolicy/networkAccess"),
-            Some(&Value::Bool(false))
+            preflight.protocol_requests[3].params.get("status"),
+            Some(&Value::String("active".to_owned()))
         );
-        assert_eq!(
-            preflight.protocol_requests[3]
-                .params
-                .get("clientUserMessageId"),
-            Some(&Value::String(preflight.idempotency_key.clone()))
-        );
+        assert!(preflight.protocol_requests[3]
+            .params
+            .get("objective")
+            .and_then(Value::as_str)
+            .is_some_and(|objective| objective.contains(&preflight.idempotency_key)));
         assert!(preflight
             .checks
             .iter()
@@ -711,6 +699,68 @@ mod tests {
                 .expect("scan")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn provider_native_goal_ignores_intermediate_turn_completion() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let sessions = directory.path().join("sessions");
+        std::fs::create_dir_all(&sessions).expect("sessions");
+        let rollout = sessions.join("rollout.jsonl");
+        let key = "gos-codex-0123456789abcdef01234567";
+        std::fs::write(
+            &rollout,
+            format!(
+                concat!(
+                    "{{\"timestamp\":\"2026-07-28T01:00:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"thread_goal_updated\",\"turn_id\":null,",
+                    "\"goal\":{{\"objective\":\"[God of Sessions contract: {}] goal\",",
+                    "\"status\":\"active\"}}}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:01:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"turn-1\"}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:02:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"agent_message\",\"turn_id\":\"turn-1\",",
+                    "\"message\":\"first pass\"}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:03:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"turn-1\"}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:04:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"turn-2\"}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:05:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"agent_message\",\"turn_id\":\"turn-2\",",
+                    "\"message\":\"final verified pass\"}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:06:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"turn-2\"}}}}\n",
+                    "{{\"timestamp\":\"2026-07-28T01:07:00Z\",\"type\":\"event_msg\",",
+                    "\"payload\":{{\"type\":\"thread_goal_updated\",\"turn_id\":null,",
+                    "\"goal\":{{\"objective\":\"[God of Sessions contract: {}] goal\",",
+                    "\"status\":\"complete\"}}}}}}\n"
+                ),
+                key, key
+            ),
+        )
+        .expect("rollout");
+
+        let marker = scan_rollout_marker_with_root(&rollout, &sessions, key)
+            .expect("scan")
+            .expect("goal marker");
+
+        assert!(marker.goal_mode);
+        assert_eq!(marker.status, "complete");
+        assert_eq!(marker.turn_id.as_deref(), Some("turn-2"));
+        assert_eq!(marker.final_text.as_deref(), Some("final verified pass"));
+        assert_eq!(marker.completed_at.as_deref(), Some("2026-07-28T01:07:00Z"));
+        assert_eq!(
+            marker
+                .events
+                .iter()
+                .filter(|event| event.kind == "turn_completed")
+                .count(),
+            2
+        );
+        assert!(marker
+            .events
+            .iter()
+            .any(|event| event.kind == "goal_complete"));
     }
 
     #[test]
@@ -841,6 +891,34 @@ mod tests {
     }
 
     #[test]
+    fn only_terminal_goal_updates_end_the_native_loop() {
+        let response = json!({
+            "result": {
+                "goal": {
+                    "threadId": "thread-1",
+                    "objective": "exact objective",
+                    "status": "active"
+                }
+            }
+        });
+        validate_goal_response(&response, "thread-1", "exact objective").expect("goal response");
+        let complete = json!({
+            "method": "thread/goal/updated",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-9",
+                "goal": {"status": "complete"}
+            }
+        });
+
+        assert_eq!(
+            goal_update(&complete, "thread-1"),
+            Some(("complete".to_owned(), Some("turn-9".to_owned())))
+        );
+        assert!(goal_update(&complete, "thread-2").is_none());
+    }
+
+    #[test]
     fn codex_marker_becomes_provider_neutral_history_and_morning_review() {
         let source = CodexThreadRunSource {
             thread_id: "thread-1".to_owned(),
@@ -864,6 +942,7 @@ mod tests {
                 created_at: Some("2026-07-24T02:00:00Z".to_owned()),
                 note: None,
             }],
+            goal_mode: false,
         };
 
         let record = codex_history_record(&source, marker.clone());

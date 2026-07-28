@@ -272,6 +272,11 @@ pub enum RecommendationConfidence {
 #[serde(rename_all = "snake_case")]
 pub enum RunDraftFormat {
     HermesGoal,
+    CodexGoal,
+    ClaudeGoal,
+    GrokGoal,
+    // Kept so persisted pre-cycle-06 plans still deserialize and fail closed
+    // against the provider-specific preflight contracts.
     StructuredPrompt,
 }
 

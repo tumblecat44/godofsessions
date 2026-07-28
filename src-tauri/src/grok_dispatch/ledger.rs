@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -35,6 +35,8 @@ pub(super) struct GrokRunReceipt {
     pub(super) worker_pid: u32,
     pub(super) grok_pid: Option<u32>,
     pub(super) exit_code: Option<i32>,
+    #[serde(default)]
+    pub(super) goal_status: Option<String>,
     pub(super) result: Option<String>,
     pub(super) error: Option<String>,
 }
@@ -67,6 +69,7 @@ impl GrokRunReceipt {
             worker_pid: std::process::id(),
             grok_pid: None,
             exit_code: None,
+            goal_status: None,
             result: None,
             error: None,
         }
@@ -142,14 +145,106 @@ pub(super) fn marker_exists(path: &Path, idempotency_key: &str) -> bool {
     let Ok(file) = File::open(path) else {
         return false;
     };
-    BufReader::new(file).split(b'\n').any(|line| {
-        line.ok().is_some_and(|line| {
-            line.len() <= MAX_MARKER_LINE_BYTES
-                && line
+    let mut reader = BufReader::new(file);
+    loop {
+        match read_bounded_update_line(&mut reader) {
+            Ok(Some(line)) => {
+                if line
                     .windows(idempotency_key.len())
                     .any(|window| window == idempotency_key.as_bytes())
-        })
-    })
+                {
+                    return true;
+                }
+            }
+            Ok(None) => return false,
+            Err(_) => return false,
+        }
+    }
+}
+
+pub(super) fn latest_goal_status(
+    session_id: &str,
+    idempotency_key: &str,
+) -> Result<Option<String>, String> {
+    latest_goal_status_at(&grok_sessions_root(), session_id, idempotency_key)
+}
+
+fn latest_goal_status_at(
+    sessions_root: &Path,
+    session_id: &str,
+    idempotency_key: &str,
+) -> Result<Option<String>, String> {
+    let identity = inspect_session(sessions_root, Some(session_id))?;
+    let path = identity
+        .transcript_path
+        .ok_or_else(|| "Grok target session의 updates.jsonl을 찾지 못했습니다.".to_owned())?;
+    let file = File::open(path)
+        .map_err(|_| "Grok target session updates를 읽지 못했습니다.".to_owned())?;
+    let mut reader = BufReader::new(file);
+    let mut latest = None;
+    while let Some(line) = read_bounded_update_line(&mut reader)? {
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let update = value
+            .pointer("/params/update")
+            .or_else(|| value.get("update"))
+            .unwrap_or(&value);
+        if update
+            .get("sessionUpdate")
+            .and_then(serde_json::Value::as_str)
+            != Some("goal_updated")
+            || !update
+                .get("objective")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|objective| objective.contains(idempotency_key))
+        {
+            continue;
+        }
+        latest = update
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+    }
+    Ok(latest)
+}
+
+fn read_bounded_update_line(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>, String> {
+    let mut line = Vec::new();
+    let mut limited = (&mut *reader).take(MAX_MARKER_LINE_BYTES as u64 + 1);
+    let read = limited
+        .read_until(b'\n', &mut line)
+        .map_err(|_| "Grok session update 행을 읽지 못했습니다.".to_owned())?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if read > MAX_MARKER_LINE_BYTES {
+        if line.last() != Some(&b'\n') {
+            discard_until_newline(reader)?;
+        }
+        line.clear();
+    }
+    Ok(Some(line))
+}
+
+fn discard_until_newline(reader: &mut impl BufRead) -> Result<(), String> {
+    loop {
+        let buffer = reader
+            .fill_buf()
+            .map_err(|_| "큰 Grok session update 행을 건너뛰지 못했습니다.".to_owned())?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(buffer.len(), |index| index + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(());
+        }
+    }
 }
 
 pub(super) fn receipt_exists(idempotency_key: &str) -> bool {
@@ -223,6 +318,20 @@ fn validate_receipt(receipt: &GrokRunReceipt) -> Result<(), String> {
         || !safe_session_id(&receipt.target_session_id)
         || receipt.workspace.is_empty()
         || receipt.prompt.is_empty()
+        || receipt.goal_status.as_deref().is_some_and(|status| {
+            !matches!(
+                status,
+                "active"
+                    | "user_paused"
+                    | "back_off_paused"
+                    | "no_progress_paused"
+                    | "infra_paused"
+                    | "blocked"
+                    | "budget_limited"
+                    | "complete"
+                    | "cleared"
+            )
+        })
         || !(3_600..=16 * 3_600).contains(&receipt.max_runtime_seconds)
         || !(1..=100).contains(&receipt.max_turns)
     {
@@ -337,7 +446,7 @@ fn history_record(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunRec
         project: project_name(&receipt.workspace),
         workspace: Some(receipt.workspace.clone()),
         status: match receipt.state.as_str() {
-            "completed" if verified => "done",
+            "completed" if verified && receipt.goal_status.as_deref() == Some("complete") => "done",
             "failed" | "timed_out" => "blocked",
             "accepted" | "running" if stale => "blocked",
             _ => "running",
@@ -357,7 +466,9 @@ fn history_record(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunRec
         thread_id: None,
         turn_id: None,
         outcome: match receipt.state.as_str() {
-            "completed" if verified => Some("completed".to_owned()),
+            "completed" if verified && receipt.goal_status.as_deref() == Some("complete") => {
+                Some("completed".to_owned())
+            }
             "failed" | "timed_out" => Some("blocked".to_owned()),
             _ => None,
         },
@@ -374,10 +485,16 @@ fn history_detail(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunDet
     let verified = provider_evidence(receipt, sessions_root);
     let stale = receipt_is_stale(receipt);
     let (verdict, reason) = match receipt.state.as_str() {
-        "completed" if verified && receipt.result.is_some() => (
-            NightRunVerdict::ReadyToReview,
-            "Grok 종료 영수증과 provider transcript의 정확한 계약 marker가 있습니다.",
-        ),
+        "completed"
+            if verified
+                && receipt.result.is_some()
+                && receipt.goal_status.as_deref() == Some("complete") =>
+        {
+            (
+                NightRunVerdict::ReadyToReview,
+                "Grok 종료 영수증과 provider transcript의 정확한 계약 marker가 있습니다.",
+            )
+        }
         "failed" | "timed_out" => (
             NightRunVerdict::NeedsAttention,
             "Grok 작업이 실패하거나 승인된 시간 상한에서 중단됐습니다.",
@@ -403,7 +520,10 @@ fn history_detail(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunDet
         } else {
             receipt.state.clone()
         },
-        outcome: (receipt.state == "completed" && verified).then(|| "completed".to_owned()),
+        outcome: (receipt.state == "completed"
+            && verified
+            && receipt.goal_status.as_deref() == Some("complete"))
+        .then(|| "completed".to_owned()),
         started_at: receipt.started_at.clone(),
         ended_at: receipt.completed_at.clone(),
         duration_seconds: duration_seconds(receipt),
@@ -444,6 +564,20 @@ fn history_detail(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunDet
             note: receipt.result.clone().or_else(|| receipt.error.clone()),
         });
     }
+    let mut warnings = if verified {
+        Vec::new()
+    } else {
+        vec![
+            "Grok provider transcript에서 정확한 God of Sessions marker를 아직 확인하지 못했습니다."
+                .to_owned(),
+        ]
+    };
+    if receipt.prompt.starts_with("/goal ") && receipt.goal_status.as_deref() != Some("complete") {
+        warnings.push(
+            "provider-native goal의 terminal complete 근거가 없어 완료로 판정하지 않았습니다."
+                .to_owned(),
+        );
+    }
     NightRunDetail {
         generated_at: chrono::Utc::now().to_rfc3339(),
         surface: Provider::Grok,
@@ -461,7 +595,7 @@ fn history_detail(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunDet
         body: Some(unmarked_prompt(&receipt.prompt).to_owned()),
         assignee: None,
         max_runtime_seconds: Some(receipt.max_runtime_seconds as i64),
-        goal_mode: true,
+        goal_mode: receipt.prompt.starts_with("/goal "),
         goal_max_turns: Some(i64::from(receipt.max_turns)),
         max_retries: Some(0),
         idempotency_key: receipt.idempotency_key.clone(),
@@ -470,17 +604,10 @@ fn history_detail(receipt: &GrokRunReceipt, sessions_root: &Path) -> NightRunDet
         verdict_reason: reason.to_owned(),
         attempts: vec![attempt],
         events,
-        warnings: if verified {
-            Vec::new()
-        } else {
-            vec![
-                "Grok provider transcript에서 정확한 God of Sessions marker를 아직 확인하지 못했습니다."
-                    .to_owned(),
-            ]
-        },
+        warnings,
         read_only: true,
         methodology:
-            "앱의 원자적 실행 영수증과 ~/.grok/sessions의 target session transcript를 정확한 marker로 교차 확인합니다."
+            "앱의 원자적 실행 영수증과 ~/.grok/sessions의 target session transcript를 정확한 marker와 terminal goal_updated 상태로 교차 확인합니다."
                 .to_owned(),
     }
 }
@@ -567,16 +694,24 @@ fn safe_session_id(value: &str) -> bool {
 }
 
 fn night_goal_title(prompt: &str) -> Option<String> {
+    let prompt = unmarked_prompt(prompt);
     let mut lines = prompt
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty());
+    let mut first_content = None;
     while let Some(line) = lines.next() {
+        first_content.get_or_insert(line);
+        if let Some(goal) = line.strip_prefix("/goal ") {
+            if !goal.starts_with("<god-of-sessions-night") {
+                return Some(goal.chars().take(240).collect());
+            }
+        }
         if line.eq_ignore_ascii_case("Overnight goal") {
             return lines.next().map(|value| value.chars().take(240).collect());
         }
     }
-    None
+    first_content.map(|value| value.chars().take(240).collect())
 }
 
 fn unmarked_prompt(prompt: &str) -> &str {
@@ -625,5 +760,80 @@ mod tests {
             identity.transcript_path.as_deref().expect("transcript"),
             "gos-grok-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         ));
+    }
+
+    #[test]
+    fn grok_goal_status_requires_the_exact_objective_marker() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let session = directory.path().join("target-session");
+        std::fs::create_dir_all(&session).expect("session");
+        std::fs::write(
+            session.join("summary.json"),
+            format!(r#"{{"info":{{"cwd":"{}"}}}}"#, directory.path().display()),
+        )
+        .expect("summary");
+        let key = "gos-grok-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        std::fs::write(
+            session.join("updates.jsonl"),
+            format!(
+                concat!(
+                    "{{\"timestamp\":1,\"method\":\"_x.ai/session/update\",",
+                    "\"params\":{{\"sessionId\":\"target-session\",\"update\":{{",
+                    "\"sessionUpdate\":\"goal_updated\",\"objective\":\"/goal <marker>{}\",",
+                    "\"status\":\"active\"}}}}}}\n",
+                    "{{\"timestamp\":2,\"method\":\"_x.ai/session/update\",",
+                    "\"params\":{{\"sessionId\":\"target-session\",\"update\":{{",
+                    "\"sessionUpdate\":\"goal_updated\",\"objective\":\"/goal <marker>{}\",",
+                    "\"status\":\"complete\"}}}}}}\n"
+                ),
+                key, key
+            ),
+        )
+        .expect("updates");
+
+        assert_eq!(
+            latest_goal_status_at(directory.path(), "target-session", key).expect("status"),
+            Some("complete".to_owned())
+        );
+        assert_eq!(
+            latest_goal_status_at(
+                directory.path(),
+                "target-session",
+                "gos-grok-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            )
+            .expect("other status"),
+            None
+        );
+    }
+
+    #[test]
+    fn oversized_grok_update_is_discarded_before_terminal_goal_status() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let session = directory.path().join("target-session");
+        std::fs::create_dir_all(&session).expect("session");
+        std::fs::write(
+            session.join("summary.json"),
+            format!(r#"{{"info":{{"cwd":"{}"}}}}"#, directory.path().display()),
+        )
+        .expect("summary");
+        let key = "gos-grok-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut updates = vec![b'x'; MAX_MARKER_LINE_BYTES + 17];
+        updates.extend_from_slice(
+            format!(
+                concat!(
+                    "\n{{\"params\":{{\"update\":{{",
+                    "\"sessionUpdate\":\"goal_updated\",\"objective\":\"/goal {}\",",
+                    "\"status\":\"complete\"}}}}}}\n"
+                ),
+                key
+            )
+            .as_bytes(),
+        );
+        std::fs::write(session.join("updates.jsonl"), updates).expect("updates");
+
+        let status =
+            latest_goal_status_at(directory.path(), "target-session", key).expect("status");
+
+        assert_eq!(status.as_deref(), Some("complete"));
     }
 }

@@ -1501,7 +1501,7 @@ mod live_tests {
                 Provider::Codex => preflight
                     .protocol_requests
                     .iter()
-                    .any(|request| request.method == "turn/start"),
+                    .any(|request| request.method == "thread/goal/set"),
                 Provider::Claude => preflight.commands.iter().any(|command| {
                     matches!(
                         command.step.as_str(),

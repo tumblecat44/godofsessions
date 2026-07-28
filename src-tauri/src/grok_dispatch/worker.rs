@@ -84,10 +84,14 @@ pub(super) fn command_preview() -> DispatchCommandPreview {
 }
 
 pub(super) fn marked_prompt(prompt: &str, idempotency_key: &str) -> String {
-    format!(
+    let marker = format!(
         "<god-of-sessions-night id=\"{idempotency_key}\">\n\
          This marker identifies one accepted contract. Do not repeat or alter it.\n\
-         </god-of-sessions-night>\n\n{prompt}"
+         </god-of-sessions-night>"
+    );
+    prompt.strip_prefix("/goal ").map_or_else(
+        || format!("{marker}\n\n{prompt}"),
+        |objective| format!("/goal {marker}\n\n{objective}"),
     )
 }
 
@@ -408,6 +412,27 @@ pub(crate) fn run_night_worker_from_stdin() {
                     receipt.error = Some(format!("Grok 프로세스 상태 확인 실패: {error}"));
                 }
             }
+            match super::ledger::latest_goal_status(
+                &request.target_session_id,
+                &request.idempotency_key,
+            ) {
+                Ok(status) => receipt.goal_status = status,
+                Err(error) => {
+                    receipt.error.get_or_insert(error);
+                }
+            }
+            if receipt.state == "completed" && receipt.goal_status.as_deref() != Some("complete") {
+                receipt.state = "failed".to_owned();
+                receipt.error = Some(match receipt.goal_status.as_deref() {
+                    Some(status) => format!(
+                        "Grok 프로세스는 종료됐지만 provider-native goal이 {status} 상태입니다."
+                    ),
+                    None => {
+                        "Grok 프로세스는 종료됐지만 terminal goal_updated 근거를 찾지 못했습니다."
+                            .to_owned()
+                    }
+                });
+            }
             let _ = super::ledger::update_receipt(&receipt);
             let _ = std::fs::remove_file(prompt_path);
         }
@@ -508,7 +533,8 @@ fn read_worker_request() -> Result<GrokWorkerRequest, String> {
         || !session_contract_valid
         || !safe_id(&request.target_session_id)
         || request.target_session_id != target_session_id(&request.idempotency_key)
-        || request.prompt.trim().is_empty()
+        || !request.prompt.starts_with("/goal ")
+        || request.prompt.chars().count() > 4_000
         || request.prompt.len() > MAX_PROMPT_BYTES
         || !(3_600..=16 * 3_600).contains(&request.max_runtime_seconds)
         || !(1..=100).contains(&request.max_turns)
@@ -779,6 +805,15 @@ mod tests {
     use super::*;
 
     const KEY: &str = "gos-grok-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    fn marker_keeps_goal_as_the_first_slash_command() {
+        let marked = marked_prompt("/goal finish the bounded change", KEY);
+
+        assert!(marked.starts_with("/goal <god-of-sessions-night "));
+        assert_eq!(marked.matches("/goal ").count(), 1);
+        assert!(marked.contains("finish the bounded change"));
+    }
 
     #[test]
     fn target_uuid_is_stable_and_provider_compatible() {
