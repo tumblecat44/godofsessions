@@ -675,6 +675,9 @@ mod tests {
                 items: vec![item(1, 0.0), item(2, 2.0)],
             }],
             error: None,
+            automatic_recovery_attempts: 0,
+            last_automatic_recovery_at: None,
+            last_automatic_recovery_reason: None,
         }
     }
 

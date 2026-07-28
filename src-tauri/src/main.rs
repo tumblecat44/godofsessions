@@ -15,5 +15,9 @@ fn main() {
         god_of_sessions_lib::run_night_coordinator_worker();
         return;
     }
+    if std::env::args().nth(1).as_deref() == Some("--night-coordinator-supervisor") {
+        god_of_sessions_lib::run_night_coordinator_supervisor();
+        return;
+    }
     god_of_sessions_lib::run();
 }

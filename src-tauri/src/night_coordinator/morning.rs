@@ -32,7 +32,7 @@ pub(super) fn load() -> Result<MorningBrief, String> {
             methodology: methodology(),
         });
     };
-    let recovery_state = super::recovery_state(&plan);
+    let (recovery_state, _, _) = super::recovery_status(&plan);
     let (reviews, review_warning) = match super::morning_review::load(&plan.idempotency_key) {
         Ok(reviews) => (reviews, None),
         Err(error) => (HashMap::new(), Some(error)),
@@ -590,6 +590,9 @@ mod tests {
                 items,
             }],
             error: None,
+            automatic_recovery_attempts: 0,
+            last_automatic_recovery_at: None,
+            last_automatic_recovery_reason: None,
         }
     }
 

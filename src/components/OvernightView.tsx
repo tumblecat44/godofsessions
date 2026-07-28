@@ -1910,6 +1910,13 @@ function NightPlanHistorySection({
               <Database size={11} />
               {copy("계획 원장 고정", "Plan ledger frozen")}
             </span>
+            <span>
+              <ShieldCheck size={11} />
+              {copy(
+                `크래시 복구 ${plan.automatic_recovery_attempts}/${plan.automatic_recovery_limit}`,
+                `Crash recovery ${plan.automatic_recovery_attempts}/${plan.automatic_recovery_limit}`,
+              )}
+            </span>
             {plan.worker_pid && (
               <code>
                 {plan.recovery_state === "active" ? "coordinator" : "last"} pid{" "}
@@ -1917,6 +1924,77 @@ function NightPlanHistorySection({
               </code>
             )}
           </div>
+          {plan.recovery_state === "active" &&
+            plan.automatic_recovery_armed && (
+            <div className="night-plan-recovery night-plan-recovery--armed">
+              <div>
+                <ShieldCheck size={14} />
+                <span>
+                  <strong>
+                    {plan.automatic_recovery_attempts > 0
+                      ? copy(
+                          "같은 승인 범위를 자동 복구가 보호하고 있습니다",
+                          "Automatic recovery is protecting the same approval",
+                        )
+                      : copy(
+                          "Coordinator 크래시 복구가 준비됐습니다",
+                          "Coordinator crash recovery is armed",
+                        )}
+                  </strong>
+                  <small>
+                    {copy(
+                      `중단되면 같은 계획만 최대 ${plan.automatic_recovery_limit}회 복구합니다. 공급자 시작 여부가 불확실하면 멈춥니다. 로그아웃·Mac 재시작/종료·덮개 닫기/수동 잠자기·배터리 소진·전체 앱 프로세스 강제 종료는 지원하지 않습니다.`,
+                      `If interrupted, only this exact plan can restart up to ${plan.automatic_recovery_limit} times. Ambiguous provider work stops for review. Logout, Mac reboot/shutdown, lid-close/manual sleep, battery loss, or force-stopping the whole app process tree are not covered.`,
+                    )}
+                  </small>
+                </span>
+              </div>
+            </div>
+          )}
+          {plan.recovery_state === "active" &&
+            !plan.automatic_recovery_armed && (
+              <div className="night-plan-recovery">
+                <div>
+                  <AlertTriangle size={14} />
+                  <span>
+                    <strong>
+                      {plan.crash_guardian_active
+                        ? plan.automatic_recovery_attempts >=
+                          plan.automatic_recovery_limit
+                          ? copy(
+                              "마지막 자동 복구 시도가 실행 중입니다",
+                              "The final automatic recovery attempt is running",
+                            )
+                          : copy(
+                              "Crash guardian이 coordinator 시작을 확인하고 있습니다",
+                              "The crash guardian is checking coordinator startup",
+                            )
+                        : copy(
+                            "Coordinator는 실행 중이지만 crash guardian이 없습니다",
+                            "Coordinator is running without a crash guardian",
+                          )}
+                    </strong>
+                    <small>
+                      {plan.crash_guardian_active
+                        ? plan.automatic_recovery_attempts >=
+                          plan.automatic_recovery_limit
+                          ? copy(
+                              "Guardian은 현재 실행을 지켜보지만 복구 횟수를 모두 사용했습니다. 다시 중단되면 자동 재시작하지 않고 사람의 검토를 기다립니다.",
+                              "The guardian is watching this run, but all recovery attempts are spent. Another interruption will stop for human review instead of restarting.",
+                            )
+                          : copy(
+                              "Guardian은 연결됐지만 coordinator가 아직 실행 상태를 기록하지 않았습니다. 이 짧은 시작 구간에는 자동 복구를 준비됐다고 표시하지 않습니다.",
+                              "The guardian is connected, but the coordinator has not recorded a running state yet. Automatic recovery is not shown as armed during this short startup window.",
+                            )
+                        : copy(
+                            "현재 실행은 지켜보지만, 중단되면 자동 복구되지 않습니다. 이는 이전 버전에서 시작했거나 guardian 상태를 확인할 수 없는 계획입니다.",
+                            "This run is visible, but it will not recover automatically if it exits. It may have started on an earlier version or its guardian could not be verified.",
+                          )}
+                    </small>
+                  </span>
+                </div>
+              </div>
+            )}
           {plan.recovery_state === "recoverable" && (
             <div className="night-plan-recovery">
               <div>
@@ -1930,8 +2008,8 @@ function NightPlanHistorySection({
                   </strong>
                   <small>
                     {copy(
-                      "공급자 원장을 먼저 대조한 뒤 원래 승인한 미종결 작업만 복구할 수 있습니다.",
-                      "Only unfinished work from the original approval can be recovered, after provider ledgers are reconciled.",
+                      `자동 복구 ${plan.automatic_recovery_attempts}/${plan.automatic_recovery_limit}. 공급자 원장을 먼저 대조한 뒤 원래 승인한 미종결 작업만 수동 복구할 수 있습니다.`,
+                      `Automatic recovery ${plan.automatic_recovery_attempts}/${plan.automatic_recovery_limit}. Only unfinished work from the original approval can be manually recovered after provider ledgers are reconciled.`,
                     )}
                   </small>
                 </span>
@@ -2906,8 +2984,8 @@ export function OvernightView({
             ),
             expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
             warning: copy(
-              "확인하면 고정된 모든 lane과 순서를 수면 마감까지 실행합니다. 새 작업을 추가하거나 대체하지 않으며 후속 작업은 시작 직전에 다시 점검합니다.",
-              "This runs only the frozen lanes and order until the wake deadline. No work is added or substituted, and every later run is checked again just before start.",
+              "확인하면 고정된 모든 lane과 순서를 수면 마감까지 실행합니다. coordinator가 중단되면 같은 승인 계획만 최대 3회 자동 복구하며, 공급자 시작 여부가 불확실하면 재실행하지 않습니다. 로그아웃·Mac 재시작/종료·덮개 닫기/수동 잠자기·배터리 소진·전체 앱 프로세스 강제 종료는 지원하지 않습니다.",
+              "This runs only the frozen lanes and order until the wake deadline. If the coordinator exits, the same approved plan may recover up to three times; ambiguous provider starts are never replayed. Logout, Mac reboot/shutdown, lid-close/manual sleep, battery loss, or force-stopping the whole app process tree are not covered.",
             ),
           };
       if (!preparationMatchesCurrentPlan(preparation)) {

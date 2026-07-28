@@ -91,13 +91,21 @@ impl ApprovalLanguage {
             Self::Ko => concat!(
                 "확인하면 위에 고정된 모든 lane과 순서를 이번 수면 시간 동안 실행합니다. ",
                 "프로젝트 파일과 연결된 구독이 사용될 수 있습니다. ",
-                "새 작업을 추가하거나 대체하지 않으며 각 지연 작업은 시작 직전에 다시 점검합니다."
+                "새 작업을 추가하거나 대체하지 않으며 각 지연 작업은 시작 직전에 다시 점검합니다. ",
+                "coordinator가 중단되면 같은 승인 계획만 최대 3회 자동 복구하고, ",
+                "공급자 시작 여부가 불확실하면 재실행하지 않습니다. ",
+                "로그아웃·Mac 재시작/종료·덮개 닫기/수동 잠자기·배터리 소진·",
+                "전체 앱 프로세스 강제 종료는 지원하지 않습니다."
             )
             .to_owned(),
             Self::En => concat!(
                 "Confirming runs every lane and order frozen above during this sleep window. ",
                 "Project files and connected subscriptions may be used. No work is added or ",
-                "substituted, and each deferred run is checked again immediately before it starts."
+                "substituted, and each deferred run is checked again immediately before it starts. ",
+                "If the coordinator exits, only this approved plan may recover up to three times; ",
+                "ambiguous provider starts are never replayed. ",
+                "Logout, Mac reboot/shutdown, lid-close/manual sleep, battery loss, or force-stopping ",
+                "the whole app process tree are not covered."
             )
             .to_owned(),
         }

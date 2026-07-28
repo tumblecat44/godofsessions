@@ -131,6 +131,10 @@ pub fn run_night_coordinator_worker() {
     night_coordinator::run_worker_from_stdin();
 }
 
+pub fn run_night_coordinator_supervisor() {
+    night_coordinator::run_supervisor_from_stdin();
+}
+
 #[tauri::command]
 async fn load_snapshot() -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(build_snapshot)

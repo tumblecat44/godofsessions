@@ -439,6 +439,11 @@ export interface NightPlanSummary {
   deadline_at: string;
   worker_pid: number | null;
   recovery_state: "active" | "recoverable" | "expired" | "closed" | "unknown";
+  crash_guardian_active: boolean;
+  automatic_recovery_armed: boolean;
+  automatic_recovery_attempts: number;
+  automatic_recovery_limit: number;
+  last_automatic_recovery_at: string | null;
   lanes: NightPlanLaneSummary[];
   error: string | null;
 }

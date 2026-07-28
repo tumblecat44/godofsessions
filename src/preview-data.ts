@@ -759,6 +759,11 @@ export const previewNightPlanHistory: NightPlanHistory = {
       deadline_at: new Date(now + 6.75 * 3_600_000).toISOString(),
       worker_pid: 73142,
       recovery_state: "recoverable",
+      crash_guardian_active: false,
+      automatic_recovery_armed: false,
+      automatic_recovery_attempts: 1,
+      automatic_recovery_limit: 3,
+      last_automatic_recovery_at: new Date(now - 4 * 60_000).toISOString(),
       error: null,
       lanes: [
         {

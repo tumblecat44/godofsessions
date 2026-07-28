@@ -23,12 +23,15 @@ use crate::{
 mod ledger;
 mod morning;
 mod morning_review;
+mod supervisor;
 mod worker;
 mod workspace_evidence;
 
 const WORKER_FLAG: &str = "--night-coordinator-worker";
+const SUPERVISOR_FLAG: &str = "--night-coordinator-supervisor";
 const WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_CHALLENGE_MINUTES: i64 = 5;
+const MAX_AUTOMATIC_RECOVERY_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -122,6 +125,12 @@ struct CoordinatorPlan {
     updated_at: DateTime<Utc>,
     lanes: Vec<CoordinatorLane>,
     error: Option<String>,
+    #[serde(default)]
+    automatic_recovery_attempts: u32,
+    #[serde(default)]
+    last_automatic_recovery_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    last_automatic_recovery_reason: Option<String>,
 }
 
 impl CoordinatorPlan {
@@ -160,6 +169,9 @@ impl CoordinatorPlan {
                 })
                 .collect(),
             error: None,
+            automatic_recovery_attempts: 0,
+            last_automatic_recovery_at: None,
+            last_automatic_recovery_reason: None,
         }
     }
 
@@ -340,18 +352,18 @@ fn launch_worker(
         idempotency_key: plan_id.to_owned(),
         mode,
     };
-    let mut worker = spawn_detached_worker(&request)?;
-    let worker_pid = worker.id();
-    let Some(stdout) = worker.stdout.take() else {
+    let mut supervisor = spawn_detached_supervisor(&request)?;
+    let supervisor_pid = supervisor.id();
+    let Some(stdout) = supervisor.stdout.take() else {
         std::thread::spawn(move || {
-            let _ = worker.wait();
+            let _ = supervisor.wait();
         });
         return Ok(PortfolioDispatchResult {
             started_at: Utc::now().to_rfc3339(),
             approval_id,
             outcomes: Vec::new(),
             message: format!(
-                "밤 계획은 원자적으로 저장했고 coordinator(pid {worker_pid})를 시작했지만 인수 영수증 통로는 확인하지 못했습니다. 중복 실행은 하지 않습니다."
+                "밤 계획은 원자적으로 저장했고 crash guardian(pid {supervisor_pid})을 시작했지만 coordinator 인수 영수증 통로는 확인하지 못했습니다. 중복 실행은 하지 않습니다."
             ),
         });
     };
@@ -362,7 +374,7 @@ fn launch_worker(
         let _ = sender.send(line);
     });
     std::thread::spawn(move || {
-        let _ = worker.wait();
+        let _ = supervisor.wait();
     });
 
     match receiver.recv_timeout(WORKER_START_TIMEOUT) {
@@ -385,7 +397,7 @@ fn launch_worker(
             approval_id,
             outcomes: Vec::new(),
             message: format!(
-                "밤 계획은 원자적으로 저장했고 coordinator(pid {worker_pid})를 시작했지만 coordinator 인수 영수증은 아직 확인하지 못했습니다. 중복 실행은 하지 않습니다."
+                "밤 계획은 원자적으로 저장했고 crash guardian(pid {supervisor_pid})을 시작했지만 coordinator 인수 영수증은 아직 확인하지 못했습니다. 중복 실행은 하지 않습니다."
             ),
         }),
     }
@@ -401,6 +413,12 @@ fn ensure_recoverable(plan: &CoordinatorPlan, now: DateTime<Utc>) -> Result<(), 
     ) || unresolved_items(plan).is_empty()
     {
         return Err("이 밤 계획에는 복구할 미종결 작업이 없습니다.".to_owned());
+    }
+    if !ledger::guardian_lease_available(&plan.idempotency_key)? {
+        return Err(
+            "crash guardian이 이 밤 계획을 자동 복구 범위 안에서 계속 보호하고 있습니다."
+                .to_owned(),
+        );
     }
     if !ledger::lease_available(&plan.idempotency_key)? {
         return Err("현재 coordinator가 이 밤 계획을 이미 관제하고 있습니다.".to_owned());
@@ -467,7 +485,7 @@ pub(crate) fn reopen_morning_item(
 fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
     let approved_at = plan.approved_at;
     let deadline_at = plan.deadline_at;
-    let recovery_state = recovery_state(&plan);
+    let (recovery_state, crash_guardian_active, automatic_recovery_armed) = recovery_status(&plan);
     let has_attention = plan.lanes.iter().flat_map(|lane| &lane.items).any(|item| {
         matches!(
             item.state,
@@ -490,6 +508,13 @@ fn plan_summary(plan: CoordinatorPlan) -> NightPlanSummary {
         deadline_at: deadline_at.to_rfc3339(),
         worker_pid: plan.worker_pid,
         recovery_state,
+        crash_guardian_active,
+        automatic_recovery_armed,
+        automatic_recovery_attempts: plan.automatic_recovery_attempts,
+        automatic_recovery_limit: MAX_AUTOMATIC_RECOVERY_ATTEMPTS,
+        last_automatic_recovery_at: plan
+            .last_automatic_recovery_at
+            .map(|value| value.to_rfc3339()),
         lanes: plan
             .lanes
             .into_iter()
@@ -549,22 +574,50 @@ fn approved_start_window(
     (approved_at + offset, deadline_at - budget)
 }
 
-fn recovery_state(plan: &CoordinatorPlan) -> String {
-    if plan
+fn recovery_status(plan: &CoordinatorPlan) -> (String, bool, bool) {
+    let all_terminal = plan
         .lanes
         .iter()
         .flat_map(|lane| &lane.items)
-        .all(|item| item.state.is_terminal())
-    {
-        return "closed".to_owned();
+        .all(|item| item.state.is_terminal());
+    let worker_available = ledger::lease_available(&plan.idempotency_key).ok();
+    let guardian_available = ledger::guardian_lease_available(&plan.idempotency_key).ok();
+    let (recovery_state, crash_guardian_active) = classify_recovery_status(
+        all_terminal,
+        Utc::now() >= plan.deadline_at,
+        worker_available,
+        guardian_available,
+    );
+    let automatic_recovery_armed = recovery_state == "active"
+        && crash_guardian_active
+        && plan.state == "running"
+        && plan.automatic_recovery_attempts < MAX_AUTOMATIC_RECOVERY_ATTEMPTS;
+    (
+        recovery_state,
+        crash_guardian_active,
+        automatic_recovery_armed,
+    )
+}
+
+fn classify_recovery_status(
+    all_terminal: bool,
+    expired: bool,
+    worker_available: Option<bool>,
+    guardian_available: Option<bool>,
+) -> (String, bool) {
+    if all_terminal {
+        return ("closed".to_owned(), false);
     }
-    if Utc::now() >= plan.deadline_at {
-        return "expired".to_owned();
+    if expired {
+        return ("expired".to_owned(), false);
     }
-    match ledger::lease_available(&plan.idempotency_key) {
-        Ok(true) => "recoverable".to_owned(),
-        Ok(false) => "active".to_owned(),
-        Err(_) => "unknown".to_owned(),
+    let crash_guardian_active = matches!(guardian_available, Some(false));
+    match (worker_available, guardian_available) {
+        (Some(false), Some(_)) | (Some(true), Some(false)) => {
+            ("active".to_owned(), crash_guardian_active)
+        }
+        (Some(true), Some(true)) => ("recoverable".to_owned(), false),
+        _ => ("unknown".to_owned(), false),
     }
 }
 
@@ -580,26 +633,62 @@ pub fn run_worker_from_stdin() {
     }
 }
 
-fn spawn_detached_worker(request: &CoordinatorWorkerRequest) -> Result<Child, String> {
+pub fn run_supervisor_from_stdin() {
+    if let Err(error) = read_worker_request().and_then(supervisor::run) {
+        let reply = CoordinatorWorkerReply {
+            kind: "error".to_owned(),
+            result: None,
+            error: Some(error),
+        };
+        println!("{}", serde_json::to_string(&reply).unwrap_or_default());
+        let _ = std::io::stdout().flush();
+    }
+}
+
+fn spawn_detached_supervisor(request: &CoordinatorWorkerRequest) -> Result<Child, String> {
     let executable = std::env::current_exe()
         .map_err(|_| "현재 God of Sessions 실행기를 찾지 못했습니다.".to_owned())?;
-    let encoded = serde_json::to_vec(request)
-        .map_err(|_| "밤 coordinator 계약을 직렬화하지 못했습니다.".to_owned())?;
     let mut command = if Path::new("/usr/bin/caffeinate").is_file() {
         let mut command = Command::new("/usr/bin/caffeinate");
-        command.arg("-i").arg(&executable).arg(WORKER_FLAG);
+        command.arg("-i").arg(&executable).arg(SUPERVISOR_FLAG);
         command
     } else {
         let mut command = Command::new(&executable);
-        command.arg(WORKER_FLAG);
+        command.arg(SUPERVISOR_FLAG);
         command
     };
+    spawn_process_with_request(
+        &mut command,
+        request,
+        "밤 coordinator crash guardian을 시작하지 못했습니다.",
+    )
+}
+
+fn spawn_coordinator_worker(request: &CoordinatorWorkerRequest) -> Result<Child, String> {
+    let executable = std::env::current_exe()
+        .map_err(|_| "현재 God of Sessions 실행기를 찾지 못했습니다.".to_owned())?;
+    let mut command = Command::new(executable);
+    command.arg(WORKER_FLAG);
+    spawn_process_with_request(
+        &mut command,
+        request,
+        "밤 coordinator 작업자를 시작하지 못했습니다.",
+    )
+}
+
+fn spawn_process_with_request(
+    command: &mut Command,
+    request: &CoordinatorWorkerRequest,
+    spawn_error: &str,
+) -> Result<Child, String> {
+    let encoded = serde_json::to_vec(request)
+        .map_err(|_| "밤 coordinator 계약을 직렬화하지 못했습니다.".to_owned())?;
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| "밤 coordinator 작업자를 시작하지 못했습니다.".to_owned())?;
+        .map_err(|_| spawn_error.to_owned())?;
     let Some(mut stdin) = child.stdin.take() else {
         let _ = child.kill();
         let _ = child.wait();
@@ -652,5 +741,59 @@ mod summary_tests {
 
         assert_eq!(not_before, approved_at + chrono::Duration::hours(2));
         assert_eq!(latest_start, approved_at + chrono::Duration::minutes(210));
+    }
+
+    #[test]
+    fn recovery_status_distinguishes_guarded_running_and_legacy_running() {
+        assert_eq!(
+            classify_recovery_status(false, false, Some(false), Some(false)),
+            ("active".to_owned(), true)
+        );
+        assert_eq!(
+            classify_recovery_status(false, false, Some(true), Some(false)),
+            ("active".to_owned(), true),
+            "a guardian remains armed while the worker is between restart attempts"
+        );
+        assert_eq!(
+            classify_recovery_status(false, false, Some(false), Some(true)),
+            ("active".to_owned(), false),
+            "a legacy worker without a guardian must never claim automatic recovery"
+        );
+        assert_eq!(
+            classify_recovery_status(false, false, Some(true), Some(true)),
+            ("recoverable".to_owned(), false)
+        );
+    }
+
+    #[test]
+    fn final_recovery_attempt_keeps_guardian_visible_without_promising_another_restart() {
+        let plan_state = "running";
+        let attempts = MAX_AUTOMATIC_RECOVERY_ATTEMPTS;
+        let (state, guardian_active) =
+            classify_recovery_status(false, false, Some(false), Some(false));
+        let automatic_recovery_armed = state == "active"
+            && guardian_active
+            && plan_state == "running"
+            && attempts < MAX_AUTOMATIC_RECOVERY_ATTEMPTS;
+
+        assert_eq!(state, "active");
+        assert!(guardian_active);
+        assert!(!automatic_recovery_armed);
+    }
+
+    #[test]
+    fn terminal_expired_and_unknown_statuses_fail_closed() {
+        assert_eq!(
+            classify_recovery_status(true, false, Some(false), Some(false)),
+            ("closed".to_owned(), false)
+        );
+        assert_eq!(
+            classify_recovery_status(false, true, Some(false), Some(false)),
+            ("expired".to_owned(), false)
+        );
+        assert_eq!(
+            classify_recovery_status(false, false, None, Some(false)),
+            ("unknown".to_owned(), false)
+        );
     }
 }

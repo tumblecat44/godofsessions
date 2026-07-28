@@ -1,4 +1,134 @@
-# Shared operating context — 2026-07-28, cycle 06 native goals
+# Shared operating context — 2026-07-28, cycle 07 crash recovery
+
+## Cycle 07 synchronization
+
+The active synchronization window ran from **2026-07-28 00:42:04 to
+01:32:02 PDT**, for **49 minutes 58 seconds** of active research. No timer or
+idle wait was counted. The window compared current official agent releases,
+direct overnight competitors, durable-execution runtimes, macOS background
+service requirements, provider restart semantics, and the exact local
+coordinator, provider ledgers, approval plan, and recovery UI.
+
+The vertical slice is still:
+
+> Reconstruct the highest-value safe overnight goal from fragmented local
+> sessions, choose one or more providers using current plan-equivalent
+> capacity, freeze exact authority, keep the work moving for the sleep window,
+> and show provider plus workspace proof in the morning.
+
+No provider task will be approved or dispatched in this cycle.
+
+## Current market delta
+
+The session-control layer is now visibly commoditizing:
+
+- Grok Build has a local Agent Dashboard, cross-provider recent-session
+  resume, goals, scheduled commands, and workflows with durable progress.
+- Claude Agent View has a per-user supervisor, three guarded process restarts,
+  disk-backed session state, and reconnect after supervisor replacement.
+- GitHub and VS Code expose multi-project agent windows, searchable session
+  history, remote session continuation, model selection, effort controls,
+  usage budgets, and agent-session streaming.
+- Termdeck directly sells a Claude/Codex/Grok local control plane with native
+  session parity, usage, approvals, diffs, and remote access.
+- AgentsRoom sells multi-provider sessions, scheduling, recommendations, and a
+  user-confirmed restore snapshot.
+- Nightshift products already spend leftover Codex or Claude subscription
+  capacity on repo maintenance and enforce multi-hour runner loops.
+
+MORROW therefore cannot win as another terminal dashboard, scheduler, or
+generic task-to-agent picker. The defensible product decision remains:
+
+`fragmented intent → portfolio priority → plan-equivalent capacity → frozen
+authority → safe durable execution → morning proof`
+
+## Cycle 07 load-bearing defect
+
+The app already atomically persists an approved coordinator plan, owns it with
+an OS file lease, runs it under `caffeinate -i`, reconciles exact provider
+ledgers before progressing, and offers a manual recovery challenge.
+
+It does **not** keep the bedtime promise if the coordinator process itself is
+killed while the GUI is closed. The plan stays on disk and becomes manually
+recoverable, but nobody is awake to press the recovery button. A detached
+worker is not a supervisor.
+
+The smallest truthful correction is a detached, bounded supervisor:
+
+1. Launch and monitor the coordinator process under the existing idle-sleep
+   guard.
+2. On an unexpected coordinator exit, load the durable plan rather than trust
+   a PID.
+3. Reclaim only a still-`running` plan with unresolved work, an unexpired
+   original deadline, and an available exclusive lease.
+4. Charge a durable automatic recovery attempt **before** each restart; keep
+   the same plan ID, item contract fingerprints, order, workspace, provider,
+   permissions, and deadline.
+5. Allow at most three attempts with short exponential backoff.
+6. Let the resumed coordinator reconcile provider-owned ledgers first.
+   `Starting` work without exact evidence becomes `Uncertain`; it is never
+   blindly dispatched again.
+7. Never automatically resume `needs_attention`, expired, completed, or
+   actively owned plans. Leave them for the existing manual review.
+
+This follows the useful invariant shared by OpenClaw, Cloudflare durable
+fibers, Google Agent Executor, and Claude Agent View: durable admission and a
+stable execution identity precede work; recovery is bounded; ambiguous
+side-effects fail closed.
+
+## Honest platform boundary
+
+The detached supervisor covers GUI closure and coordinator process crashes
+while the Mac remains running and awake. It does **not** cover logout, shutdown,
+reboot, lid-close sleep, battery exhaustion, or a user force-stopping the whole
+application tree.
+
+Apple's supported persistent-background path is an app-bundled LaunchAgent or
+login item registered through `SMAppService`, subject to visible user approval
+and System Settings control. That requires packaging, lifecycle controls, a
+user-facing enable/disable setting, and reboot tests. It is a later slice and
+must not be implied by this one.
+
+## Cycle 07 implementation result
+
+The local app now launches a detached crash guardian around the night
+coordinator. The guardian holds an independent lifetime lease, and each
+automatic recovery holds the real coordinator lease across
+load–decision–attempt-record, removing the stale-plan overwrite race. It
+reuses only the frozen plan, charges attempts before spawn, backs off for
+1/2/4 seconds, and stops after three attempts or the original deadline.
+
+History now distinguishes:
+
+- a live guardian with another automatic restart available;
+- a guardian checking initial coordinator startup;
+- a final 3/3 attempt with no further restart promise;
+- a legacy running coordinator without a guardian;
+- a stopped recoverable plan.
+
+The focused coordinator suite passed 37 tests. The full backend suite passed
+248 tests with 19 explicitly subscription-consuming tests ignored. The
+production frontend build, strict Clippy run, JSONL validation, and whitespace
+check passed. A final independent review found P0: 0, P1: 0, and P2: 0.
+
+The second real-path read-only trial reconstructed 52 sessions into 9 projects
+but returned no candidates because Claude, Codex, and Grok capacity probes were
+all degraded. That no-run is honest, but it identifies the next load-bearing
+defect: bedtime recommendation is not useful on this machine until current
+plan and remaining-capacity evidence can be recovered without guessing.
+
+## Next falsification after cycle 07
+
+After the supervisor is tested with a forced coordinator exit, the strongest
+remaining release risk is the installed-provider boundary: a separately
+authorized live native Goal must validate real Codex, Claude, and Grok event
+ordering, transcript flush timing, process interruption, and morning evidence.
+Until that exact approval exists, unit, simulated-crash, and read-only
+integration results must not be called a live overnight run.
+
+---
+
+## Historical cycle 06 context
 
 ## Cycle contract
 

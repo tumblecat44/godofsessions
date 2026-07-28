@@ -535,6 +535,11 @@ pub struct NightPlanSummary {
     pub deadline_at: String,
     pub worker_pid: Option<u32>,
     pub recovery_state: String,
+    pub crash_guardian_active: bool,
+    pub automatic_recovery_armed: bool,
+    pub automatic_recovery_attempts: u32,
+    pub automatic_recovery_limit: u32,
+    pub last_automatic_recovery_at: Option<String>,
     pub lanes: Vec<NightPlanLaneSummary>,
     pub error: Option<String>,
 }

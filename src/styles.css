@@ -3305,6 +3305,16 @@ button:active:not(:disabled) {
   border-radius: var(--radius-control);
 }
 
+.night-plan-recovery--armed {
+  color: var(--signal-teal);
+  background: rgba(99, 181, 160, 0.055);
+  border-color: rgba(99, 181, 160, 0.17);
+}
+
+.night-plan-recovery--armed strong {
+  color: var(--ink-secondary);
+}
+
 .night-plan-recovery > div {
   min-width: 0;
   display: flex;

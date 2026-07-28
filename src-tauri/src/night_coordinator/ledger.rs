@@ -73,13 +73,26 @@ pub(super) fn load_recent(limit: usize) -> Result<Vec<CoordinatorPlan>, String> 
 }
 
 pub(super) fn acquire_lease(idempotency_key: &str) -> Result<CoordinatorLease, String> {
-    acquire_lease_at(&root(), idempotency_key)?.ok_or_else(|| {
+    try_acquire_lease(idempotency_key)?.ok_or_else(|| {
         "이 밤 계획은 다른 coordinator가 이미 관제하고 있어 중복 실행하지 않습니다.".to_owned()
     })
 }
 
+pub(super) fn try_acquire_lease(idempotency_key: &str) -> Result<Option<CoordinatorLease>, String> {
+    acquire_lease_at(&root(), idempotency_key)
+}
+
 pub(super) fn lease_available(idempotency_key: &str) -> Result<bool, String> {
     lease_available_at(&root(), idempotency_key)
+}
+
+pub(super) fn acquire_guardian_lease(idempotency_key: &str) -> Result<CoordinatorLease, String> {
+    acquire_guardian_lease_at(&root(), idempotency_key)?
+        .ok_or_else(|| "이 밤 계획은 다른 crash guardian이 이미 보호하고 있습니다.".to_owned())
+}
+
+pub(super) fn guardian_lease_available(idempotency_key: &str) -> Result<bool, String> {
+    guardian_lease_available_at(&root(), idempotency_key)
 }
 
 fn root() -> PathBuf {
@@ -99,6 +112,10 @@ fn lease_path(root: &Path, idempotency_key: &str) -> Option<PathBuf> {
     safe_plan_id(idempotency_key).then(|| root.join(format!("{idempotency_key}.lock")))
 }
 
+fn guardian_lease_path(root: &Path, idempotency_key: &str) -> Option<PathBuf> {
+    safe_plan_id(idempotency_key).then(|| root.join(format!("{idempotency_key}.guardian.lock")))
+}
+
 fn acquire_lease_at(
     root: &Path,
     idempotency_key: &str,
@@ -107,27 +124,18 @@ fn acquire_lease_at(
         .map_err(|_| "밤 coordinator 원장 폴더를 만들지 못했습니다.".to_owned())?;
     let path = lease_path(root, idempotency_key)
         .ok_or_else(|| "밤 coordinator lease 식별자가 안전하지 않습니다.".to_owned())?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|_| "밤 coordinator lease 파일을 열지 못했습니다.".to_owned())?;
-    // SAFETY: `file` is a live descriptor and flock does not outlive this call.
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if result == 0 {
-        return Ok(Some(CoordinatorLease { file }));
-    }
-    let error = std::io::Error::last_os_error();
-    if error
-        .raw_os_error()
-        .is_some_and(|code| code == libc::EWOULDBLOCK || code == libc::EAGAIN)
-    {
-        return Ok(None);
-    }
-    Err("밤 coordinator lease를 확인하지 못했습니다.".to_owned())
+    acquire_file_lease(path, "밤 coordinator lease를 확인하지 못했습니다.")
+}
+
+fn acquire_guardian_lease_at(
+    root: &Path,
+    idempotency_key: &str,
+) -> Result<Option<CoordinatorLease>, String> {
+    std::fs::create_dir_all(root)
+        .map_err(|_| "밤 coordinator 원장 폴더를 만들지 못했습니다.".to_owned())?;
+    let path = guardian_lease_path(root, idempotency_key)
+        .ok_or_else(|| "밤 coordinator guardian 식별자가 안전하지 않습니다.".to_owned())?;
+    acquire_file_lease(path, "밤 coordinator guardian lease를 확인하지 못했습니다.")
 }
 
 fn lease_available_at(root: &Path, idempotency_key: &str) -> Result<bool, String> {
@@ -142,6 +150,48 @@ fn lease_available_at(root: &Path, idempotency_key: &str) -> Result<bool, String
     Ok(acquire_lease_at(root, idempotency_key)?.is_some())
 }
 
+fn guardian_lease_available_at(root: &Path, idempotency_key: &str) -> Result<bool, String> {
+    let path = guardian_lease_path(root, idempotency_key)
+        .ok_or_else(|| "밤 coordinator guardian 식별자가 안전하지 않습니다.".to_owned())?;
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => {
+            return Err("밤 coordinator guardian lease 경로가 일반 파일이 아닙니다.".to_owned())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(_) => {
+            return Err("밤 coordinator guardian lease 메타데이터를 읽지 못했습니다.".to_owned());
+        }
+    }
+    Ok(acquire_guardian_lease_at(root, idempotency_key)?.is_some())
+}
+
+fn acquire_file_lease(
+    path: PathBuf,
+    error_message: &str,
+) -> Result<Option<CoordinatorLease>, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| error_message.to_owned())?;
+    // SAFETY: `file` is a live descriptor and flock does not outlive this call.
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        return Ok(Some(CoordinatorLease { file }));
+    }
+    let error = std::io::Error::last_os_error();
+    if error
+        .raw_os_error()
+        .is_some_and(|code| code == libc::EWOULDBLOCK || code == libc::EAGAIN)
+    {
+        return Ok(None);
+    }
+    Err(error_message.to_owned())
+}
 fn validate(plan: &CoordinatorPlan) -> Result<(), String> {
     let duration_seconds = (plan.deadline_at - plan.approved_at).num_seconds();
     if plan.version != 1
@@ -151,6 +201,11 @@ fn validate(plan: &CoordinatorPlan) -> Result<(), String> {
         || plan.lanes.is_empty()
         || plan.lanes.iter().any(|lane| lane.items.is_empty())
         || plan.item_count() == 0
+        || plan.automatic_recovery_attempts > super::MAX_AUTOMATIC_RECOVERY_ATTEMPTS
+        || plan
+            .last_automatic_recovery_reason
+            .as_deref()
+            .is_some_and(|value| value.is_empty() || value.len() > 500)
     {
         return Err("밤 coordinator 계획의 구조나 시간이 올바르지 않습니다.".to_owned());
     }
@@ -380,6 +435,9 @@ mod tests {
 
         plan.state = "running".to_owned();
         plan.worker_pid = Some(42);
+        plan.automatic_recovery_attempts = 1;
+        plan.last_automatic_recovery_at = Some(plan.approved_at + chrono::Duration::minutes(5));
+        plan.last_automatic_recovery_reason = Some("coordinator가 신호로 종료됨".to_owned());
         update_at(temporary.path(), &plan).expect("atomic update");
 
         let loaded = load_at(temporary.path(), &plan.idempotency_key)
@@ -387,6 +445,15 @@ mod tests {
             .expect("stored plan");
         assert_eq!(loaded.state, "running");
         assert_eq!(loaded.worker_pid, Some(42));
+        assert_eq!(loaded.automatic_recovery_attempts, 1);
+        assert_eq!(
+            loaded.last_automatic_recovery_at,
+            plan.last_automatic_recovery_at
+        );
+        assert_eq!(
+            loaded.last_automatic_recovery_reason,
+            plan.last_automatic_recovery_reason
+        );
         assert!(temporary
             .path()
             .read_dir()
@@ -399,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_workspace_wait_without_a_kind_remains_loadable() {
+    fn legacy_plan_without_recovery_fields_or_workspace_wait_kind_remains_loadable() {
         let mut source = plan();
         source.lanes[0].items[0].waiting_reason =
             Some("같은 실제 작업공간의 다른 실행을 기다립니다.".to_owned());
@@ -411,10 +478,17 @@ mod tests {
             .and_then(serde_json::Value::as_object_mut)
             .expect("item")
             .remove("waiting_kind");
+        let object = encoded.as_object_mut().expect("plan");
+        object.remove("automatic_recovery_attempts");
+        object.remove("last_automatic_recovery_at");
+        object.remove("last_automatic_recovery_reason");
 
         let decoded: CoordinatorPlan = serde_json::from_value(encoded).expect("legacy plan");
 
         assert_eq!(decoded.lanes[0].items[0].waiting_kind, None);
+        assert_eq!(decoded.automatic_recovery_attempts, 0);
+        assert_eq!(decoded.last_automatic_recovery_at, None);
+        assert_eq!(decoded.last_automatic_recovery_reason, None);
         validate(&decoded).expect("legacy wait stays valid");
     }
 
@@ -450,5 +524,37 @@ mod tests {
         assert!(acquire_lease_at(temporary.path(), &plan_id)
             .expect("released lease")
             .is_some());
+    }
+
+    #[test]
+    fn guardian_lease_is_exclusive_and_independent_from_worker_lease() {
+        let temporary = tempfile::tempdir().expect("temporary ledger");
+        let plan_id = format!("gos-portfolio-{}", "e".repeat(20));
+        let guardian_path =
+            guardian_lease_path(temporary.path(), &plan_id).expect("guardian lease path");
+
+        assert!(guardian_lease_available_at(temporary.path(), &plan_id)
+            .expect("missing guardian is available"));
+        assert!(
+            !guardian_path.exists(),
+            "read-only availability must not create a guardian lease"
+        );
+
+        let guardian = acquire_guardian_lease_at(temporary.path(), &plan_id)
+            .expect("first guardian lease")
+            .expect("guardian available");
+        assert!(!guardian_lease_available_at(temporary.path(), &plan_id)
+            .expect("held guardian is unavailable"));
+        assert!(
+            acquire_lease_at(temporary.path(), &plan_id)
+                .expect("worker lease stays independent")
+                .is_some(),
+            "the guardian must not occupy the coordinator worker lease"
+        );
+
+        drop(guardian);
+
+        assert!(guardian_lease_available_at(temporary.path(), &plan_id)
+            .expect("released guardian is available"));
     }
 }
