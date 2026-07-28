@@ -260,3 +260,25 @@ prove the final subscription-consuming vertical slice:
 
 That run changes provider state and consumes subscription capacity, so it
 remains outside this sleeping user's authority.
+
+## Final UI honesty follow-up
+
+A post-bundle contract audit found one user-facing inconsistency in the same
+slice. The candidate card labels every resumable recommendation “Resume
+existing session,” while its approval detail correctly says that Claude and
+Grok preserve the source by creating an isolated fork. Codex really does resume
+the existing thread. The generic summary therefore overstates mutation of the
+original Claude/Grok session immediately before approval.
+
+The bounded follow-up changes only that summary label:
+
+- Codex: resume the existing thread;
+- Claude/Grok: isolated fork from the existing session;
+- other resumable routes: resume the existing session;
+- new work: new session.
+
+It does not change provider commands, recommendation rank, authority, sandbox,
+or dispatch behavior.
+
+The candidate summary now uses those provider-specific labels in Korean and
+English. The production frontend build passed after the change.

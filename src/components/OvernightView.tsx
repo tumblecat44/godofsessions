@@ -1400,6 +1400,17 @@ function CandidateCard({
       : recommendationConfidenceLabelsEn;
   const poolLabels =
     language === "ko" ? capacityPoolLabels : capacityPoolLabelsEn;
+  const sessionModeLabel = !candidate.resume_existing
+    ? copy("새 세션", "New session")
+    : candidate.execution_surface === "codex"
+      ? copy("기존 thread 재개", "Resume existing thread")
+      : candidate.execution_surface === "claude" ||
+          candidate.execution_surface === "grok"
+        ? copy(
+            "기존 세션에서 격리 fork",
+            "Isolated fork from existing session",
+          )
+        : copy("기존 세션 재개", "Resume existing session");
   return (
     <article
       className={`candidate-card ${primary ? "candidate-card--primary" : ""}`}
@@ -1441,11 +1452,7 @@ function CandidateCard({
               {copy("작업자", "Worker")} <strong>{candidate.executor_profile}</strong>
             </span>
           )}
-          <span>
-            {candidate.resume_existing
-              ? copy("기존 세션 재개", "Resume existing session")
-              : copy("새 세션 필요", "New session")}
-          </span>
+          <span>{sessionModeLabel}</span>
           <small>
             {candidate.capacity_ready_after_hours > 0 &&
               copy(
