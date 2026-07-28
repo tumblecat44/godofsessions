@@ -228,6 +228,7 @@ live capacity result and is not presented as a product success.
 - real Codex chat model metadata: passed;
 - real local connector snapshot under the ten-second floor: passed;
 - production frontend build: passed;
+- debug macOS Tauri application bundle: passed;
 - Rust formatting, JSONL validation, and whitespace checks: passed;
 - Clippy with warnings denied and the repository's pre-existing dead-code,
   argument-count, and enum-name lint families explicitly allowed: passed.
