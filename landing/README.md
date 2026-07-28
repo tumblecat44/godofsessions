@@ -1,8 +1,8 @@
-# God of Sessions landing page
+# Morrow — God of Sessions landing page
 
-This is the local launch candidate for `sessions.vibejason.com`. It is a
-static Vite site with English and Korean copy, an actual-product proof cut,
-the honest provider support matrix, and a private-alpha install path.
+This is the source for [morrow.vibejason.com](https://morrow.vibejason.com).
+It is a static Vite site with English and Korean copy, an actual-product proof
+cut, the honest provider support matrix, and a private-alpha install path.
 
 The launch art direction is a **night watch instrument**: warm editorial paper
 for the operator's decisions, a dark precision surface for Morrow and provider
@@ -12,15 +12,16 @@ character art supports the install close without replacing product evidence.
 
 ## Run it
 
-From the repository root:
+Install dependencies and run the site:
 
 ```sh
-npm run landing:dev
-npm run landing:build
-npm run landing:preview
+npm install
+npm run dev
+npm run build
+npm run preview
 ```
 
-The build output is `landing/dist/`.
+The build output is `dist/`.
 
 ## Verified launch behavior
 
@@ -40,7 +41,7 @@ The build output is `landing/dist/`.
 The landing expects this local file:
 
 ```text
-landing/public/downloads/God-of-Sessions_0.1.0_aarch64.dmg
+public/downloads/God-of-Sessions_0.1.0_aarch64.dmg
 ```
 
 DMGs are intentionally ignored by Git. Public hosting should receive a
@@ -50,6 +51,6 @@ download action instead of sending the user to an HTML fallback.
 
 ## Launch boundary
 
-Do not deploy this page as a public download until the conditions in
-`docs/launch/install-readiness.md` are cleared. The source is a private-alpha
-candidate, not a claim that Apple Gatekeeper accepts the current build.
+The page is public, but the current app download is a private-alpha candidate.
+Do not describe it as a frictionless public Mac release until Apple
+notarization and a clean-machine install test pass.

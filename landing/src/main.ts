@@ -246,7 +246,7 @@ const downloadLink = document.querySelector<HTMLAnchorElement>("[data-download-l
 const artifactState = document.querySelector<HTMLElement>("[data-artifact-state]");
 
 if (downloadLink && artifactState) {
-  fetch(downloadLink.href, { method: "HEAD" })
+  fetch(`${downloadLink.href}.checksum.txt`, { method: "HEAD" })
     .then((response) => {
       const contentType = response.headers.get("content-type") ?? "";
       if (!response.ok || contentType.includes("text/html")) {
