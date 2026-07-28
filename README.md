@@ -3,6 +3,11 @@
 God of Sessions is a local-first control plane for AI work sessions and
 overnight engineering decisions.
 
+The project is open source under the [MIT License](LICENSE). Read
+[OPEN_SOURCE_BOUNDARY.md](OPEN_SOURCE_BOUNDARY.md) before adding data, assets,
+or generated artifacts, and see [AGENTS.md](AGENTS.md) for instructions used by
+AI coding agents working in this repository.
+
 It does not replace Claude Code, Codex, Cursor, Grok Build, Hermes, or
 OpenClaw. It discovers sessions created in those tools, normalizes their
 metadata, shows which work needs attention, and recommends which project and
