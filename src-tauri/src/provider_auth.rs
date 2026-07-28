@@ -201,10 +201,6 @@ fn grok_budget_proves_authentication(budget: &ResourceBudget) -> bool {
     budget.provider == Provider::Grok
         && budget.state == ResourceState::Ready
         && !budget.windows.is_empty()
-        && budget
-            .plan
-            .as_deref()
-            .is_some_and(|plan| !plan.trim().is_empty())
         && budget.source_label == "Grok ACP billing"
 }
 
@@ -477,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn grok_authentication_requires_a_positive_live_billing_response() {
+    fn grok_authentication_requires_a_fresh_ready_billing_window() {
         let mut budget = crate::usage::grok::tests::sample_budget_for_auth_test();
         assert!(grok_budget_proves_authentication(&budget));
         budget.state = ResourceState::Degraded;
@@ -491,6 +487,8 @@ mod tests {
             resets_at: None,
         });
         budget.plan = None;
+        assert!(grok_budget_proves_authentication(&budget));
+        budget.source_label = "cached fixture".to_owned();
         assert!(!grok_budget_proves_authentication(&budget));
     }
 

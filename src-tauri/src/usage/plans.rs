@@ -95,8 +95,10 @@ fn detect_tier(
     let plan = budget
         .plan
         .as_deref()?
-        .to_ascii_lowercase()
-        .replace([' ', '-', '_', '$'], "");
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
     match budget.provider {
         Provider::Claude => match plan.as_str() {
             "pro" | "claudepro" => Some((
@@ -285,6 +287,22 @@ mod tests {
             .message
             .as_deref()
             .is_some_and(|message| message.contains("Max 5x/20x")));
+    }
+
+    #[test]
+    fn current_openclaw_max20_label_is_exact_provider_evidence() {
+        let mut budgets = vec![budget(Provider::Claude, Some("Max (20x)"), 95.0, "5시간")];
+        apply_profiles(&mut budgets, &SubscriptionPlanOverrides::default());
+
+        let estimate = budgets[0].plan_capacity.as_ref().expect("estimate");
+        assert_eq!(estimate.tier_label, "Claude Max 20x");
+        assert_eq!(estimate.multiplier, 20.0);
+        assert_eq!(estimate.equivalent_base_plan_percent, 100.0);
+        assert_eq!(
+            estimate.confidence,
+            CapacityEstimateConfidence::ProviderReported
+        );
+        assert_eq!(estimate.scope, "verified_session");
     }
 
     #[test]

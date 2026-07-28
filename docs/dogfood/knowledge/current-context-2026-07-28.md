@@ -300,3 +300,90 @@ No provider task was approved or dispatched. The next honest evidence gap is a
 separately authorized, bounded live Goal run to verify installed-provider event
 ordering and transcript flush timing. Until then, successful unit and
 read-only integration evidence must not be described as a live overnight run.
+
+---
+
+## Cycle 08 context — provider-native capacity evidence
+
+The active synchronization window ran from **2026-07-28 05:51:14 to
+06:21:15 PDT**, for **30 minutes 1 second** of active research. It covered
+current control-plane competitors, long-running agent demand, provider-native
+usage wires, subscription policy, installed versions, and a release-equivalent
+read-only portfolio trial.
+
+That actual app-permission trial corrected cycle 07's sandbox-contaminated
+result. It reconstructed **52 sessions** into **9 projects**, selected **3
+candidates**, and produced **3 native-Goal preflights** without approving or
+dispatching work. Claude and Codex capacity were ready; Grok returned an exact
+authentication failure.
+
+### Current product judgment
+
+Session dashboards, background workers, worktrees, resume, remote control,
+usage meters, burn-rate attribution, diffs, and prompt queues are commodity
+surfaces. The inspected set now includes official Claude, Codex, and Grok
+control planes plus Agent Sessions, Termdeck, Agent of Empires, OpenUsage,
+abtop, Nightshift, and Overnight.
+
+MORROW should not become another terminal fleet UI. Its differentiated promise
+is the complete decision contract:
+
+`fragmented intent → portfolio priority → exact plan-equivalent capacity →
+frozen authority → durable execution → morning proof`
+
+### Current provider truth
+
+- Codex `0.145.0-alpha.30` returned a single 10,080-minute weekly window in
+  `primary`, a null `secondary`, two reset credits, account plan Plus, and an
+  internal Pro label. Window duration and account plan remain authoritative.
+- OpenClaw's current Claude snapshot can carry `plan`, `error`, windows, and
+  extra-usage budget. Its exact plan label is `Max (20x)`. The local parser
+  currently discards plan/error and cannot normalize the parentheses.
+- Grok Build `0.2.112` confirmed that `_x.ai/billing` is the correct ACP wire
+  request. It returned a structured authentication-required error. Current
+  source supports percentage, legacy used/limit, optional tier, prepaid
+  balance, and proto3-omitted zero fields.
+- Anthropic still forbids a third-party product from offering Claude.ai login
+  or routing consumer-plan credentials. MORROW may invoke the user's official
+  installed CLI but must not broker or copy the credential.
+
+### Cycle 08 selected defect
+
+Repair only the provider-evidence boundary:
+
+1. preserve Claude plan and error;
+2. recognize `Max (20x)` exactly;
+3. expose actionable Grok authentication and protocol errors;
+4. parse current, legacy, and valid-zero Grok billing;
+5. let a fresh ready Grok billing window prove authentication without requiring
+   an optional plan label.
+
+No provider work is approved or dispatched in this cycle. A successful
+read-only recommendation proves selection and preflight, not live unattended
+execution.
+
+### Cycle 08 verified implementation
+
+The selected provider-evidence repair is complete:
+
+- Claude now preserves bounded plan/error evidence and recognizes the current
+  provider-reported `Max (20x)` label exactly.
+- Grok keeps the correct `_x.ai/billing` wire, exposes actionable login and
+  unsupported-method failures, and reads current and legacy billing shapes.
+- A proto3-omitted Grok percentage counts as zero only when the response has a
+  known weekly/monthly period type or parseable RFC3339 period timestamps.
+- A fresh ready Grok billing window can prove installed-CLI authentication
+  without an optional tier label; stale or degraded evidence still cannot
+  authorize execution.
+
+The post-change real read-only trial again reconstructed 52 sessions into 9
+projects, selected 3 candidates, and produced 3 native-Goal preflights. Grok's
+live failure now names `grok login --oauth`; no provider work was dispatched.
+The full backend passed 257 tests with 19 explicitly live tests ignored, the
+production frontend build and strict Clippy passed, and the final independent
+review reported P0/P1/P2 all zero.
+
+The remaining claim boundary is unchanged: resume/new-session selection,
+frozen approval, provider-native Goal execution, interruption recovery, and
+morning proof have not been exercised together against a real subscription.
+That final run requires a separately approved, bounded provider task.

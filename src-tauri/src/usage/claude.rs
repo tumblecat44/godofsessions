@@ -66,17 +66,40 @@ fn parse(output: &str) -> Result<ResourceBudget, String> {
         .and_then(Value::as_i64)
         .and_then(unix_millis_to_rfc3339)
         .unwrap_or_else(|| Utc::now().to_rfc3339());
+    let plan = provider
+        .get("plan")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|plan| !plan.is_empty())
+        .map(str::to_owned);
+    let message = provider
+        .get("error")
+        .and_then(Value::as_str)
+        .and_then(bounded_provider_message);
 
     Ok(ResourceBudget {
         provider: Provider::Claude,
         state: state_for_windows(&windows),
-        plan: None,
+        plan,
         plan_capacity: None,
         windows,
         credits: None,
         observed_at,
         source_label: SOURCE_LABEL.to_owned(),
-        message: None,
+        message,
+    })
+}
+
+fn bounded_provider_message(message: &str) -> Option<String> {
+    let compact = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    let bounded = compact.chars().take(200).collect::<String>();
+    Some(if compact.chars().count() > 200 {
+        format!("{bounded}…")
+    } else {
+        bounded
     })
 }
 
@@ -118,5 +141,52 @@ mod tests {
         assert_eq!(budget.windows[0].label, "5시간");
         assert_eq!(budget.windows[1].label, "7일");
         assert_eq!(budget.source_label, SOURCE_LABEL);
+    }
+
+    #[test]
+    fn parser_preserves_current_openclaw_plan_label() {
+        let output = r#"{
+  "runtimeVersion": "test",
+  "usage": {
+    "updatedAt": 1784955350957,
+    "providers": [{
+      "provider": "anthropic",
+      "displayName": "Claude",
+      "plan": "Max (20x)",
+      "windows": [{"label":"5h","usedPercent":95}]
+    }]
+  }
+}"#;
+
+        let budget = parse(output).expect("claude budget");
+
+        assert_eq!(budget.plan.as_deref(), Some("Max (20x)"));
+        assert_eq!(budget.state, crate::model::ResourceState::Ready);
+    }
+
+    #[test]
+    fn parser_preserves_bounded_provider_error_without_windows() {
+        let output = format!(
+            r#"{{
+  "runtimeVersion": "test",
+  "usage": {{
+    "providers": [{{
+      "provider": "anthropic",
+      "displayName": "Claude",
+      "windows": [],
+      "error": "  HTTP 403   {}  "
+    }}]
+  }}
+}}"#,
+            "x".repeat(240)
+        );
+
+        let budget = parse(&output).expect("degraded Claude budget");
+
+        assert_eq!(budget.state, crate::model::ResourceState::Degraded);
+        let message = budget.message.expect("provider error");
+        assert!(message.starts_with("HTTP 403 "));
+        assert!(message.ends_with('…'));
+        assert_eq!(message.chars().count(), 201);
     }
 }
