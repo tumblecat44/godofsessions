@@ -2207,43 +2207,7 @@ pub(crate) fn read_codex_account() -> Result<CodexAccount, String> {
 }
 
 pub(crate) fn codex_binary() -> Option<PathBuf> {
-    let home = dirs::home_dir();
-    let known = [
-        Some(PathBuf::from(
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-        )),
-        home.as_ref().map(|home| {
-            home.join("Applications")
-                .join("ChatGPT.app")
-                .join("Contents/Resources/codex")
-        }),
-    ];
-    if let Some(path) = known.into_iter().flatten().find(|path| path.is_file()) {
-        return Some(path);
-    }
-
-    for applications in [
-        Some(PathBuf::from("/Applications")),
-        home.map(|home| home.join("Applications")),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let Ok(entries) = std::fs::read_dir(applications) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let app = entry.path();
-            if app.extension().and_then(|value| value.to_str()) != Some("app") {
-                continue;
-            }
-            let candidate = app.join("Contents/Resources/codex");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    find_executable("codex")
+    crate::execution_routes::resolve_codex_binary()
 }
 
 fn start_app_server(binary: &Path) -> Result<(Child, ChildStdin, Receiver<String>), String> {

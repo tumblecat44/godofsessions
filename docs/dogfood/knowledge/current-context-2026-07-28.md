@@ -387,3 +387,59 @@ The remaining claim boundary is unchanged: resume/new-session selection,
 frozen approval, provider-native Goal execution, interruption recovery, and
 morning proof have not been exercised together against a real subscription.
 That final run requires a separately approved, bounded provider task.
+
+## Cycle 09 context update — 07:05 PDT
+
+A second exact thirty-minute research window ran from 06:35:42 to 07:05:43
+PDT. It preserved cycle 08's verified result and compared the same slice
+against the July 2026 Codex-to-ChatGPT desktop migration, current provider
+session semantics, control-plane competitors, and unattended-agent safety
+guidance.
+
+The market has made generic multi-agent fleet UI a commodity. Claude Agent
+View, Grok dashboards and Workflows, Cursor 3, Termdeck, Agent Sessions, and
+Nightshift cover large portions of session persistence, routing, usage,
+approvals, background operation, and remote supervision. MORROW should keep its
+complete decision contract rather than grow another cockpit:
+
+`fragmented intent → portfolio priority → exact plan-equivalent capacity →
+frozen authority → durable execution → morning proof`
+
+The current release-blocking defect is narrower and local. OpenAI has moved the
+Codex desktop experience into a ChatGPT-named app while retaining Codex
+identity and history. The installed official host is
+`/Applications/ChatGPT.app`, bundle identifier `com.openai.codex`, and bundles
+Codex CLI `0.145.0-alpha.30`. A separately installed command-path Codex is
+currently broken.
+
+MORROW's chat, usage, execution routes, and connector provenance do not share a
+single runtime resolver. Some hard-code the system ChatGPT path; chat scans any
+application containing a `codex` file; other surfaces can fall through to a
+standalone executable. During a rebrand or staged update this can make chat
+appear connected while recommendation capacity or execution readiness observes
+a different runtime.
+
+Cycle 09 therefore selects one change: resolve the current or legacy official
+bundle by stable `CFBundleIdentifier`, discover renamed official bundles,
+reject unrelated bundles, fall back to standalone executables only afterward,
+and reuse the result across every Codex surface. Bundle identity is discovery
+evidence, not an authenticity claim, and no credential is read.
+
+Provider session-isolation semantics remain a later explicit product decision:
+Codex has same-thread resume and new-ID fork; Claude and Grok expose comparable
+resume/fork choices. The current slice should not silently rename or broaden
+that behavior while repairing runtime identity.
+
+Cycle 09's implementation now shares one resolver across Codex chat, account
+auth, usage, execution routes and native dispatch, and connector provenance.
+Every exact-bundle app candidate is enumerated once and ranked by plist product
+generation, canonical name, installation root, and path. This is important
+because the final independent review found two filename edge cases in
+succession: a renamed current host losing to a named legacy host, then a current
+host renamed exactly `Codex.app` disappearing. Six regressions now cover
+current/legacy coexistence, arbitrary and crossed renames, unrelated bundle
+rejection, and standalone fallback. Final review is P0 0, P1 0, P2 0.
+
+The final post-review read-only slice saw 56 sessions, 9 projects, 3 candidates,
+and 3 provider-native Goal preflights. Claude and Codex are ready; Grok is
+logged out and correctly degraded. No provider Goal was approved or started.

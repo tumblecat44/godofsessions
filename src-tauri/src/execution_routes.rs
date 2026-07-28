@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fs,
     path::{Path, PathBuf},
 };
@@ -10,6 +11,16 @@ use crate::model::{
     AdapterReadiness, CapacityPool, ExecutionRoute, ExecutionRouteInventory, Provider,
     ResourceBudget, ResourceState, RouteCapability,
 };
+
+const CODEX_APP_BUNDLE_ID: &str = "com.openai.codex";
+const CODEX_BUNDLED_BINARY: &str = "Contents/Resources/codex";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexHostGeneration {
+    Current,
+    Legacy,
+    Unknown,
+}
 
 #[derive(Debug, Clone)]
 pub struct RouteSources {
@@ -35,11 +46,9 @@ impl RouteSources {
                 home.join(".local/bin/claude"),
                 PathBuf::from("/usr/local/bin/claude"),
             ]),
-            codex_binary: first_file([
-                PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex"),
-                PathBuf::from("/opt/homebrew/bin/codex"),
-                PathBuf::from("/usr/local/bin/codex"),
-            ]),
+            codex_binary: resolve_codex_binary().unwrap_or_else(|| {
+                PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex")
+            }),
             grok_binary: resolve_grok_binary().unwrap_or_else(|| home.join(".grok/bin/grok")),
             cursor_binary: first_file([
                 home.join(".local/bin/cursor"),
@@ -493,6 +502,134 @@ fn first_file<const N: usize>(paths: [PathBuf; N]) -> PathBuf {
         .unwrap_or_else(|| paths[0].clone())
 }
 
+pub(crate) fn resolve_codex_binary() -> Option<PathBuf> {
+    let home = dirs::home_dir();
+    let application_roots = [
+        Some(PathBuf::from("/Applications")),
+        home.as_ref().map(|home| home.join("Applications")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let standalone_candidates = [
+        home.as_ref().map(|home| home.join(".local/bin/codex")),
+        Some(PathBuf::from("/opt/homebrew/bin/codex")),
+        Some(PathBuf::from("/usr/local/bin/codex")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    resolve_codex_binary_from(
+        &application_roots,
+        &standalone_candidates,
+        std::env::var_os("PATH").as_deref(),
+    )
+}
+
+fn resolve_codex_binary_from(
+    application_roots: &[PathBuf],
+    standalone_candidates: &[PathBuf],
+    path: Option<&OsStr>,
+) -> Option<PathBuf> {
+    // Enumerate every bundle once, then rank by stable plist product identity.
+    // This handles arbitrary renames, including a current host renamed exactly
+    // to Codex.app or a legacy host renamed exactly to ChatGPT.app.
+    let mut app_candidates = Vec::new();
+    for (root_rank, root) in application_roots.iter().enumerate() {
+        let Ok(entries) = fs::read_dir(root) else {
+            continue;
+        };
+        let mut apps = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|app| app.extension().and_then(OsStr::to_str) == Some("app"))
+            .collect::<Vec<_>>();
+        apps.sort();
+        for app in apps {
+            let Some((binary, generation)) = codex_app_runtime(&app) else {
+                continue;
+            };
+            let canonical_name = matches!(
+                (generation, app.file_name().and_then(OsStr::to_str)),
+                (CodexHostGeneration::Current, Some("ChatGPT.app"))
+                    | (CodexHostGeneration::Legacy, Some("Codex.app"))
+            );
+            app_candidates.push((
+                codex_generation_rank(generation),
+                u8::from(!canonical_name),
+                root_rank,
+                app,
+                binary,
+            ));
+        }
+    }
+    app_candidates.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.cmp(&right.2))
+            .then(left.3.cmp(&right.3))
+    });
+    if let Some((_, _, _, _, binary)) = app_candidates.into_iter().next() {
+        return Some(binary);
+    }
+
+    standalone_candidates
+        .iter()
+        .find(|candidate| candidate.is_file())
+        .cloned()
+        .or_else(|| {
+            path.and_then(|paths| {
+                std::env::split_paths(paths)
+                    .map(|directory| directory.join("codex"))
+                    .find(|candidate| candidate.is_file())
+            })
+        })
+}
+
+fn codex_generation_rank(generation: CodexHostGeneration) -> u8 {
+    match generation {
+        CodexHostGeneration::Current => 0,
+        CodexHostGeneration::Legacy => 1,
+        CodexHostGeneration::Unknown => 2,
+    }
+}
+
+fn codex_app_runtime(app: &Path) -> Option<(PathBuf, CodexHostGeneration)> {
+    let info = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
+    let info = info.as_dictionary()?;
+    let bundle_id = info.get("CFBundleIdentifier")?.as_string()?;
+    if bundle_id != CODEX_APP_BUNDLE_ID {
+        return None;
+    }
+    let binary = app.join(CODEX_BUNDLED_BINARY);
+    if !binary.is_file() {
+        return None;
+    }
+    let product_names = ["CFBundleDisplayName", "CFBundleName"]
+        .into_iter()
+        .filter_map(|key| info.get(key).and_then(plist::Value::as_string))
+        .collect::<Vec<_>>();
+    let generation = if product_names
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case("ChatGPT"))
+    {
+        CodexHostGeneration::Current
+    } else if product_names
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case("Codex"))
+    {
+        CodexHostGeneration::Legacy
+    } else {
+        match app.file_name().and_then(OsStr::to_str) {
+            Some("ChatGPT.app") => CodexHostGeneration::Current,
+            Some("Codex.app") => CodexHostGeneration::Legacy,
+            _ => CodexHostGeneration::Unknown,
+        }
+    };
+    Some((binary, generation))
+}
+
 pub(crate) fn resolve_grok_binary() -> Option<PathBuf> {
     let home = dirs::home_dir();
     [
@@ -526,6 +663,128 @@ mod tests {
     };
 
     use super::*;
+
+    fn fake_codex_app(root: &Path, name: &str, bundle_id: &str, product_name: &str) -> PathBuf {
+        let app = root.join(name);
+        let resources = app.join("Contents/Resources");
+        fs::create_dir_all(&resources).expect("create app resources");
+        let mut info = plist::Dictionary::new();
+        info.insert(
+            "CFBundleIdentifier".to_owned(),
+            plist::Value::String(bundle_id.to_owned()),
+        );
+        info.insert(
+            "CFBundleDisplayName".to_owned(),
+            plist::Value::String(product_name.to_owned()),
+        );
+        info.insert(
+            "CFBundleName".to_owned(),
+            plist::Value::String(product_name.to_owned()),
+        );
+        plist::Value::Dictionary(info)
+            .to_file_xml(app.join("Contents/Info.plist"))
+            .expect("write Info.plist");
+        let binary = resources.join("codex");
+        fs::write(&binary, "test runtime").expect("write bundled runtime");
+        binary
+    }
+
+    #[test]
+    fn codex_resolver_prefers_current_official_host_across_install_roots() {
+        let directory = tempdir().expect("tempdir");
+        let system = directory.path().join("system-applications");
+        let user = directory.path().join("user-applications");
+        fs::create_dir_all(&system).expect("system applications");
+        fs::create_dir_all(&user).expect("user applications");
+        let _legacy = fake_codex_app(&system, "Codex.app", CODEX_APP_BUNDLE_ID, "Codex");
+        let current = fake_codex_app(&user, "ChatGPT.app", CODEX_APP_BUNDLE_ID, "ChatGPT");
+
+        let resolved = resolve_codex_binary_from(&[system, user], &[], None);
+
+        assert_eq!(resolved.as_deref(), Some(current.as_path()));
+    }
+
+    #[test]
+    fn codex_resolver_finds_renamed_host_by_bundle_identity() {
+        let directory = tempdir().expect("tempdir");
+        let applications = directory.path().join("Applications");
+        fs::create_dir_all(&applications).expect("applications");
+        let renamed = fake_codex_app(
+            &applications,
+            "Morrow-Codex.app",
+            CODEX_APP_BUNDLE_ID,
+            "ChatGPT",
+        );
+
+        let resolved = resolve_codex_binary_from(&[applications], &[], None);
+
+        assert_eq!(resolved.as_deref(), Some(renamed.as_path()));
+    }
+
+    #[test]
+    fn codex_resolver_prefers_renamed_current_host_over_named_legacy_host() {
+        let directory = tempdir().expect("tempdir");
+        let applications = directory.path().join("Applications");
+        fs::create_dir_all(&applications).expect("applications");
+        let _legacy = fake_codex_app(&applications, "Codex.app", CODEX_APP_BUNDLE_ID, "Codex");
+        let current = fake_codex_app(&applications, "MORROW.app", CODEX_APP_BUNDLE_ID, "ChatGPT");
+
+        let resolved = resolve_codex_binary_from(&[applications], &[], None);
+
+        assert_eq!(resolved.as_deref(), Some(current.as_path()));
+    }
+
+    #[test]
+    fn codex_resolver_ranks_plist_generation_over_crossed_filenames() {
+        let directory = tempdir().expect("tempdir");
+        let applications = directory.path().join("Applications");
+        fs::create_dir_all(&applications).expect("applications");
+        let current = fake_codex_app(&applications, "Codex.app", CODEX_APP_BUNDLE_ID, "ChatGPT");
+        let _legacy = fake_codex_app(&applications, "ChatGPT.app", CODEX_APP_BUNDLE_ID, "Codex");
+
+        let resolved = resolve_codex_binary_from(&[applications], &[], None);
+
+        assert_eq!(resolved.as_deref(), Some(current.as_path()));
+    }
+
+    #[test]
+    fn codex_resolver_rejects_unrelated_bundle_before_standalone_fallback() {
+        let directory = tempdir().expect("tempdir");
+        let applications = directory.path().join("Applications");
+        fs::create_dir_all(&applications).expect("applications");
+        let _unrelated = fake_codex_app(
+            &applications,
+            "ChatGPT.app",
+            "com.openai.chatgpt",
+            "ChatGPT",
+        );
+        let standalone = directory.path().join("bin/codex");
+        fs::create_dir_all(standalone.parent().expect("standalone parent"))
+            .expect("standalone directory");
+        fs::write(&standalone, "standalone").expect("standalone runtime");
+
+        let resolved =
+            resolve_codex_binary_from(&[applications], std::slice::from_ref(&standalone), None);
+
+        assert_eq!(resolved.as_deref(), Some(standalone.as_path()));
+    }
+
+    #[test]
+    fn codex_resolver_uses_path_only_after_explicit_standalone_candidates() {
+        let directory = tempdir().expect("tempdir");
+        let explicit = directory.path().join("explicit/codex");
+        let path_directory = directory.path().join("path");
+        fs::create_dir_all(explicit.parent().expect("explicit parent")).expect("explicit dir");
+        fs::create_dir_all(&path_directory).expect("path dir");
+        fs::write(&explicit, "explicit").expect("explicit runtime");
+        fs::write(path_directory.join("codex"), "path").expect("path runtime");
+        let joined_path = std::env::join_paths([path_directory]).expect("joined path");
+
+        let resolved =
+            resolve_codex_binary_from(&[], std::slice::from_ref(&explicit), Some(&joined_path));
+
+        assert_eq!(resolved.as_deref(), Some(explicit.as_path()));
+    }
 
     fn budget(provider: Provider) -> ResourceBudget {
         ResourceBudget {

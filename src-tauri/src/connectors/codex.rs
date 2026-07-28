@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use chrono::Utc;
@@ -54,11 +54,8 @@ pub fn load() -> ConnectorOutput {
 }
 
 fn codex_version() -> Option<String> {
-    let bundled = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex");
-    bundled
-        .is_file()
-        .then(|| command_version(&bundled, &["--version"]))
-        .flatten()
+    crate::execution_routes::resolve_codex_binary()
+        .and_then(|binary| command_version(&binary, &["--version"]))
 }
 
 fn load_from_path(path: &Path) -> rusqlite::Result<Vec<Session>> {

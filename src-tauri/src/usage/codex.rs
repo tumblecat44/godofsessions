@@ -1,9 +1,8 @@
-use std::path::Path;
-
 use chrono::Utc;
 use serde_json::Value;
 
 use crate::{
+    execution_routes::resolve_codex_binary,
     model::{Provider, ResourceBudget, UsageWindow},
     time_utils::unix_seconds_to_rfc3339,
 };
@@ -17,14 +16,13 @@ use super::{
 const SOURCE_LABEL: &str = "Codex app-server";
 
 pub(super) fn load() -> ResourceBudget {
-    let binary = Path::new("/Applications/ChatGPT.app/Contents/Resources/codex");
-    if !binary.is_file() {
+    let Some(binary) = resolve_codex_binary() else {
         return unavailable(
             Provider::Codex,
             SOURCE_LABEL,
-            "ChatGPT 앱의 Codex 실행기를 찾지 못했습니다.",
+            "공식 ChatGPT/Codex 앱 또는 Codex 실행기를 찾지 못했습니다.",
         );
-    }
+    };
     let input = concat!(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
         "{\"clientInfo\":{\"name\":\"god-of-sessions\",\"title\":\"God of Sessions\",",
@@ -34,7 +32,7 @@ pub(super) fn load() -> ResourceBudget {
         "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}\n"
     );
     run_streaming_protocol(
-        binary,
+        &binary,
         &["app-server", "--listen", "stdio://"],
         input,
         |output| {
