@@ -1,4 +1,6 @@
 mod approval;
+mod action_run;
+mod action_run_registry;
 mod chat;
 mod claude_dispatch;
 mod codex_dispatch;
@@ -24,7 +26,10 @@ mod workspace_identity;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use chrono::{Duration as ChronoDuration, Utc};
@@ -44,6 +49,9 @@ type ApprovalState = Mutex<approval::ApprovalRegistry>;
 type RecoveryState = Mutex<night_coordinator::RecoveryRegistry>;
 type ProviderAuthState = Mutex<provider_auth::ProviderAuthRegistry>;
 type OperatorChatState = Result<operator_chat::ChatStore, String>;
+type ActionRunState = Result<Arc<action_run_registry::ActionRunRegistry>, String>;
+
+static ACTION_RUN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 fn approval_lock_error(language: approval::ApprovalLanguage) -> String {
     match language {
@@ -434,6 +442,101 @@ async fn send_chat_message(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn load_action_runs(
+    chat_session_id: Option<String>,
+    actions: State<'_, ActionRunState>,
+) -> Result<Vec<action_run_registry::ActionRun>, String> {
+    actions
+        .inner()
+        .as_ref()
+        .map_err(Clone::clone)?
+        .list(chat_session_id.as_deref())
+}
+
+#[tauri::command]
+async fn start_action_run(
+    request: action_run_registry::StartActionRunRequest,
+    on_event: Channel<action_run_registry::ActionRunUiEvent>,
+    actions: State<'_, ActionRunState>,
+) -> Result<action_run_registry::ActionRun, String> {
+    if request.objective.trim().is_empty() {
+        return Err("실행할 작업을 입력해 주세요.".to_owned());
+    }
+    let (cwd, allowed_roots) = resolve_action_workspace(&request.workspace)?;
+    let codex_binary = chat::codex_binary()
+        .ok_or_else(|| "ChatGPT 앱 또는 Codex 실행기를 찾지 못했습니다.".to_owned())?;
+    let run_id = next_action_run_id();
+    let queued = action_run_registry::ActionRun::queued(
+        run_id.clone(),
+        &request,
+        cwd.display().to_string(),
+    );
+    let mut config = action_run::ActionRunConfig::new(
+        codex_binary,
+        &cwd,
+        allowed_roots,
+        request.objective.clone(),
+    );
+    config.model = request.model.clone();
+    config.effort = request.effort.clone();
+    let actions = actions.inner().as_ref().map_err(Clone::clone)?.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let process =
+            action_run::ActionRunProcess::start(config).map_err(|error| error.to_string())?;
+        let (controller, events) = process.into_parts();
+        let mut current = actions.begin(queued, controller)?;
+        let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
+            run: current.clone(),
+        });
+        while let Ok(payload) = events.recv() {
+            current = actions.apply(&run_id, payload)?;
+            let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
+                run: current.clone(),
+            });
+            if matches!(
+                current.status,
+                action_run_registry::ActionRunStatus::Completed
+                    | action_run_registry::ActionRunStatus::Failed
+                    | action_run_registry::ActionRunStatus::Cancelled
+            ) {
+                return Ok(current);
+            }
+        }
+        if matches!(
+            current.status,
+            action_run_registry::ActionRunStatus::Completed
+                | action_run_registry::ActionRunStatus::Failed
+                | action_run_registry::ActionRunStatus::Cancelled
+        ) {
+            return Ok(current);
+        }
+        let failed = actions.fail(
+            &run_id,
+            "Codex 실행 이벤트 통로가 종료 상태 없이 닫혔습니다.".to_owned(),
+        )?;
+        let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
+            run: failed.clone(),
+        });
+        Ok(failed)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn stop_action_run(
+    run_id: String,
+    actions: State<'_, ActionRunState>,
+) -> Result<action_run_registry::ActionRun, String> {
+    actions
+        .inner()
+        .as_ref()
+        .map_err(Clone::clone)?
+        .stop(&run_id)
 }
 
 #[tauri::command]
@@ -887,6 +990,68 @@ pub(crate) fn build_workspace_overview() -> WorkspaceOverview {
     }
 }
 
+fn resolve_action_workspace(requested: &str) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let requested = PathBuf::from(requested.trim())
+        .canonicalize()
+        .map_err(|error| format!("선택한 작업 공간을 확인하지 못했습니다: {error}"))?;
+    let requested_root = git_workspace_root(&requested)
+        .ok_or_else(|| "Action Run은 확인된 Git 작업 공간에서만 시작할 수 있습니다.".to_owned())?;
+    let allowed = known_action_workspace_roots();
+    if !allowed.iter().any(|root| root == &requested_root) {
+        return Err(
+            "현재 세션 근거에서 확인되지 않은 작업 공간에는 실행 권한을 줄 수 없습니다."
+                .to_owned(),
+        );
+    }
+    Ok((requested, vec![requested_root]))
+}
+
+fn known_action_workspace_roots() -> Vec<PathBuf> {
+    let overview = build_workspace_overview();
+    let candidates = std::env::current_dir()
+        .ok()
+        .into_iter()
+        .chain(
+            overview
+                .snapshot
+                .sessions
+                .iter()
+                .filter_map(|session| session.cwd.as_deref())
+                .map(PathBuf::from),
+        )
+        .chain(
+            overview
+                .context_index
+                .projects
+                .iter()
+                .filter_map(|project| project.workspace.as_deref())
+                .map(PathBuf::from),
+        );
+    let mut seen = HashSet::new();
+    candidates
+        .filter_map(|path| path.canonicalize().ok())
+        .filter_map(|path| git_workspace_root(&path))
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
+}
+
+fn git_workspace_root(path: &std::path::Path) -> Option<PathBuf> {
+    let directory = if path.is_dir() { path } else { path.parent()? };
+    directory
+        .ancestors()
+        .find(|candidate| candidate.join(".git").exists())
+        .and_then(|candidate| candidate.canonicalize().ok())
+}
+
+fn next_action_run_id() -> String {
+    let sequence = ACTION_RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "action-{}-{}-{sequence}",
+        std::process::id(),
+        Utc::now().timestamp_micros()
+    )
+}
+
 pub(crate) fn build_overnight_plan_read_only(sleep_hours: f64) -> Result<OvernightPlan, String> {
     let sleep_hours = recommendation::SleepHours::new(sleep_hours)?;
     let budgets_thread = std::thread::spawn(usage::load_budgets);
@@ -1290,11 +1455,14 @@ fn deduplicate_sessions(sessions: Vec<Session>) -> Vec<Session> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let chat_store = operator_chat::ChatStore::open(operator_chat_database_path());
+    let action_runs =
+        action_run_registry::ActionRunRegistry::open(action_run_history_path()).map(Arc::new);
     tauri::Builder::default()
         .manage(ApprovalState::default())
         .manage(RecoveryState::default())
         .manage(ProviderAuthState::default())
         .manage(chat_store)
+        .manage(action_runs)
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             load_workspace_overview,
@@ -1308,6 +1476,9 @@ pub fn run() {
             poll_provider_login,
             cancel_provider_login,
             send_chat_message,
+            load_action_runs,
+            start_action_run,
+            stop_action_run,
             load_night_run_history,
             load_night_plan_history,
             load_morning_brief,
@@ -1340,6 +1511,14 @@ fn operator_chat_database_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("god-of-sessions")
         .join("operator-chat.sqlite3")
+}
+
+fn action_run_history_path() -> PathBuf {
+    dirs::data_local_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("god-of-sessions")
+        .join("action-runs.json")
 }
 
 #[cfg(test)]
