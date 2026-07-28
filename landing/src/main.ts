@@ -18,11 +18,7 @@ const copy: Record<Language, Copy> = {
     primaryCta: "22초 실제 시연 보기",
     secondaryCta: "프라이빗 알파 확인",
     heroTrust: "macOS 로컬 우선 · 읽기 전용 계획 · 승인 없이는 실행하지 않음",
-    signalOne: "잠들기 전 당신이 필요한 일",
-    signalTwo: "오늘 밤 안전하게 실행할 일",
-    signalThree: "아침에 검토할 결과",
     proofEyebrow: "실제 제품 · 22초",
-    proofTitle: "잠들기 전 질문 하나.<br /><em>돌아오면 근거가 남습니다.</em>",
     proofNote:
       "컨셉 UI가 아닙니다. 실제 영문 제품 화면을 사용했으며, 번들 픽스처 데이터는 명확히 표시했습니다.",
     videoFallback:
