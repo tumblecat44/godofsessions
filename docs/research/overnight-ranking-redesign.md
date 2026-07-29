@@ -2,10 +2,12 @@
 
 ## Status
 
-**Approved on 2026-07-28. The core selection redesign is implemented with
-synthetic regression coverage. Batch promotion intentionally remains
-fail-closed until trusted local verifier receipts or an acknowledged Morning
-Review verdict are available; calibration telemetry is also a follow-up.**
+**Approved on 2026-07-28 and implemented with synthetic regression coverage.
+Batch promotion consumes only fingerprint-bound, explicitly accepted Morning
+Review results with verified provenance, an exact observed output change, and
+the same execution route and persisted executed verification-contract ID;
+missing, legacy, or weaker evidence fails closed. Calibration telemetry remains
+a follow-up.**
 
 This design derives from
 [`overnight-task-selection.md`](./overnight-task-selection.md) and
@@ -88,10 +90,16 @@ record; one ambiguous start does not trigger an automatic retry.
 
 Provider-authored completion prose is not representative proof. In the current
 implementation it may close an already-finished item only when it explicitly
-states whole-goal completion, but it cannot unlock batch promotion. Until a
-trusted local verifier receipt or acknowledged Morning Review verdict is
-present in the recommendation input, candidate batches are excluded rather
-than promoted.
+states whole-goal completion, but it cannot unlock batch promotion. Promotion
+uses only an explicitly accepted Morning Review verdict whose provider
+provenance, evidence fingerprint, inspectability, finalized repository root,
+and concrete workspace changes all verify. The acceptance is bound to the
+current evidence fingerprint; a changed result reopens it. The changed-file
+evidence must include the exact parsed output target, and the proof is reusable
+only on the same execution route, surface, capacity pool, and
+verification-contract ID recorded in the approved historical draft. The prior
+ID is never reconstructed from the current classifier. Without that evidence,
+candidate batches are excluded rather than promoted.
 
 Promotion requires one of:
 
@@ -252,7 +260,8 @@ Expected result: **no overnight recommendation**, with a direct reason such as
 - A short unit remains short; only an explicit batch changes aggregate
   duration.
 - Batch promotion requires task similarity, a stable proven pattern, exact
-  targets, and aggregate leverage.
+  targets, an explicitly accepted fingerprint-bound result, the persisted
+  executed contract ID, and aggregate leverage.
 - Unknown task class, missing verifier, human gate, destructive side effect,
   or uncertain provider start fails closed.
 - Every considered project or batch is selected or receives one typed

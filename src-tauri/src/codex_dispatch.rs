@@ -575,6 +575,7 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "codex:native".to_owned(),
+            verification_contract_id: "code-change-v1".to_owned(),
             format: RunDraftFormat::CodexGoal,
             run_mode: RunMode::ResumeExisting,
             native_session_id: Some("thread-1".to_owned()),

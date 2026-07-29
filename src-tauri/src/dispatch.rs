@@ -1225,6 +1225,7 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "hermes:default".to_owned(),
+            verification_contract_id: "code-change-v1".to_owned(),
             format: RunDraftFormat::HermesGoal,
             run_mode: RunMode::NewSession,
             native_session_id: None,

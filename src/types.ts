@@ -238,6 +238,7 @@ export interface NightRunDraft {
   candidate_rank: number;
   project: string;
   route_id: string;
+  verification_contract_id: string;
   format: RunDraftFormat;
   run_mode: RunMode;
   native_session_id: string | null;
@@ -601,6 +602,9 @@ export interface MorningBriefItem {
   draft_id: string;
   project: string;
   title: string;
+  workspace: string;
+  execution_route_id: string;
+  verification_contract_id: string;
   surface: Provider;
   capacity_pool: CapacityPool;
   coordinator_state: string;
@@ -618,6 +622,7 @@ export interface MorningBriefItem {
   evidence_fingerprint: string;
   review_state: MorningReviewState;
   reviewed_at: string | null;
+  outcome_accepted: boolean;
   workspace_evidence: WorkspaceChangeEvidence | null;
 }
 
@@ -650,6 +655,7 @@ export interface OvernightCandidate {
   executor_profile: string | null;
   capacity_pool: CapacityPool;
   route_reason: string;
+  verification_contract_id: string;
   native_session_id: string | null;
   resume_existing: boolean;
   score: number;

@@ -308,6 +308,8 @@ pub struct NightRunDraft {
     pub candidate_rank: usize,
     pub project: String,
     pub route_id: String,
+    #[serde(default)]
+    pub verification_contract_id: String,
     pub format: RunDraftFormat,
     pub run_mode: RunMode,
     pub native_session_id: Option<String>,
@@ -720,6 +722,9 @@ pub struct MorningBriefItem {
     pub draft_id: String,
     pub project: String,
     pub title: String,
+    pub workspace: String,
+    pub execution_route_id: String,
+    pub verification_contract_id: String,
     pub surface: Provider,
     pub capacity_pool: CapacityPool,
     pub coordinator_state: String,
@@ -737,6 +742,7 @@ pub struct MorningBriefItem {
     pub evidence_fingerprint: String,
     pub review_state: MorningReviewState,
     pub reviewed_at: Option<String>,
+    pub outcome_accepted: bool,
     pub workspace_evidence: Option<WorkspaceChangeEvidence>,
 }
 
@@ -771,6 +777,8 @@ pub struct OvernightCandidate {
     pub executor_profile: Option<String>,
     pub capacity_pool: CapacityPool,
     pub route_reason: String,
+    #[serde(default)]
+    pub verification_contract_id: String,
     pub native_session_id: Option<String>,
     pub resume_existing: bool,
     pub score: f64,

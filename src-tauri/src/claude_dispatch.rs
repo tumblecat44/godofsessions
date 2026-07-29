@@ -736,6 +736,7 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "claude:native".to_owned(),
+            verification_contract_id: "code-change-v1".to_owned(),
             format: RunDraftFormat::ClaudeGoal,
             run_mode: RunMode::ResumeExisting,
             native_session_id: Some("session-1".to_owned()),

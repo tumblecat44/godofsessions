@@ -413,6 +413,7 @@ mod tests {
             candidate_rank: 1,
             project: "alpha".to_owned(),
             route_id: "grok:native".to_owned(),
+            verification_contract_id: "code-change-v1".to_owned(),
             format: RunDraftFormat::GrokGoal,
             run_mode: mode,
             native_session_id: (mode == RunMode::ResumeExisting)

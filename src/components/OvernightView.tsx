@@ -630,6 +630,7 @@ function updatePreviewMorningReview(
             ...item,
             review_state: reviewed ? ("reviewed" as const) : ("unreviewed" as const),
             reviewed_at: reviewed ? new Date().toISOString() : null,
+            outcome_accepted: reviewed,
           }
         : item,
     )
@@ -922,8 +923,8 @@ function MorningBriefSection({
                         "Evidence changed after your last review",
                       )
                     : copy(
-                        "이 공급자 근거를 모두 확인했나요?",
-                        "Have you reviewed all provider evidence?",
+                        "결과와 계약별 검증 근거를 확인하고 수락하나요?",
+                        "Have you reviewed and accepted the result and its contract-specific verification evidence?",
                       )}
                 </strong>
                 <small>
@@ -947,7 +948,7 @@ function MorningBriefSection({
               ) : (
                 <>
                   <Check size={12} />
-                  {copy("이 근거 검토 완료", "Mark evidence reviewed")}
+                  {copy("결과·검증 근거 수락", "Accept result and evidence")}
                 </>
               )}
             </button>

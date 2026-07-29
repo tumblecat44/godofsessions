@@ -51,7 +51,7 @@ pub(super) fn mark_reviewed(
 ) -> Result<MorningBrief, String> {
     let current = load()?;
     if current.plan_id.as_deref() != Some(plan_id) {
-        return Err("최신 밤 계획이 바뀌어 이 결과를 검토 완료로 표시하지 않았습니다.".to_owned());
+        return Err("최신 밤 계획이 바뀌어 이 결과 수락을 기록하지 않았습니다.".to_owned());
     }
     let item = current
         .items
@@ -67,7 +67,8 @@ pub(super) fn mark_reviewed(
             .is_some_and(|evidence| !evidence.finalized)
     {
         return Err(
-            "공급자 근거와 최종 작업공간 관측을 열어볼 수 있는 완료 결과만 검토 완료로 표시할 수 있습니다.".to_owned(),
+            "공급자 근거와 최종 작업공간 관측을 열어볼 수 있는 완료 결과만 수락할 수 있습니다."
+                .to_owned(),
         );
     }
     if item.evidence_fingerprint != evidence_fingerprint {
@@ -269,24 +270,35 @@ fn morning_item(
         }
         .to_owned();
     }
-    let (review_state, reviewed_at) = match review {
+    let (review_state, reviewed_at, outcome_accepted) = match review {
         Some(review)
             if review.evidence_fingerprint == evidence_fingerprint
-                && verdict == MorningBriefVerdict::ReadyToReview =>
+                && verdict == MorningBriefVerdict::ReadyToReview
+                && review.accepted =>
         {
             (
                 MorningReviewState::Reviewed,
                 Some(review.reviewed_at.to_rfc3339()),
+                true,
             )
         }
-        Some(_) => (MorningReviewState::EvidenceChanged, None),
-        None => (MorningReviewState::Unreviewed, None),
+        Some(review)
+            if review.evidence_fingerprint == evidence_fingerprint
+                && verdict == MorningBriefVerdict::ReadyToReview =>
+        {
+            (MorningReviewState::Unreviewed, None, false)
+        }
+        Some(_) => (MorningReviewState::EvidenceChanged, None, false),
+        None => (MorningReviewState::Unreviewed, None, false),
     };
     let record = observation.record.as_ref();
     MorningBriefItem {
         draft_id: draft.id.clone(),
         project: draft.project.clone(),
         title: draft.goal.clone(),
+        workspace: draft.workspace.clone(),
+        execution_route_id: draft.route_id.clone(),
+        verification_contract_id: draft.verification_contract_id.clone(),
         surface: item.approved.dispatch.preflight.surface,
         capacity_pool,
         coordinator_state: item.state.as_str().to_owned(),
@@ -312,6 +324,7 @@ fn morning_item(
         evidence_fingerprint,
         review_state,
         reviewed_at,
+        outcome_accepted,
         workspace_evidence,
     }
 }
@@ -342,6 +355,7 @@ fn evidence_fingerprint(item: &CoordinatorItem, observation: &Observation) -> St
     let value = json!({
         "coordinator_state": item.state,
         "coordinator_error": item.error,
+        "verification_contract_id": item.approved.dispatch.draft.verification_contract_id,
         "workspace_baseline": item.workspace_baseline,
         "workspace_final": item.workspace_final,
         "record": observation.record,
@@ -508,6 +522,7 @@ mod tests {
                         candidate_rank: 1,
                         project: project.to_owned(),
                         route_id: "native_codex".to_owned(),
+                        verification_contract_id: "code-change-v1".to_owned(),
                         format: RunDraftFormat::StructuredPrompt,
                         run_mode: RunMode::ResumeExisting,
                         native_session_id: Some(format!("thread-{project}")),
@@ -773,6 +788,7 @@ mod tests {
                 draft_id: "draft-review".to_owned(),
                 evidence_fingerprint: fingerprint,
                 reviewed_at,
+                accepted: true,
             },
         )]);
 
@@ -788,6 +804,27 @@ mod tests {
         assert_eq!(reviewed.review_count, 0);
         assert_eq!(reviewed.reviewed_count, 1);
         assert_eq!(reviewed.items[0].review_state, MorningReviewState::Reviewed);
+        assert!(reviewed.items[0].outcome_accepted);
+
+        let unaccepted_reviews = HashMap::from([(
+            "draft-review".to_owned(),
+            super::super::morning_review::ReviewRecord {
+                draft_id: "draft-review".to_owned(),
+                evidence_fingerprint: reviewed.items[0].evidence_fingerprint.clone(),
+                reviewed_at,
+                accepted: false,
+            },
+        )]);
+        let unaccepted = build(&source, "closed", &unaccepted_reviews, |_| Observation {
+            record: Some(record("review")),
+            detail: Some(detail(NightRunVerdict::ReadyToReview)),
+            warning: None,
+        });
+        assert_eq!(
+            unaccepted.items[0].review_state,
+            MorningReviewState::Unreviewed
+        );
+        assert!(!unaccepted.items[0].outcome_accepted);
 
         let changed = build(&source, "closed", &reviews, |_| {
             let mut next = detail(NightRunVerdict::ReadyToReview);

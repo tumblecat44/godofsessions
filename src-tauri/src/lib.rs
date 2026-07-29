@@ -1148,11 +1148,13 @@ pub(crate) fn build_overnight_plan_read_only(sleep_hours: f64) -> Result<Overnig
         .join()
         .map_err(|_| "구독 사용량 증거를 모으지 못했습니다.".to_owned())?;
     let routes = execution_routes::load(&budgets, now);
-    let mut plan = recommendation::build_overnight_plan_with_context_and_routes(
+    let morning_review = night_coordinator::load_morning_brief().ok();
+    let mut plan = recommendation::build_overnight_plan_with_context_routes_and_review(
         &snapshot,
         budgets,
         &context,
         &routes,
+        morning_review.as_ref(),
         sleep_hours,
         now,
     );
@@ -1184,11 +1186,13 @@ pub(crate) fn build_overnight_plan_with_advisor(
         .join()
         .map_err(|_| "구독 사용량 증거를 모으지 못했습니다.".to_owned())?;
     let routes = execution_routes::load(&budgets, now);
-    let envelope = recommendation::discover_portfolio_candidates_with_context_and_routes(
+    let morning_review = night_coordinator::load_morning_brief().ok();
+    let envelope = recommendation::discover_portfolio_candidates_with_context_routes_and_review(
         &snapshot,
         budgets,
         &context,
         &routes,
+        morning_review.as_ref(),
         sleep_hours,
         now,
         recommendation::PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS,

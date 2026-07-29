@@ -19,6 +19,8 @@ pub(super) struct ReviewRecord {
     pub(super) draft_id: String,
     pub(super) evidence_fingerprint: String,
     pub(super) reviewed_at: DateTime<Utc>,
+    #[serde(default)]
+    pub(super) accepted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +59,7 @@ pub(super) fn mark(
         draft_id: draft_id.to_owned(),
         evidence_fingerprint: evidence_fingerprint.to_owned(),
         reviewed_at,
+        accepted: true,
     });
     update_at(&root, &ledger)
 }
@@ -221,6 +224,7 @@ mod tests {
                 draft_id: "draft-1".to_owned(),
                 evidence_fingerprint: FINGERPRINT.to_owned(),
                 reviewed_at: now,
+                accepted: true,
             }],
         };
         update_at(root.path(), &ledger).expect("write");
@@ -247,8 +251,21 @@ mod tests {
                 draft_id: "draft-1".to_owned(),
                 evidence_fingerprint: "short".to_owned(),
                 reviewed_at: Utc::now(),
+                accepted: true,
             }],
         };
         assert!(update_at(root.path(), &ledger).is_err());
+    }
+
+    #[test]
+    fn legacy_review_records_do_not_imply_result_acceptance() {
+        let record: ReviewRecord = serde_json::from_value(serde_json::json!({
+            "draft_id": "draft-1",
+            "evidence_fingerprint": FINGERPRINT,
+            "reviewed_at": "2026-07-24T21:00:00Z"
+        }))
+        .expect("legacy record");
+
+        assert!(!record.accepted);
     }
 }

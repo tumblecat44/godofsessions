@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Capability, CapacityPool, ContextExcerpt, ContextIndex, ContextRole, ExcludedProject,
-    ExecutionRoute, ExecutionRouteInventory, NightSchedule, NightScheduleLane, NightScheduleSlot,
-    OvernightCandidate, OvernightPlan, ProjectContextBrief, Provider, RecommendationConfidence,
-    ResourceBudget, ResourceState, ScheduleWaitReason, Session, SessionStatus, Snapshot,
+    ExecutionRoute, ExecutionRouteInventory, MorningBrief, MorningBriefVerdict, MorningReviewState,
+    NightSchedule, NightScheduleLane, NightScheduleSlot, OvernightCandidate, OvernightPlan,
+    ProjectContextBrief, Provider, RecommendationConfidence, ResourceBudget, ResourceState,
+    ScheduleWaitReason, Session, SessionStatus, Snapshot, WorkspaceEvidenceState,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -129,7 +130,15 @@ pub fn build_overnight_plan(
     now: DateTime<Utc>,
 ) -> OvernightPlan {
     let context = synthetic_request_context(snapshot, now);
-    build_overnight_plan_inner(snapshot, budgets, Some(&context), None, sleep_hours, now)
+    build_overnight_plan_inner(
+        snapshot,
+        budgets,
+        Some(&context),
+        None,
+        None,
+        sleep_hours,
+        now,
+    )
 }
 
 #[cfg(test)]
@@ -139,7 +148,7 @@ fn build_overnight_plan_without_context(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
-    build_overnight_plan_inner(snapshot, budgets, None, None, sleep_hours, now)
+    build_overnight_plan_inner(snapshot, budgets, None, None, None, sleep_hours, now)
 }
 
 #[cfg(test)]
@@ -200,7 +209,15 @@ pub fn build_overnight_plan_with_context(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
-    build_overnight_plan_inner(snapshot, budgets, Some(context), None, sleep_hours, now)
+    build_overnight_plan_inner(
+        snapshot,
+        budgets,
+        Some(context),
+        None,
+        None,
+        sleep_hours,
+        now,
+    )
 }
 
 pub fn build_overnight_plan_with_context_and_routes(
@@ -211,11 +228,32 @@ pub fn build_overnight_plan_with_context_and_routes(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
+    build_overnight_plan_with_context_routes_and_review(
+        snapshot,
+        budgets,
+        context,
+        routes,
+        None,
+        sleep_hours,
+        now,
+    )
+}
+
+pub fn build_overnight_plan_with_context_routes_and_review(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: &ContextIndex,
+    routes: &ExecutionRouteInventory,
+    morning_review: Option<&MorningBrief>,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
     build_overnight_plan_inner(
         snapshot,
         budgets,
         Some(context),
         Some(routes),
+        morning_review,
         sleep_hours,
         now,
     )
@@ -226,6 +264,7 @@ fn build_overnight_plan_inner(
     budgets: Vec<ResourceBudget>,
     context: Option<&ContextIndex>,
     route_inventory: Option<&ExecutionRouteInventory>,
+    morning_review: Option<&MorningBrief>,
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
@@ -234,6 +273,7 @@ fn build_overnight_plan_inner(
         budgets,
         context,
         route_inventory,
+        morning_review,
         sleep_hours,
         now,
         24,
@@ -250,11 +290,34 @@ pub fn discover_portfolio_candidates_with_context_and_routes(
     now: DateTime<Utc>,
     evidence_window_hours: u32,
 ) -> PortfolioCandidateEnvelope {
+    discover_portfolio_candidates_with_context_routes_and_review(
+        snapshot,
+        budgets,
+        context,
+        routes,
+        None,
+        sleep_hours,
+        now,
+        evidence_window_hours,
+    )
+}
+
+pub fn discover_portfolio_candidates_with_context_routes_and_review(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    context: &ContextIndex,
+    routes: &ExecutionRouteInventory,
+    morning_review: Option<&MorningBrief>,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+    evidence_window_hours: u32,
+) -> PortfolioCandidateEnvelope {
     discover_candidate_envelope_inner(
         snapshot,
         budgets,
         Some(context),
         Some(routes),
+        morning_review,
         sleep_hours,
         now,
         evidence_window_hours,
@@ -266,6 +329,7 @@ fn discover_candidate_envelope_inner(
     budgets: Vec<ResourceBudget>,
     context: Option<&ContextIndex>,
     route_inventory: Option<&ExecutionRouteInventory>,
+    morning_review: Option<&MorningBrief>,
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
     evidence_window_hours: u32,
@@ -314,10 +378,10 @@ fn discover_candidate_envelope_inner(
 
     let mut candidates = Vec::new();
     let mut short_candidates = Vec::new();
-    // Provider-authored prose is not independent verification evidence. Keep this
-    // empty until the recommendation input carries trusted local verifier receipts
-    // or an acknowledged Morning Review verdict.
-    let completed_patterns = BTreeSet::new();
+    // Provider-authored prose is not independent verification evidence. Only
+    // fingerprint-bound Morning Review acknowledgements with finalized workspace
+    // changes may prove that a repeated short-task pattern is stable enough to batch.
+    let completed_patterns = trusted_completed_patterns(morning_review);
     let mut exclusions = Vec::new();
     for (project_key, sessions) in projects.iter_mut() {
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
@@ -409,7 +473,6 @@ fn discover_candidate_envelope_inner(
             .cwd
             .clone()
             .unwrap_or_else(|| latest.repository.clone().unwrap_or_default());
-        let proof_key = task_pattern_key(&cwd, task.kind, goal_subject);
         if !failed && context_brief.is_some_and(latest_goal_is_reported_complete) {
             exclusions.push(ExcludedProject {
                 project,
@@ -624,6 +687,7 @@ fn discover_candidate_envelope_inner(
             executor_profile: route.and_then(|route| route.executor_profile.clone()),
             capacity_pool,
             route_reason,
+            verification_contract_id: task_contract_identity(task.kind).to_owned(),
             native_session_id: if resume_existing {
                 provider_session.map(|session| session.native_id.clone())
             } else {
@@ -645,8 +709,25 @@ fn discover_candidate_envelope_inner(
             estimated_hours: task.upper_bound_hours,
         };
         if task.expected_hours < 1.0 {
+            let (proof_route_id, proof_surface, proof_capacity_pool) =
+                route_for_new_batch(candidate.provider, route_inventory)
+                    .map(|route| (route.id.as_str(), route.surface, route.capacity_pool))
+                    .unwrap_or((
+                        candidate.execution_route_id.as_str(),
+                        candidate.execution_surface,
+                        candidate.capacity_pool,
+                    ));
+            let proof_key = batch_proof_key(
+                &candidate.cwd,
+                task.kind,
+                goal_subject,
+                proof_route_id,
+                proof_surface,
+                proof_capacity_pool,
+                &candidate.verification_contract_id,
+            );
             short_candidates.push(ShortCandidate {
-                batch_key: format!("{}|{}", proof_key, candidate.provider.as_str()),
+                batch_key: proof_key.clone(),
                 candidate,
                 target: task_target(goal_subject, task.kind),
                 objective: goal_subject.to_owned(),
@@ -1246,6 +1327,8 @@ fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
             &[
                 "not complete",
                 "not completed",
+                "not all requested work",
+                "not all of the requested work",
                 "not fully",
                 "partial",
                 "only;",
@@ -1281,11 +1364,10 @@ fn assess_open_work(
         if let Some((goal, response)) = latest_goal_and_response(brief) {
             let request = goal.text.to_lowercase();
             let response_text = response.map(|item| item.text.to_lowercase());
-            let combined = format!(
-                "{request}\n{}",
-                response_text.as_deref().unwrap_or_default()
-            );
-            if response_requires_human(&combined) {
+            if response_text
+                .as_deref()
+                .is_some_and(response_requires_human)
+            {
                 return OpenWorkEvidence::Ambiguous;
             }
             if failed {
@@ -1293,6 +1375,11 @@ fn assess_open_work(
                     .as_deref()
                     .is_some_and(response_has_technical_failure)
                     .then_some(OpenWorkEvidence::RetryableFailure)
+                    .unwrap_or(OpenWorkEvidence::Ambiguous);
+            }
+            if let Some(response) = response_text {
+                return response_has_concrete_remaining_work(&response)
+                    .then_some(OpenWorkEvidence::IncompleteHandoff)
                     .unwrap_or(OpenWorkEvidence::Ambiguous);
             }
             if contains_any(
@@ -1310,11 +1397,6 @@ fn assess_open_work(
             ) {
                 return OpenWorkEvidence::ExplicitDeferral;
             }
-            if let Some(response) = response_text {
-                return response_has_concrete_remaining_work(&response)
-                    .then_some(OpenWorkEvidence::IncompleteHandoff)
-                    .unwrap_or(OpenWorkEvidence::Ambiguous);
-            }
             return OpenWorkEvidence::PendingUserRequest;
         }
     }
@@ -1327,17 +1409,37 @@ fn response_requires_human(response: &str) -> bool {
         "no input or approval is needed",
         "no approval is needed",
         "without human input",
+        "no credentials are required",
+        "credentials are not required",
+        "no api key is required",
+        "an api key is not required",
+        "no login is required",
+        "login is not required",
         "사람의 입력 없이",
         "승인이 필요하지 않",
+        "자격 증명이 필요하지 않",
+        "api 키가 필요하지 않",
+        "로그인이 필요하지 않",
     ] {
         unresolved = unresolved.replace(safe_phrase, "");
     }
     contains_any(
         &unresolved,
         &[
-            "api key",
-            "credential",
-            "secret",
+            "need your api key",
+            "need an api key",
+            "api key is required",
+            "missing api key",
+            "provide an api key",
+            "provide your api key",
+            "need your credential",
+            "need credentials",
+            "credentials are required",
+            "missing credentials",
+            "provide credentials",
+            "need your secret",
+            "secret is required",
+            "missing secret",
             "log in",
             "login required",
             "need your input",
@@ -1346,10 +1448,12 @@ fn response_requires_human(response: &str) -> bool {
             "choose one",
             "your decision",
             "provide access",
-            "provide the",
             "waiting for you",
-            "api 키",
-            "자격 증명",
+            "api 키가 필요",
+            "api 키를 제공",
+            "자격 증명이 필요",
+            "자격 증명을 제공",
+            "비밀 키가 필요",
             "로그인",
             "승인 필요",
             "확인 필요",
@@ -1384,38 +1488,56 @@ fn response_has_technical_failure(response: &str) -> bool {
 }
 
 fn response_has_concrete_remaining_work(response: &str) -> bool {
-    contains_any(
-        response,
-        &[
-            "not implemented",
-            "not generated",
-            "not verified",
-            "not passed",
-            "has not passed",
-            "have not passed",
-            "couldn't",
-            "could not",
-            "failed",
-            "blocked",
-            "remaining",
-            "remains unfinished",
-            "still need",
-            "still needs",
-            "needs to be fixed",
-            "unable to",
-            "미완료",
-            "완료하지 못",
-            "실패",
-            "막혔",
-            "남았",
-            "추가 작업",
-            "구현하지 못",
-            "생성하지 못",
-            "검증하지 못",
-            "확인하지 못",
-            "통과하지 못",
-        ],
-    )
+    let mut unresolved = response.to_owned();
+    for historical_phrase in [
+        "previously failed",
+        "failed before the fix",
+        "failed before this fix",
+        "used to fail",
+        "had failed",
+        "이전에는 실패",
+        "수정 전 실패",
+    ] {
+        unresolved = unresolved.replace(historical_phrase, "");
+    }
+    response_has_technical_failure(&unresolved)
+        || contains_any(
+            &unresolved,
+            &[
+                "not implemented",
+                "not generated",
+                "not verified",
+                "not passed",
+                "has not passed",
+                "have not passed",
+                "couldn't",
+                "could not",
+                "blocked",
+                "remaining",
+                "remains unfinished",
+                "still need",
+                "still needs",
+                "still fails",
+                "is failing",
+                "currently failing",
+                "failed with",
+                "run failed",
+                "command failed",
+                "needs to be fixed",
+                "unable to",
+                "미완료",
+                "완료하지 못",
+                "실패",
+                "막혔",
+                "남았",
+                "추가 작업",
+                "구현하지 못",
+                "생성하지 못",
+                "검증하지 못",
+                "확인하지 못",
+                "통과하지 못",
+            ],
+        )
 }
 
 fn open_work_evidence_label(evidence: OpenWorkEvidence) -> &'static str {
@@ -1437,6 +1559,15 @@ fn estimate_confidence_label(confidence: EstimateConfidence) -> &'static str {
 }
 
 fn normalized_task_pattern(goal: &str) -> String {
+    let goal = [
+        " — 검증 가능한 결과까지 진행",
+        " — continue to a verifiable result",
+    ]
+    .iter()
+    .filter_map(|suffix| goal.find(suffix))
+    .min()
+    .map(|index| &goal[..index])
+    .unwrap_or(goal);
     goal.to_lowercase()
         .split_whitespace()
         .take(24)
@@ -1454,6 +1585,62 @@ fn normalized_task_pattern(goal: &str) -> String {
         .join(" ")
 }
 
+fn trusted_completed_patterns(morning_review: Option<&MorningBrief>) -> BTreeSet<String> {
+    let Some(morning_review) = morning_review else {
+        return BTreeSet::new();
+    };
+
+    morning_review
+        .items
+        .iter()
+        .filter(|item| {
+            item.review_state == MorningReviewState::Reviewed
+                && item.outcome_accepted
+                && item.verdict == MorningBriefVerdict::ReadyToReview
+                && item.provenance_verified
+                && item.inspectable
+                && !item.evidence_fingerprint.trim().is_empty()
+                && item.coordinator_state == "completed"
+                && item.completed_at.is_some()
+                && item.error.is_none()
+                && item.reviewed_at.is_some()
+        })
+        .filter_map(|item| {
+            let evidence = item.workspace_evidence.as_ref()?;
+            if !evidence.finalized
+                || evidence.state != WorkspaceEvidenceState::Changed
+                || (!evidence.head_changed && evidence.changed_files.is_empty())
+            {
+                return None;
+            }
+            let repository_root = evidence.repository_root.as_deref()?;
+            let task = assess_task(&item.title);
+            if task.kind != OvernightTaskKind::AssetGeneration {
+                return None;
+            }
+            let target = task_target(&item.title, task.kind)?;
+            let relative_target =
+                worktree_relative_target(&item.workspace, &target, repository_root)?;
+            let target_was_observed = evidence.changed_files.iter().any(|file| {
+                file.path == relative_target
+                    && file.after_status.is_some()
+                    && !file.change.eq_ignore_ascii_case("deleted")
+            });
+            target_was_observed.then(|| {
+                batch_proof_key(
+                    &item.workspace,
+                    task.kind,
+                    &item.title,
+                    &item.execution_route_id,
+                    item.surface,
+                    item.capacity_pool,
+                    &item.verification_contract_id,
+                )
+            })
+        })
+        .collect()
+}
+
 fn task_pattern_key(cwd: &str, kind: OvernightTaskKind, goal: &str) -> String {
     format!(
         "{}|{}|{}",
@@ -1461,6 +1648,51 @@ fn task_pattern_key(cwd: &str, kind: OvernightTaskKind, goal: &str) -> String {
         task_kind_label(kind),
         normalized_task_pattern(goal)
     )
+}
+
+fn batch_proof_key(
+    cwd: &str,
+    kind: OvernightTaskKind,
+    goal: &str,
+    execution_route_id: &str,
+    execution_surface: Provider,
+    capacity_pool: CapacityPool,
+    verification_contract_id: &str,
+) -> String {
+    format!(
+        "{}|route:{}|surface:{}|pool:{}|contract:{}",
+        task_pattern_key(cwd, kind, goal),
+        execution_route_id,
+        execution_surface.as_str(),
+        capacity_pool_key(capacity_pool),
+        verification_contract_id,
+    )
+}
+
+fn task_contract_identity(kind: OvernightTaskKind) -> &'static str {
+    match kind {
+        OvernightTaskKind::AssetGeneration => "asset-generation-v1",
+        OvernightTaskKind::CodeChange => "code-change-v1",
+        OvernightTaskKind::TestRepair => "test-repair-v1",
+        OvernightTaskKind::MigrationOrTransform => "migration-transform-v1",
+        OvernightTaskKind::ResearchOrAudit => "research-audit-v1",
+        OvernightTaskKind::ExperimentOrBenchmark => "experiment-benchmark-v1",
+        OvernightTaskKind::DependencyMaintenance => "dependency-maintenance-v1",
+        OvernightTaskKind::IncidentRepair => "incident-repair-v1",
+        OvernightTaskKind::Documentation => "documentation-v1",
+        OvernightTaskKind::Unknown => "unknown-v1",
+    }
+}
+
+fn capacity_pool_key(pool: CapacityPool) -> &'static str {
+    match pool {
+        CapacityPool::ClaudeSubscription => "claude-subscription",
+        CapacityPool::CodexSubscription => "codex-subscription",
+        CapacityPool::GrokSubscription => "grok-subscription",
+        CapacityPool::CursorSubscription => "cursor-subscription",
+        CapacityPool::ApiCredits => "api-credits",
+        CapacityPool::Unknown => "unknown",
+    }
 }
 
 fn promote_short_batches(
@@ -1731,8 +1963,7 @@ fn task_target(goal: &str, kind: OvernightTaskKind) -> Option<String> {
     if kind != OvernightTaskKind::AssetGeneration {
         return None;
     }
-    let normalized = goal.to_lowercase();
-    let marker = [
+    let marker_end = [
         "save it as ",
         "save as ",
         "write it to ",
@@ -1743,9 +1974,16 @@ fn task_target(goal: &str, kind: OvernightTaskKind) -> Option<String> {
         "저장해 ",
     ]
     .iter()
-    .filter_map(|marker| normalized.find(marker).map(|index| (index, marker.len())))
-    .min_by_key(|(index, _)| *index)?;
-    let suffix = &goal[marker.0 + marker.1..];
+    .filter_map(|marker| {
+        goal.char_indices().find_map(|(index, _)| {
+            goal[index..]
+                .get(..marker.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(marker))
+                .then_some(index + marker.len())
+        })
+    })
+    .min()?;
+    let suffix = &goal[marker_end..];
     let path = suffix
         .split_whitespace()
         .next()?
@@ -1806,6 +2044,11 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "이미지를 만들어",
         ],
     );
+
+    if is_code_action(&normalized) {
+        return assess_code_task(&normalized, requested_count);
+    }
+
     if asset_format && asset_action {
         return assessment(
             OvernightTaskKind::AssetGeneration,
@@ -1817,10 +2060,6 @@ fn assess_task(goal: &str) -> TaskAssessment {
                 "항목당 생성·파일 검증 시간".to_owned(),
             ],
         );
-    }
-
-    if is_code_action(&normalized) {
-        return assess_code_task(&normalized, requested_count);
     }
 
     if contains_any(
@@ -2087,7 +2326,24 @@ fn assess_code_task(normalized: &str, requested_count: Option<usize>) -> TaskAss
             "한 줄",
             "문구 수정",
         ],
-    );
+    ) || (normalized.contains("test")
+        && contains_any(
+            normalized,
+            &[
+                "one failing",
+                "single failing",
+                "one broken",
+                "single broken",
+                "one test",
+                "single test",
+                "a failing",
+                "the failing",
+                "a broken",
+                "the broken",
+                "테스트 하나",
+                "단일 테스트",
+            ],
+        ));
     if small_scope {
         return assessment(
             OvernightTaskKind::CodeChange,
@@ -2660,9 +2916,11 @@ mod tests {
 
     use crate::model::{
         AdapterReadiness, Capability, CapacityEstimateConfidence, ContextExcerpt, ContextIndex,
-        ContextRole, ExecutionRoute, ExecutionRouteInventory, NativeKind, PlanCapacityEstimate,
+        ContextRole, ExecutionRoute, ExecutionRouteInventory, MorningBrief, MorningBriefItem,
+        MorningBriefVerdict, MorningReviewState, NativeKind, PlanCapacityEstimate,
         ProjectContextBrief, Provider, ResourceBudget, ResourceState, RouteCapability, Session,
         SessionSignal, SessionStatus, Snapshot, StatusConfidence, UsageWindow,
+        WorkspaceChangeEvidence, WorkspaceEvidenceState, WorkspaceFileChange,
     };
 
     use super::*;
@@ -3950,6 +4208,7 @@ mod tests {
             vec![budget(Provider::Codex, 10.0)],
             Some(&context),
             None,
+            None,
             SleepHours::new(1.3).expect("valid sleep duration"),
             now,
             24,
@@ -3958,6 +4217,7 @@ mod tests {
             &snapshot,
             vec![budget(Provider::Codex, 10.0)],
             Some(&context),
+            None,
             None,
             SleepHours::new(10.0).expect("valid sleep duration"),
             now,
@@ -4458,6 +4718,225 @@ mod tests {
     }
 
     #[test]
+    fn reviewed_workspace_evidence_can_prove_a_short_batch_pattern() {
+        let repository = temporary_repository();
+        let repository_root = repository
+            .path()
+            .canonicalize()
+            .expect("canonical repository");
+        let mut sessions = Vec::new();
+        let mut briefs = Vec::new();
+        let mut reviewed_title = None;
+        for index in 0..=10 {
+            let project = format!("asset-{index}");
+            let native_id = format!("asset-session-{index}");
+            let directory = repository.path().join(format!("assets/{index}"));
+            std::fs::create_dir_all(&directory).expect("asset directory");
+            let goal = format!("Generate {index} save as c.png");
+            let mut item = session(
+                Provider::Codex,
+                &native_id,
+                &project,
+                &goal,
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            );
+            item.cwd = Some(directory.display().to_string());
+            sessions.push(item);
+
+            let mut excerpts = vec![ContextExcerpt {
+                provider: Provider::Codex,
+                session_id: format!("codex:{native_id}"),
+                role: ContextRole::User,
+                text: goal.clone(),
+                timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+            }];
+            if index == 0 {
+                reviewed_title = Some(format!("{goal} — 검증 가능한 결과까지 진행"));
+                excerpts.push(ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: format!("codex:{native_id}"),
+                    role: ContextRole::Assistant,
+                    text: "All requested work is complete. The output file was verified."
+                        .to_owned(),
+                    timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
+                });
+            }
+            briefs.push(ProjectContextBrief {
+                project,
+                workspace: Some(directory.display().to_string()),
+                session_ids: vec![format!("codex:{native_id}")],
+                providers: vec![Provider::Codex],
+                excerpt_count: excerpts.len(),
+                excerpts,
+                truncated: false,
+            });
+        }
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: briefs,
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let morning = MorningBrief {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            plan_id: Some("plan-reviewed".to_owned()),
+            approved_at: Some("2026-07-24T20:00:00Z".to_owned()),
+            deadline_at: Some("2026-07-24T22:00:00Z".to_owned()),
+            plan_state: Some("completed".to_owned()),
+            headline: "One reviewed item".to_owned(),
+            attention_count: 0,
+            review_count: 1,
+            in_progress_count: 0,
+            not_started_count: 0,
+            reviewed_count: 1,
+            items: vec![MorningBriefItem {
+                draft_id: "draft-reviewed".to_owned(),
+                project: "asset-0".to_owned(),
+                title: reviewed_title.expect("reviewed title"),
+                workspace: repository.path().join("assets/0").display().to_string(),
+                execution_route_id: "codex:native".to_owned(),
+                verification_contract_id: "asset-generation-v1".to_owned(),
+                surface: Provider::Codex,
+                capacity_pool: CapacityPool::CodexSubscription,
+                coordinator_state: "completed".to_owned(),
+                task_id: Some("task-reviewed".to_owned()),
+                thread_id: Some("thread-reviewed".to_owned()),
+                verdict: MorningBriefVerdict::ReadyToReview,
+                verdict_reason: "Verified provider receipt and workspace evidence".to_owned(),
+                summary: Some("Generated the requested asset".to_owned()),
+                error: None,
+                started_at: Some("2026-07-24T20:00:00Z".to_owned()),
+                completed_at: Some("2026-07-24T20:05:00Z".to_owned()),
+                next_action: "Reviewed".to_owned(),
+                provenance_verified: true,
+                inspectable: true,
+                evidence_fingerprint: "fingerprint-reviewed".to_owned(),
+                review_state: MorningReviewState::Reviewed,
+                reviewed_at: Some("2026-07-24T21:00:00Z".to_owned()),
+                outcome_accepted: true,
+                workspace_evidence: Some(WorkspaceChangeEvidence {
+                    state: WorkspaceEvidenceState::Changed,
+                    captured_before: "2026-07-24T20:00:00Z".to_owned(),
+                    observed_at: "2026-07-24T20:05:00Z".to_owned(),
+                    finalized: true,
+                    repository_root: Some(repository_root.display().to_string()),
+                    baseline_head: Some("baseline".to_owned()),
+                    observed_head: Some("observed".to_owned()),
+                    head_changed: false,
+                    preexisting_dirty_count: 0,
+                    observed_dirty_count: 1,
+                    changed_files: vec![WorkspaceFileChange {
+                        path: "assets/0/c.png".to_owned(),
+                        before_status: None,
+                        after_status: Some("??".to_owned()),
+                        change: "added".to_owned(),
+                    }],
+                    attribution: "Observed after the verified run".to_owned(),
+                    warning: None,
+                }),
+            }],
+            warnings: Vec::new(),
+            read_only: true,
+            methodology: "test".to_owned(),
+        };
+
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let routes = ExecutionRouteInventory {
+            generated_at: now.to_rfc3339(),
+            routes: vec![route(
+                "codex:native",
+                Provider::Codex,
+                Provider::Codex,
+                ResourceState::Ready,
+            )],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+        let candidate_snapshot = snapshot(sessions);
+        let mut reviewed_but_not_accepted = morning.clone();
+        reviewed_but_not_accepted.items[0].outcome_accepted = false;
+        let unaccepted_plan = build_overnight_plan_with_context_routes_and_review(
+            &candidate_snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            &routes,
+            Some(&reviewed_but_not_accepted),
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+        assert!(unaccepted_plan.candidates.is_empty());
+
+        let mut old_contract = morning.clone();
+        old_contract.items[0].verification_contract_id = "asset-generation-v0".to_owned();
+        let old_contract_plan = build_overnight_plan_with_context_routes_and_review(
+            &candidate_snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            &routes,
+            Some(&old_contract),
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+        assert!(old_contract_plan.candidates.is_empty());
+
+        let mut unrelated_change = morning.clone();
+        unrelated_change.items[0]
+            .workspace_evidence
+            .as_mut()
+            .expect("workspace evidence")
+            .changed_files[0]
+            .path = "assets/0/unrelated.png".to_owned();
+        let unrelated_plan = build_overnight_plan_with_context_routes_and_review(
+            &candidate_snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            &routes,
+            Some(&unrelated_change),
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+        assert!(unrelated_plan.candidates.is_empty());
+
+        let mut other_route = morning.clone();
+        other_route.items[0].execution_route_id = "claude:native".to_owned();
+        let other_route_plan = build_overnight_plan_with_context_routes_and_review(
+            &candidate_snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            &routes,
+            Some(&other_route),
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+        assert!(other_route_plan.candidates.is_empty());
+
+        let plan = build_overnight_plan_with_context_routes_and_review(
+            &candidate_snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            &routes,
+            Some(&morning),
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+
+        assert_eq!(
+            plan.candidates.len(),
+            1,
+            "batch exclusions: {:#?}",
+            plan.exclusions
+        );
+        assert!(plan.candidates[0].project.contains("10개"));
+        assert!(plan.candidates[0].goal.contains("assets/1/c.png"));
+        assert!(plan.candidates[0].goal.contains("assets/10/c.png"));
+    }
+
+    #[test]
     fn a_provider_final_response_that_reports_completion_is_not_open_work() {
         let project = "completed-refactor";
         let goal = "Refactor the authentication module and run its regression tests";
@@ -4716,6 +5195,10 @@ mod tests {
             "Implement the parser module and run focused tests",
             "Done. All checks are green.",
         );
+        let deferred_done = exchange_brief(
+            "Continue the parser module while I sleep",
+            "Done. All checks are green.",
+        );
         let needs_secret = exchange_brief(
             "Implement the parser module and run focused tests",
             "The run failed because I need your API key.",
@@ -4752,6 +5235,15 @@ mod tests {
             ),
             OpenWorkEvidence::RetryableFailure
         );
+        assert_eq!(
+            assess_open_work(
+                false,
+                Some(&deferred_done),
+                "Continue implementation",
+                SessionStatus::Idle
+            ),
+            OpenWorkEvidence::Ambiguous
+        );
     }
 
     #[test]
@@ -4763,6 +5255,14 @@ mod tests {
         let remaining = exchange_brief(
             "Implement the parser module and run focused tests",
             "The parser is implemented; the focused regression test still needs to be fixed.",
+        );
+        let credential_module = exchange_brief(
+            "Implement the credential module and run focused tests",
+            "The module is started; the focused test still needs to be fixed.",
+        );
+        let no_credentials_needed = exchange_brief(
+            "Implement the authentication module and run focused tests",
+            "No credentials are required; the focused regression test still needs to be fixed.",
         );
 
         assert_eq!(
@@ -4778,6 +5278,24 @@ mod tests {
             assess_open_work(
                 false,
                 Some(&remaining),
+                "Continue implementation",
+                SessionStatus::Idle
+            ),
+            OpenWorkEvidence::IncompleteHandoff
+        );
+        assert_eq!(
+            assess_open_work(
+                false,
+                Some(&credential_module),
+                "Continue implementation",
+                SessionStatus::Idle
+            ),
+            OpenWorkEvidence::IncompleteHandoff
+        );
+        assert_eq!(
+            assess_open_work(
+                false,
+                Some(&no_credentials_needed),
                 "Continue implementation",
                 SessionStatus::Idle
             ),
@@ -4802,6 +5320,14 @@ mod tests {
             .as_deref(),
             Some("thumbnail.png")
         );
+        assert_eq!(
+            task_target(
+                "İ generate an image and save it as 사진.png",
+                OvernightTaskKind::AssetGeneration
+            )
+            .as_deref(),
+            Some("사진.png")
+        );
     }
 
     #[test]
@@ -4812,6 +5338,10 @@ mod tests {
         );
         assert_eq!(
             assess_task("Refactor the documentation parser and run focused tests").kind,
+            OvernightTaskKind::CodeChange
+        );
+        assert_eq!(
+            assess_task("Refactor the render pipeline for .svg files with focused tests").kind,
             OvernightTaskKind::CodeChange
         );
         let tiny_test_fix = assess_task("Fix failing test typo");
@@ -4834,6 +5364,12 @@ mod tests {
             );
         }
         assert!(assess_task("Audit all 20 files in the parser package").expected_hours >= 1.0);
+        assert!(assess_task("Fix one failing parser test with focused tests").expected_hours < 1.0);
+        assert!(
+            assess_task("Fix the failing parser test and run its focused regression test")
+                .expected_hours
+                < 1.0
+        );
     }
 
     #[test]
@@ -4844,6 +5380,26 @@ mod tests {
         );
 
         assert!(!latest_goal_is_reported_complete(&brief));
+    }
+
+    #[test]
+    fn completion_status_handles_negation_and_historical_failure_clauses() {
+        let completed = exchange_brief(
+            "Implement the parser and run focused tests",
+            "All requested work is complete; the previously failed test now passes.",
+        );
+        let incomplete = exchange_brief(
+            "Implement the parser and run focused tests",
+            "Not all requested work is complete.",
+        );
+        let historical_failure = exchange_brief(
+            "Implement the parser and run focused tests",
+            "All requested work is complete; the test failed before the fix and now passes.",
+        );
+
+        assert!(latest_goal_is_reported_complete(&completed));
+        assert!(!latest_goal_is_reported_complete(&incomplete));
+        assert!(latest_goal_is_reported_complete(&historical_failure));
     }
 
     fn exchange_brief(user: &str, assistant: &str) -> ProjectContextBrief {

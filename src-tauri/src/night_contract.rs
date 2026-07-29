@@ -69,6 +69,7 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         candidate_rank: candidate.rank,
         project: candidate.project.clone(),
         route_id: candidate.execution_route_id.clone(),
+        verification_contract_id: candidate.verification_contract_id.clone(),
         format,
         run_mode: if candidate.resume_existing {
             RunMode::ResumeExisting
@@ -181,6 +182,7 @@ mod tests {
             executor_profile: (surface == Provider::Hermes).then(|| "default".to_owned()),
             capacity_pool: CapacityPool::GrokSubscription,
             route_reason: "test".to_owned(),
+            verification_contract_id: "code-change-v1".to_owned(),
             native_session_id: resume_existing.then(|| "session-1".to_owned()),
             resume_existing,
             score: 90.0,

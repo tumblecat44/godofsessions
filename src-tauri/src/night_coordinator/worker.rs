@@ -602,6 +602,7 @@ mod tests {
                         candidate_rank: rank,
                         project: format!("project-{rank}"),
                         route_id: "codex:native".to_owned(),
+                        verification_contract_id: "code-change-v1".to_owned(),
                         format: RunDraftFormat::StructuredPrompt,
                         run_mode: RunMode::ResumeExisting,
                         native_session_id: Some(format!("thread-{rank}")),
