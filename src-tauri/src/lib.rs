@@ -1,6 +1,8 @@
-mod approval;
+mod action_approval;
+mod action_routes;
 mod action_run;
 mod action_run_registry;
+mod approval;
 mod chat;
 mod claude_dispatch;
 mod codex_dispatch;
@@ -50,6 +52,7 @@ type RecoveryState = Mutex<night_coordinator::RecoveryRegistry>;
 type ProviderAuthState = Mutex<provider_auth::ProviderAuthRegistry>;
 type OperatorChatState = Result<operator_chat::ChatStore, String>;
 type ActionRunState = Result<Arc<action_run_registry::ActionRunRegistry>, String>;
+type ActionApprovalState = Mutex<action_approval::ActionApprovalRegistry>;
 
 static ACTION_RUN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -457,52 +460,134 @@ fn load_action_runs(
 }
 
 #[tauri::command]
+async fn load_action_routes() -> Result<Vec<action_routes::ActionRouteOption>, String> {
+    tauri::async_runtime::spawn_blocking(|| action_routes::load(&[]))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn prepare_action_run(
+    request: action_run_registry::StartActionRunRequest,
+    approvals: State<'_, ActionApprovalState>,
+) -> Result<action_approval::ActionApprovalChallenge, String> {
+    request.validate()?;
+    let resolution_request = request.clone();
+    let (cwd, route) = tauri::async_runtime::spawn_blocking(move || {
+        let (cwd, _) = resolve_action_workspace(&resolution_request.workspace)?;
+        let route = action_routes::resolve(&resolution_request.route_id, &[])?;
+        action_routes::validate_model_selection(
+            &route.option,
+            resolution_request.model.as_deref(),
+            resolution_request.effort.as_deref(),
+        )?;
+        Ok::<_, String>((cwd, route))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let mut approvals = approvals
+        .lock()
+        .map_err(|_| "ACTION 승인 상태를 잠글 수 없습니다.".to_owned())?;
+    Ok(approvals.prepare(
+        &request,
+        &cwd.display().to_string(),
+        &route.option,
+        &route.runtime_identity,
+        Utc::now(),
+    ))
+}
+
+#[tauri::command]
 async fn start_action_run(
     request: action_run_registry::StartActionRunRequest,
+    approval_id: String,
+    confirmation_phrase: String,
     on_event: Channel<action_run_registry::ActionRunUiEvent>,
     actions: State<'_, ActionRunState>,
+    approvals: State<'_, ActionApprovalState>,
 ) -> Result<action_run_registry::ActionRun, String> {
-    if request.objective.trim().is_empty() {
-        return Err("실행할 작업을 입력해 주세요.".to_owned());
+    request.validate()?;
+    let resolution_request = request.clone();
+    let (cwd, allowed_roots, route) = tauri::async_runtime::spawn_blocking(move || {
+        let (cwd, allowed_roots) = resolve_action_workspace(&resolution_request.workspace)?;
+        let route = action_routes::resolve(&resolution_request.route_id, &[])?;
+        action_routes::validate_model_selection(
+            &route.option,
+            resolution_request.model.as_deref(),
+            resolution_request.effort.as_deref(),
+        )?;
+        Ok::<_, String>((cwd, allowed_roots, route))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    {
+        let mut approvals = approvals
+            .lock()
+            .map_err(|_| "ACTION 승인 상태를 잠글 수 없습니다.".to_owned())?;
+        approvals.consume(
+            &approval_id,
+            &confirmation_phrase,
+            &request,
+            &cwd.display().to_string(),
+            &route.option,
+            &route.runtime_identity,
+            Utc::now(),
+        )?;
     }
-    let (cwd, allowed_roots) = resolve_action_workspace(&request.workspace)?;
-    let codex_binary = chat::codex_binary()
-        .ok_or_else(|| "ChatGPT 앱 또는 Codex 실행기를 찾지 못했습니다.".to_owned())?;
     let run_id = next_action_run_id();
     let queued = action_run_registry::ActionRun::queued(
         run_id.clone(),
         &request,
         cwd.display().to_string(),
+        &route.option,
     );
-    let mut config = action_run::ActionRunConfig::new(
-        codex_binary,
+    let mut config = action_run::ActionRunConfig::for_provider(
+        route.option.provider,
+        route.binary,
         &cwd,
         allowed_roots,
         request.objective.clone(),
     );
     config.model = request.model.clone();
     config.effort = request.effort.clone();
+    config.approval_marker = Some(approval_id);
+    config.expected_runtime_identity = Some(route.runtime_identity);
     let actions = actions.inner().as_ref().map_err(Clone::clone)?.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let process =
-            action_run::ActionRunProcess::start(config).map_err(|error| error.to_string())?;
+            action_run::ActionRunProcess::prepare(config).map_err(|error| error.to_string())?;
         let (controller, events) = process.into_parts();
-        let mut current = actions.begin(queued, controller)?;
+        let mut current = actions.begin(queued, controller.clone())?;
         let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
             run: current.clone(),
         });
+        if let Err(error) = controller.start() {
+            current = actions.apply(
+                &run_id,
+                action_run::ActionRunEventPayload::Finished {
+                    state: action_run::ActionRunState::Failed,
+                    provider_status: "notStarted".to_owned(),
+                    error: Some(format!(
+                        "로컬 실행 기록은 저장됐지만 provider 시작 게이트를 열지 못했습니다: {error}"
+                    )),
+                },
+            )?;
+            let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
+                run: current.clone(),
+            });
+            return Ok(current);
+        }
         while let Ok(payload) = events.recv() {
+            let finished = matches!(
+                &payload,
+                action_run::ActionRunEventPayload::Finished { .. }
+            );
             current = actions.apply(&run_id, payload)?;
             let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
                 run: current.clone(),
             });
-            if matches!(
-                current.status,
-                action_run_registry::ActionRunStatus::Completed
-                    | action_run_registry::ActionRunStatus::Failed
-                    | action_run_registry::ActionRunStatus::Cancelled
-            ) {
+            if finished {
                 return Ok(current);
             }
         }
@@ -510,18 +595,20 @@ async fn start_action_run(
             current.status,
             action_run_registry::ActionRunStatus::Completed
                 | action_run_registry::ActionRunStatus::Failed
+                | action_run_registry::ActionRunStatus::Interrupted
                 | action_run_registry::ActionRunStatus::Cancelled
         ) {
             return Ok(current);
         }
-        let failed = actions.fail(
+        let interrupted = actions.interrupt(
             &run_id,
-            "Codex 실행 이벤트 통로가 종료 상태 없이 닫혔습니다.".to_owned(),
+            "공급자 실행 이벤트 통로가 종료 상태 없이 닫혔습니다. 결과 미확인 · 자동 재시도 없음."
+                .to_owned(),
         )?;
         let _ = on_event.send(action_run_registry::ActionRunUiEvent::Updated {
-            run: failed.clone(),
+            run: interrupted.clone(),
         });
-        Ok(failed)
+        Ok(interrupted)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -999,11 +1086,10 @@ fn resolve_action_workspace(requested: &str) -> Result<(PathBuf, Vec<PathBuf>), 
     let allowed = known_action_workspace_roots();
     if !allowed.iter().any(|root| root == &requested_root) {
         return Err(
-            "현재 세션 근거에서 확인되지 않은 작업 공간에는 실행 권한을 줄 수 없습니다."
-                .to_owned(),
+            "현재 세션 근거에서 확인되지 않은 작업 공간에는 실행 권한을 줄 수 없습니다.".to_owned(),
         );
     }
-    Ok((requested, vec![requested_root]))
+    Ok((requested_root.clone(), vec![requested_root]))
 }
 
 fn known_action_workspace_roots() -> Vec<PathBuf> {
@@ -1459,6 +1545,7 @@ pub fn run() {
         action_run_registry::ActionRunRegistry::open(action_run_history_path()).map(Arc::new);
     tauri::Builder::default()
         .manage(ApprovalState::default())
+        .manage(ActionApprovalState::default())
         .manage(RecoveryState::default())
         .manage(ProviderAuthState::default())
         .manage(chat_store)
@@ -1477,6 +1564,8 @@ pub fn run() {
             cancel_provider_login,
             send_chat_message,
             load_action_runs,
+            load_action_routes,
+            prepare_action_run,
             start_action_run,
             stop_action_run,
             load_night_run_history,

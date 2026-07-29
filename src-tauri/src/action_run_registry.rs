@@ -4,6 +4,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::action_routes::ActionRouteOption;
 use crate::action_run::{
     ActionRunController, ActionRunEventPayload, ActionRunState, WorkspaceObservedChange,
 };
@@ -19,8 +20,24 @@ pub(crate) struct StartActionRunRequest {
     pub chat_session_id: Option<String>,
     pub objective: String,
     pub workspace: String,
+    pub route_id: String,
     pub model: Option<String>,
     pub effort: Option<String>,
+}
+
+impl StartActionRunRequest {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.objective.trim().is_empty() {
+            return Err("실행할 작업을 입력해 주세요.".to_owned());
+        }
+        if self.objective.chars().count() > 32_000 {
+            return Err("ACTION 작업은 32,000자 이하여야 합니다.".to_owned());
+        }
+        if self.route_id.trim().is_empty() {
+            return Err("ACTION 실행 경로를 선택해 주세요.".to_owned());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +67,7 @@ impl From<ActionRunState> for ActionRunStatus {
             ActionRunState::Queued => Self::Queued,
             ActionRunState::Preparing => Self::Preparing,
             ActionRunState::Running => Self::Running,
+            ActionRunState::Interrupted => Self::Interrupted,
             ActionRunState::Completed => Self::Completed,
             ActionRunState::Failed => Self::Failed,
             ActionRunState::Cancelled => Self::Cancelled,
@@ -102,11 +120,23 @@ pub(crate) struct ActionRun {
     pub title: Option<String>,
     pub workspace: String,
     pub cwd: String,
+    #[serde(default = "legacy_codex_route")]
+    pub route_id: String,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub effort: Option<String>,
     pub sandbox: String,
     pub network: String,
     pub approval_mode: String,
+    #[serde(default)]
+    pub stop_supported: bool,
+    #[serde(default)]
+    pub native_session_id: Option<String>,
+    #[serde(default)]
+    pub receipt_source: String,
+    #[serde(default)]
+    pub limitations: Vec<String>,
     pub status: ActionRunStatus,
     pub summary: Option<String>,
     pub elapsed: Option<String>,
@@ -123,8 +153,17 @@ pub(crate) struct ActionRun {
     pub completed_at: Option<String>,
 }
 
+fn legacy_codex_route() -> String {
+    "codex:native".to_owned()
+}
+
 impl ActionRun {
-    pub(crate) fn queued(id: String, request: &StartActionRunRequest, cwd: String) -> Self {
+    pub(crate) fn queued(
+        id: String,
+        request: &StartActionRunRequest,
+        cwd: String,
+        route: &ActionRouteOption,
+    ) -> Self {
         let now = Utc::now().to_rfc3339();
         Self {
             id,
@@ -132,14 +171,20 @@ impl ActionRun {
             title: Some(truncate_chars(request.objective.trim(), 80)),
             workspace: request.workspace.clone(),
             cwd,
-            provider: "Codex subscription".to_owned(),
+            route_id: route.id.clone(),
+            provider: route.label.clone(),
             model: request
                 .model
                 .clone()
                 .unwrap_or_else(|| "provider default".to_owned()),
-            sandbox: "workspace write".to_owned(),
-            network: "blocked".to_owned(),
-            approval_mode: "fail closed".to_owned(),
+            effort: request.effort.clone(),
+            sandbox: route.sandbox.clone(),
+            network: route.network.clone(),
+            approval_mode: "exact · single use · fail closed".to_owned(),
+            stop_supported: route.stop_supported,
+            native_session_id: None,
+            receipt_source: route.receipt_source.clone(),
+            limitations: route.limitations.clone(),
             status: ActionRunStatus::Queued,
             summary: None,
             elapsed: None,
@@ -291,7 +336,7 @@ impl ActionRunRegistry {
         Ok(run)
     }
 
-    pub(crate) fn fail(&self, run_id: &str, message: String) -> Result<ActionRun, String> {
+    pub(crate) fn interrupt(&self, run_id: &str, message: String) -> Result<ActionRun, String> {
         let mut inner = self
             .inner
             .lock()
@@ -301,7 +346,7 @@ impl ActionRunRegistry {
             .iter_mut()
             .find(|run| run.id == run_id)
             .ok_or_else(|| "실행 기록을 찾지 못했습니다.".to_owned())?;
-        run.status = ActionRunStatus::Failed;
+        run.status = ActionRunStatus::Interrupted;
         run.summary = Some(message);
         let now = Utc::now().to_rfc3339();
         run.updated_at = now.clone();
@@ -317,6 +362,17 @@ impl ActionRunRegistry {
             .inner
             .lock()
             .map_err(|_| "실행 기록 상태를 잠글 수 없습니다.".to_owned())?;
+        let stop_supported = inner
+            .runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .map(|run| run.stop_supported)
+            .unwrap_or(false);
+        if !stop_supported {
+            return Err(
+                "이 공급자 경로는 검증된 로컬 process-tree 중지를 제공하지 않습니다.".to_owned(),
+            );
+        }
         let active = inner
             .active
             .get(run_id)
@@ -330,7 +386,10 @@ impl ActionRunRegistry {
             .iter_mut()
             .find(|run| run.id == run_id)
             .ok_or_else(|| "실행 기록을 찾지 못했습니다.".to_owned())?;
-        run.summary = Some("중지 요청을 Codex 실행 세션에 전달했습니다.".to_owned());
+        run.summary = Some(format!(
+            "중지 요청을 {} 실행 세션에 전달했습니다.",
+            run.provider
+        ));
         run.updated_at = Utc::now().to_rfc3339();
         let snapshot = run.clone();
         self.persist_locked(&inner)?;
@@ -393,20 +452,25 @@ fn apply_payload(run: &mut ActionRun, payload: &ActionRunEventPayload) {
             approval_policy,
             network_access,
         } => {
-            run.thread_id = Some(thread_id.clone());
-            run.turn_id = Some(turn_id.clone());
+            run.thread_id = thread_id.clone();
+            run.turn_id = turn_id.clone();
             run.cwd = cwd.clone();
             run.approval_mode = if approval_policy == "never" {
                 "fail closed".to_owned()
             } else {
                 approval_policy.replace('-', " ")
             };
-            run.network = if *network_access {
-                "enabled".to_owned()
-            } else {
-                "blocked".to_owned()
-            };
+            if *network_access {
+                run.network = "enabled".to_owned();
+            }
             run.status = ActionRunStatus::Running;
+        }
+        ActionRunEventPayload::ProviderReceipt {
+            native_session_id,
+            receipt_source,
+        } => {
+            run.native_session_id = Some(native_session_id.clone());
+            run.receipt_source = receipt_source.clone();
         }
         ActionRunEventPayload::ItemStarted {
             item_id,
@@ -492,7 +556,9 @@ fn upsert_command(run: &mut ActionRun, item_id: &str, item: &Value, completed: b
         .iter_mut()
         .find(|command| command.id == item_id)
     {
-        command.command = command_text;
+        if command_text != "command" {
+            command.command = command_text;
+        }
         command.cwd = cwd;
         command.status = status.to_owned();
         if output.is_some() {
@@ -625,8 +691,26 @@ mod tests {
             chat_session_id: Some("chat-1".to_owned()),
             objective: "Run the build".to_owned(),
             workspace: "/work/repo".to_owned(),
+            route_id: "codex:native".to_owned(),
             model: Some("gpt-test".to_owned()),
             effort: Some("medium".to_owned()),
+        }
+    }
+
+    fn route() -> ActionRouteOption {
+        ActionRouteOption {
+            id: "codex:native".to_owned(),
+            provider: crate::model::Provider::Codex,
+            label: "Codex".to_owned(),
+            runtime: "Codex".to_owned(),
+            runtime_identity: "sha256:abc".to_owned(),
+            available: true,
+            sandbox: "workspace-write".to_owned(),
+            network: "blocked".to_owned(),
+            stop_supported: true,
+            receipt_source: "thread + turn + item events".to_owned(),
+            message: None,
+            limitations: Vec::new(),
         }
     }
 
@@ -634,7 +718,12 @@ mod tests {
     fn recovery_marks_in_flight_runs_interrupted_without_claiming_provider_failure() {
         let directory = tempdir().expect("tempdir");
         let path = directory.path().join("runs.json");
-        let run = ActionRun::queued("run-1".to_owned(), &request(), "/work/repo".to_owned());
+        let run = ActionRun::queued(
+            "run-1".to_owned(),
+            &request(),
+            "/work/repo".to_owned(),
+            &route(),
+        );
         fs::write(&path, serde_json::to_vec(&vec![run]).expect("json")).expect("write");
 
         let registry = ActionRunRegistry::open(path).expect("registry");
@@ -650,7 +739,12 @@ mod tests {
 
     #[test]
     fn completed_command_and_file_items_become_reviewable_receipts() {
-        let mut run = ActionRun::queued("run-1".to_owned(), &request(), "/work/repo".to_owned());
+        let mut run = ActionRun::queued(
+            "run-1".to_owned(),
+            &request(),
+            "/work/repo".to_owned(),
+            &route(),
+        );
         apply_payload(
             &mut run,
             &ActionRunEventPayload::ItemCompleted {
@@ -689,7 +783,12 @@ mod tests {
 
     #[test]
     fn provider_file_evidence_is_bounded_with_an_explicit_warning() {
-        let mut run = ActionRun::queued("run-1".to_owned(), &request(), "/work/repo".to_owned());
+        let mut run = ActionRun::queued(
+            "run-1".to_owned(),
+            &request(),
+            "/work/repo".to_owned(),
+            &route(),
+        );
         let changes = (0..(MAX_PROVIDER_CHANGED_FILES_PER_RUN + 1))
             .map(|index| {
                 serde_json::json!({
@@ -726,6 +825,7 @@ mod tests {
                     format!("run-{index:03}"),
                     &request(),
                     "/work/repo".to_owned(),
+                    &route(),
                 );
                 run.created_at = format!("2026-07-28T00:00:{index:02}Z");
                 run.status = ActionRunStatus::Completed;

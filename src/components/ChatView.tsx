@@ -69,6 +69,92 @@ interface ActionRunUiEvent {
   run: ActionRun;
 }
 
+type ActionSurface = "codex" | "claude" | "grok" | "hermes";
+
+interface ActionRouteOption {
+  id: string;
+  provider: ActionSurface;
+  label: string;
+  runtime: string;
+  runtimeIdentity: string;
+  available: boolean;
+  sandbox: string;
+  network: string;
+  stopSupported: boolean;
+  receiptSource: string;
+  message?: string | null;
+  limitations: string[];
+}
+
+interface ActionApprovalChallenge {
+  id: string;
+  confirmationPhrase: string;
+  expiresAt: string;
+  route: ActionRouteOption;
+  cwd: string;
+  objective: string;
+  model: string;
+  effort?: string | null;
+  warning: string;
+}
+
+const previewActionRoutes: ActionRouteOption[] = [
+  {
+    id: "codex:native",
+    provider: "codex",
+    label: "Codex",
+    runtime: "Codex CLI · codex exec --json --ephemeral",
+    runtimeIdentity: "sha256:preview-codex-runtime",
+    available: true,
+    sandbox: "workspace-write",
+    network: "blocked",
+    stopSupported: true,
+    receiptSource: "Codex exec JSONL thread + turn + item events",
+    limitations: [],
+  },
+  {
+    id: "claude:native",
+    provider: "claude",
+    label: "Claude Code",
+    runtime: "Claude Code CLI · stream-json persistent session",
+    runtimeIdentity: "sha256:preview-claude-runtime",
+    available: true,
+    sandbox: "strict workspace sandbox",
+    network: "blocked",
+    stopSupported: true,
+    receiptSource: "Claude stream-json + provider-owned transcript",
+    limitations: [],
+  },
+  {
+    id: "grok:native",
+    provider: "grok",
+    label: "Grok Build",
+    runtime: "Grok Build ACP",
+    runtimeIdentity: "unverified",
+    available: false,
+    sandbox: "strict (CWD + provider state + temp)",
+    network: "not kernel-blocked on macOS",
+    stopSupported: false,
+    receiptSource: "Grok ACP + provider session",
+    message: "macOS network confinement와 plugin/hook 격리를 아직 증명하지 못했습니다.",
+    limitations: [],
+  },
+  {
+    id: "hermes:default",
+    provider: "hermes",
+    label: "Hermes",
+    runtime: "Hermes Kanban agent loop",
+    runtimeIdentity: "unverified",
+    available: false,
+    sandbox: "provider profile",
+    network: "not proven",
+    stopSupported: false,
+    receiptSource: "Hermes task + task_runs",
+    message: "현재 설치 경로의 confinement와 process-tree stop 보증이 부족합니다.",
+    limitations: [],
+  },
+];
+
 const previewProviders: ChatProviderOption[] = [
   {
     provider: "codex_subscription",
@@ -143,6 +229,14 @@ function providerLabel(provider: ChatProvider, ko: boolean) {
     return ko ? "Codex 구독" : "Codex subscription";
   }
   return ko ? "Claude 구독" : "Claude subscription";
+}
+
+function actionChatProvider(
+  route: ActionRouteOption | undefined,
+): ChatProvider | null {
+  if (route?.provider === "codex") return "codex_subscription";
+  if (route?.provider === "claude") return "claude_subscription";
+  return null;
 }
 
 function asksForOvernight(message: string) {
@@ -389,6 +483,27 @@ export function ChatView({
     () => workspaces[0] ?? "",
   );
   const [actionRuns, setActionRuns] = useState<ActionRun[]>([]);
+  const [actionRoutes, setActionRoutes] = useState<ActionRouteOption[]>(() =>
+    isTauri() ? [] : previewActionRoutes,
+  );
+  const [actionRouteId, setActionRouteId] = useState("codex:native");
+  const [actionModels, setActionModels] = useState<ChatModelOption[]>(() =>
+    isTauri() ? [] : previewModels.codex_subscription,
+  );
+  const [actionModelsRoute, setActionModelsRoute] = useState<string | null>(
+    isTauri() ? null : "codex:native",
+  );
+  const [loadingActionModels, setLoadingActionModels] = useState(isTauri());
+  const [actionModel, setActionModel] = useState<string | null>(
+    isTauri()
+      ? null
+      : (previewModels.codex_subscription[0]?.id ?? null),
+  );
+  const [actionEffort, setActionEffort] = useState<string | null>(
+    isTauri()
+      ? null
+      : (previewModels.codex_subscription[0]?.default_effort ?? null),
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [stoppingRuns, setStoppingRuns] = useState<Set<string>>(
     () => new Set(),
@@ -427,11 +542,24 @@ export function ChatView({
       run.status === "preparing" ||
       run.status === "running",
   );
-  const codexAvailable = providers.some(
-    (option) =>
-      option.provider === "codex_subscription" &&
-      option.available &&
-      option.authenticated,
+  const selectedActionRoute =
+    actionRoutes.find((route) => route.id === actionRouteId) ??
+    actionRoutes.find((route) => route.available);
+  const configuredActionModel = actionModels.find(
+    (option) => option.id === actionModel,
+  );
+  const actionEfforts = configuredActionModel?.supported_efforts ?? [];
+  const actionModelReady = Boolean(
+    selectedActionRoute &&
+      actionModelsRoute === selectedActionRoute.id &&
+      configuredActionModel &&
+      (configuredActionModel.supported_efforts.length === 0
+        ? actionEffort === null
+        : actionEffort &&
+          configuredActionModel.supported_efforts.includes(actionEffort)),
+  );
+  const actionRouteAvailable = Boolean(
+    selectedActionRoute?.available && actionModelReady,
   );
   const configurationLocked = sending || Boolean(activeTurnRunning);
   const activeSessionIdRef = useRef(activeSessionId);
@@ -449,10 +577,77 @@ export function ChatView({
   }, [actionWorkspace, workspaces]);
 
   useEffect(() => {
-    if (provider !== "codex_subscription") {
-      setActionMode(false);
+    if (!isTauri()) return;
+    let cancelled = false;
+    invoke<ActionRouteOption[]>("load_action_routes")
+      .then((routes) => {
+        if (cancelled) return;
+        setActionRoutes(routes);
+        setActionRouteId((current) =>
+          routes.some((route) => route.id === current)
+            ? current
+            : (routes.find((route) => route.available)?.id ?? routes[0]?.id ?? ""),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setActionRoutes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const route = selectedActionRoute;
+    const provider = actionChatProvider(route);
+    const applyOptions = (options: ChatModelOption[]) => {
+      if (cancelled || !route) return;
+      const selected =
+        options.find((option) => option.is_default) ?? options[0] ?? null;
+      setActionModels(options);
+      setActionModelsRoute(route.id);
+      setActionModel(selected?.id ?? null);
+      setActionEffort(
+        selected?.default_effort ??
+          selected?.supported_efforts[0] ??
+          null,
+      );
+      setLoadingActionModels(false);
+    };
+    if (!route?.available || !provider) {
+      setActionModels([]);
+      setActionModelsRoute(route?.id ?? null);
+      setActionModel(null);
+      setActionEffort(null);
+      setLoadingActionModels(false);
+      return;
     }
-  }, [provider]);
+    setActionModels([]);
+    setActionModelsRoute(null);
+    setActionModel(null);
+    setActionEffort(null);
+    setLoadingActionModels(true);
+    if (!isTauri()) {
+      applyOptions(previewModels[provider]);
+      return;
+    }
+    invoke<ChatModelOption[]>("load_chat_models", { provider })
+      .then(applyOptions)
+      .catch(() => {
+        if (cancelled) return;
+        setActionModels([]);
+        setActionModelsRoute(route.id);
+        setLoadingActionModels(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedActionRoute?.available,
+    selectedActionRoute?.id,
+    selectedActionRoute?.provider,
+  ]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -831,20 +1026,6 @@ export function ChatView({
       setActionMode(false);
       return;
     }
-    if (!codexAvailable || (activeSessionId && provider !== "codex_subscription")) {
-      return;
-    }
-    if (provider !== "codex_subscription") {
-      setProvider("codex_subscription");
-      setModel(
-        preferences.default_chat_models.codex_subscription ?? null,
-      );
-      setEffort(
-        preferences.default_chat_efforts.codex_subscription ?? null,
-      );
-      setConfigNotice(null);
-      setProviderMenuOpen(false);
-    }
     setOvernightMode(false);
     setActionMode(true);
     setActionError(null);
@@ -1026,37 +1207,68 @@ export function ChatView({
       sending ||
       savingConfiguration ||
       activeTurnRunning ||
-      (actionMode && (actionRunActive || !actionWorkspace)) ||
-      !currentProvider.available ||
-      !modelReady
+      (actionMode &&
+        (actionRunActive || !actionWorkspace || !actionRouteAvailable)) ||
+      (!actionMode && (!currentProvider.available || !modelReady))
     )
       return;
-    if (
-      actionMode &&
-      isTauri() &&
-      !window.confirm(
-        ko
-          ? [
-              "이 ACTION을 한 번 실행할까요?",
-              "",
-              `작업: ${content}`,
-              `CWD: ${actionWorkspace}`,
-              `모델: ${model ?? "공급자 기본값"}`,
-              "경계: workspace-write · 네트워크 차단 · 범위 밖 쓰기 차단",
-              "표시: 명령 상태는 즉시, 출력은 각 명령 종료 시",
-            ].join("\n")
-          : [
-              "Run this ACTION once?",
-              "",
-              `Objective: ${content}`,
-              `CWD: ${actionWorkspace}`,
-              `Model: ${model ?? "provider default"}`,
-              "Boundary: workspace-write · network blocked · outside writes blocked",
-              "Display: command status is immediate; output appears on command exit",
-            ].join("\n"),
-      )
-    ) {
-      return;
+    const actionRequest = actionMode
+      ? {
+          chat_session_id: activeSessionId,
+          objective: content,
+          workspace: actionWorkspace,
+          route_id: selectedActionRoute?.id ?? "",
+          model: actionModel,
+          effort: actionEffort,
+        }
+      : null;
+    let actionApproval: ActionApprovalChallenge | null = null;
+    if (actionRequest && isTauri()) {
+      try {
+        actionApproval = await invoke<ActionApprovalChallenge>(
+          "prepare_action_run",
+          { request: actionRequest },
+        );
+        const entered = window.prompt(
+          [
+            actionApproval.warning,
+            "",
+            `${ko ? "작업" : "Objective"}: ${actionApproval.objective}`,
+            `${ko ? "실행 경로" : "Route"}: ${actionApproval.route.label} · ${actionApproval.route.runtime}`,
+            `${ko ? "런타임 지문" : "Runtime fingerprint"}: ${actionApproval.route.runtimeIdentity}`,
+            `${ko ? "모델" : "Model"}: ${actionApproval.model}`,
+            `${ko ? "노력 수준" : "Effort"}: ${actionApproval.effort ?? (ko ? "해당 없음" : "not applicable")}`,
+            `CWD: ${actionApproval.cwd}`,
+            `${ko ? "샌드박스" : "Sandbox"}: ${actionApproval.route.sandbox}`,
+            `${ko ? "네트워크" : "Network"}: ${actionApproval.route.network}`,
+            `${ko ? "영수증" : "Receipt"}: ${actionApproval.route.receiptSource}`,
+            ...actionApproval.route.limitations.map(
+              (limitation) => `• ${limitation}`,
+            ),
+            ...(actionApproval.route.message
+              ? [`• ${actionApproval.route.message}`]
+              : []),
+            "",
+            ko
+              ? "아래 문구를 정확히 입력하면 한 번만 실행됩니다."
+              : "Enter the exact phrase below to authorize one run.",
+            actionApproval.confirmationPhrase,
+          ].join("\n"),
+          "",
+        );
+        if (entered !== actionApproval.confirmationPhrase) return;
+      } catch (error) {
+        setActionError(
+          typeof error === "string"
+            ? error
+            : error instanceof Error
+              ? error.message
+              : ko
+                ? "ACTION 승인 경계를 준비하지 못했습니다."
+                : "The ACTION approval boundary could not be prepared.",
+        );
+        return;
+      }
     }
     const overnightHours =
       overnightMode || asksForOvernight(content) ? sleepHours : null;
@@ -1085,13 +1297,9 @@ export function ChatView({
           }
         };
         const completed = await invoke<ActionRun>("start_action_run", {
-          request: {
-            chat_session_id: activeSessionId,
-            objective: content,
-            workspace: actionWorkspace,
-            model,
-            effort,
-          },
+          request: actionRequest,
+          approvalId: actionApproval?.id,
+          confirmationPhrase: actionApproval?.confirmationPhrase,
           onEvent,
         });
         if (activeSessionIdRef.current === viewSessionId) {
@@ -1115,11 +1323,19 @@ export function ChatView({
               actionWorkspace.split("/").filter(Boolean).at(-1) ??
               actionWorkspace,
             cwd: actionWorkspace,
-            provider: "Codex subscription",
-            model: model ?? "default",
-            sandbox: "workspace-write",
-            network: "disabled",
-            approvalMode: "fail closed",
+            routeId: selectedActionRoute?.id ?? "codex:native",
+            provider: selectedActionRoute?.label ?? "Codex",
+            model: actionModel ?? "provider default",
+            effort: actionEffort,
+            sandbox: selectedActionRoute?.sandbox ?? "workspace-write",
+            network: selectedActionRoute?.network ?? "blocked",
+            approvalMode: "exact · single use · fail closed",
+            stopSupported: selectedActionRoute?.stopSupported ?? true,
+            nativeSessionId: null,
+            receiptSource:
+              selectedActionRoute?.receiptSource ??
+              "provider-native receipt",
+            limitations: selectedActionRoute?.limitations ?? [],
             status: "completed",
             summary: ko
               ? "미리보기에서는 실행 경계만 표시합니다."
@@ -1526,6 +1742,49 @@ export function ChatView({
               </span>
             </div>
           )}
+          {actionMode && selectedActionRoute && (
+            <div
+              className={`chat-action-route-state ${
+                actionRouteAvailable ? "is-ready" : "is-blocked"
+              }`}
+              role="status"
+            >
+              {actionRouteAvailable ? (
+                <Check size={14} />
+              ) : (
+                <AlertTriangle size={14} />
+              )}
+              <span>
+                <strong>
+                  {selectedActionRoute.label} · {selectedActionRoute.runtime}
+                </strong>
+                <small>
+                  {selectedActionRoute.available
+                    ? loadingActionModels
+                      ? ko
+                        ? "이 실행 경로의 모델과 effort를 확인하는 중입니다."
+                        : "Checking models and effort levels for this route."
+                      : actionModelReady
+                        ? `${selectedActionRoute.sandbox} · ${selectedActionRoute.network} · ${selectedActionRoute.receiptSource}`
+                        : ko
+                          ? "이 경로의 모델 목록을 확인하지 못해 실행을 차단했습니다."
+                          : "This route is blocked because its model list could not be verified."
+                    : selectedActionRoute.message}
+                </small>
+                <small>
+                  {ko ? "런타임 지문" : "Runtime fingerprint"} ·{" "}
+                  {selectedActionRoute.runtimeIdentity}
+                </small>
+                {selectedActionRoute.limitations.length > 0 && (
+                  <small>{selectedActionRoute.limitations.join(" · ")}</small>
+                )}
+                {selectedActionRoute.available &&
+                  selectedActionRoute.message && (
+                    <small>{selectedActionRoute.message}</small>
+                  )}
+              </span>
+            </div>
+          )}
           {chatStorageError && (
             <div className="chat-provider-needed">
               <Settings2 size={14} />
@@ -1537,7 +1796,7 @@ export function ChatView({
               </span>
             </div>
           )}
-          {!currentProvider.available && (
+          {!actionMode && !currentProvider.available && (
             <div className="chat-provider-needed">
               <Settings2 size={14} />
               <span>
@@ -1573,7 +1832,7 @@ export function ChatView({
               </button>
             </div>
           )}
-          {currentProvider.available && !modelOptionsReady && (
+          {!actionMode && currentProvider.available && !modelOptionsReady && (
             <div className="chat-provider-needed">
               <Settings2 size={14} />
               <span>
@@ -1622,7 +1881,7 @@ export function ChatView({
                 actionMode
                   ? ko
                     ? "이 작업 공간에서 무엇을 실행할까요?"
-                    : "What should Codex do in this workspace?"
+                    : "What should the selected agent do in this workspace?"
                   : ko
                     ? "Morrow에게 무엇이든 물어보세요…"
                     : "Ask Morrow anything…"
@@ -1653,8 +1912,8 @@ export function ChatView({
                 savingConfiguration ||
                 activeTurnRunning ||
                 (actionMode && (actionRunActive || !actionWorkspace)) ||
-                !modelReady ||
-                !currentProvider.available
+                (actionMode && !actionRouteAvailable) ||
+                (!actionMode && (!modelReady || !currentProvider.available))
               }
             >
               {sending ? <OperatorMark size={18} active /> : <Send size={15} />}
@@ -1712,9 +1971,11 @@ export function ChatView({
                   </div>
                 )}
               </div>
-              <label className="chat-model-control">
-                <span>MODEL</span>
-                <select
+              {!actionMode && (
+                <>
+                  <label className="chat-model-control">
+                    <span>MODEL</span>
+                    <select
                   value={model ?? ""}
                   onChange={(event) => {
                     const next = event.target.value;
@@ -1742,6 +2003,7 @@ export function ChatView({
                     activeTurnRunning ||
                     savingConfiguration ||
                     loadingModels ||
+                    actionMode ||
                     modelsProvider !== provider ||
                     models.length === 0
                   }
@@ -1751,11 +2013,11 @@ export function ChatView({
                       {option.display_name}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label className="chat-model-control">
-                <span>EFFORT</span>
-                <select
+                    </select>
+                  </label>
+                  <label className="chat-model-control">
+                    <span>EFFORT</span>
+                    <select
                   value={effort ?? ""}
                   onChange={(event) => {
                     const next = event.target.value;
@@ -1778,6 +2040,7 @@ export function ChatView({
                     activeTurnRunning ||
                     savingConfiguration ||
                     loadingModels ||
+                    actionMode ||
                     modelsProvider !== provider ||
                     efforts.length === 0
                   }
@@ -1787,8 +2050,10 @@ export function ChatView({
                       {option}
                     </option>
                   ))}
-                </select>
-              </label>
+                    </select>
+                  </label>
+                </>
+              )}
               <div
                 className={`chat-sleep-control ${overnightMode ? "is-active" : ""}`}
               >
@@ -1828,25 +2093,102 @@ export function ChatView({
                   className="overnight-toggle"
                   aria-pressed={actionMode}
                   title={
-                    activeSessionId && provider !== "codex_subscription"
-                      ? ko
-                        ? "현재는 Codex 대화에서만 실행할 수 있습니다."
-                        : "Actions are currently available in Codex conversations."
-                      : undefined
+                    actionRoutes.some((route) => route.available)
+                      ? undefined
+                      : ko
+                        ? "안전 계약을 충족하는 실행 경로가 없습니다."
+                        : "No route currently satisfies the ACTION safety contract."
                   }
-                  disabled={
-                    sending ||
-                    !codexAvailable ||
-                    Boolean(
-                      activeSessionId && provider !== "codex_subscription",
-                    )
-                  }
+                  disabled={sending}
                   onClick={toggleActionMode}
                 >
                   <Terminal size={12} />
                   ACTION
                 </button>
               </div>
+              {actionMode && (
+                <label className="chat-model-control action-route-control">
+                  <span>AGENT</span>
+                  <select
+                    value={actionRouteId}
+                    onChange={(event) => setActionRouteId(event.target.value)}
+                    disabled={sending || actionRunActive}
+                    title={selectedActionRoute?.message ?? selectedActionRoute?.runtime}
+                  >
+                    {actionRoutes.map((route) => (
+                      <option value={route.id} key={route.id}>
+                        {route.label}
+                        {route.available
+                          ? ""
+                          : ko
+                            ? " · 실행 차단"
+                            : " · blocked"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {actionMode && (
+                <label className="chat-model-control">
+                  <span>MODEL</span>
+                  <select
+                    value={actionModel ?? ""}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      const option = actionModels.find(
+                        (item) => item.id === next,
+                      );
+                      setActionModel(next);
+                      setActionEffort(
+                        option?.default_effort ??
+                          option?.supported_efforts[0] ??
+                          null,
+                      );
+                    }}
+                    disabled={
+                      sending ||
+                      actionRunActive ||
+                      loadingActionModels ||
+                      actionModelsRoute !== selectedActionRoute?.id ||
+                      actionModels.length === 0
+                    }
+                  >
+                    {actionModels.map((option) => (
+                      <option value={option.id} key={option.id}>
+                        {option.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {actionMode && (
+                <label className="chat-model-control">
+                  <span>EFFORT</span>
+                  <select
+                    value={actionEffort ?? ""}
+                    onChange={(event) =>
+                      setActionEffort(event.target.value || null)
+                    }
+                    disabled={
+                      sending ||
+                      actionRunActive ||
+                      loadingActionModels ||
+                      actionEfforts.length === 0
+                    }
+                  >
+                    {actionEfforts.length === 0 && (
+                      <option value="">
+                        {ko ? "해당 없음" : "Not applicable"}
+                      </option>
+                    )}
+                    {actionEfforts.map((option) => (
+                      <option value={option} key={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {actionMode && (
                 <label className="chat-model-control">
                   <span>CWD</span>
@@ -1882,8 +2224,8 @@ export function ChatView({
           </div>
           <p>
             {ko
-              ? "ACTION을 켜고 보내면 표시된 CWD에서 한 번 실행됩니다. 작업 공간 밖 쓰기·네트워크는 차단되고 실행 영수증은 로컬에 저장됩니다."
-              : "Turn on ACTION and send to authorize one run in the shown CWD. Writes outside it and network access are blocked; the receipt is stored locally."}
+              ? "ACTION은 Codex·Claude·Grok·Hermes의 실제 실행 가능성과 한계를 함께 보여줍니다. 시작 가능한 경로만 정확한 단일사용 승인 뒤 실행되며, 공급자 영수증이 권위 있는 근거입니다."
+              : "ACTION shows the real readiness and limitations of Codex, Claude, Grok and Hermes. Only ready routes can start after exact single-use approval, with provider receipts kept authoritative."}
           </p>
         </footer>
       </section>

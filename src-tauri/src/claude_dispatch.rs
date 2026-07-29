@@ -27,8 +27,124 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
+pub(crate) fn action_arguments(
+    workspace: &Path,
+    max_turns: u32,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let mut arguments = worker::claude_arguments(RunMode::NewSession, None, workspace, max_turns);
+    if let Some(index) = arguments
+        .windows(2)
+        .position(|pair| pair == ["--output-format", "json"])
+    {
+        arguments[index + 1] = "stream-json".to_owned();
+    }
+    let print_index = arguments
+        .iter()
+        .position(|argument| argument == "-p")
+        .unwrap_or(arguments.len());
+    arguments.splice(
+        print_index..print_index,
+        [
+            "--verbose".to_owned(),
+            "--include-partial-messages".to_owned(),
+            "--disable-slash-commands".to_owned(),
+        ],
+    );
+    let print_index = arguments
+        .iter()
+        .position(|argument| argument == "-p")
+        .unwrap_or(arguments.len());
+    if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
+        arguments.splice(
+            print_index..print_index,
+            ["--model".to_owned(), model.to_owned()],
+        );
+    }
+    let print_index = arguments
+        .iter()
+        .position(|argument| argument == "-p")
+        .unwrap_or(arguments.len());
+    if let Some(effort) = effort.filter(|value| !value.trim().is_empty()) {
+        arguments.splice(
+            print_index..print_index,
+            ["--effort".to_owned(), effort.to_owned()],
+        );
+    }
+    harden_action_arguments(&mut arguments)?;
+    Ok(arguments)
+}
+
+fn harden_action_arguments(arguments: &mut Vec<String>) -> Result<(), String> {
+    let settings_index = arguments
+        .iter()
+        .position(|argument| argument == "--settings")
+        .ok_or_else(|| "Claude ACTION settings flag is missing".to_owned())?;
+    let encoded_settings = arguments
+        .get(settings_index + 1)
+        .ok_or_else(|| "Claude ACTION settings value is missing".to_owned())?;
+    let mut settings = serde_json::from_str::<serde_json::Value>(encoded_settings)
+        .map_err(|_| "Claude ACTION settings are not valid JSON".to_owned())?;
+    // Sandboxed Bash is auto-approved by Claude's sandbox. Keeping this list
+    // empty prevents our own settings from authorizing an excluded command to
+    // fall back to unsandboxed execution.
+    settings["permissions"]["allow"] = serde_json::json!([]);
+    let deny = settings["permissions"]["deny"]
+        .as_array_mut()
+        .ok_or_else(|| "Claude ACTION permissions deny is not an array".to_owned())?;
+    for tool in ["Read", "Edit", "Write", "Glob", "Grep"] {
+        if !deny.iter().any(|rule| rule.as_str() == Some(tool)) {
+            deny.push(serde_json::Value::String(tool.to_owned()));
+        }
+    }
+    settings["sandbox"]["network"]["allowedDomains"] = serde_json::json!([]);
+    settings["sandbox"]["network"]["deniedDomains"] = serde_json::json!(["*"]);
+    settings["sandbox"]["network"]["strictAllowlist"] = serde_json::json!(true);
+    arguments[settings_index + 1] = settings.to_string();
+
+    let tools_index = arguments
+        .iter()
+        .position(|argument| argument == "--tools")
+        .ok_or_else(|| "Claude ACTION tools flag is missing".to_owned())?;
+    let tools = arguments
+        .get_mut(tools_index + 1)
+        .ok_or_else(|| "Claude ACTION tools value is missing".to_owned())?;
+    *tools = "Bash".to_owned();
+    if let Some(allowed_index) = arguments
+        .iter()
+        .position(|argument| argument == "--allowedTools")
+    {
+        if allowed_index + 1 >= arguments.len() {
+            return Err("Claude ACTION allowed-tools value is missing".to_owned());
+        }
+        arguments.drain(allowed_index..=(allowed_index + 1));
+    }
+    Ok(())
+}
+
+pub(crate) fn action_runtime_version(binary: &Path) -> Result<String, String> {
+    let (version, label) = probe_version(binary);
+    let version = version.ok_or_else(|| {
+        "Claude Code 버전을 확인하지 못해 strict sandbox 계약을 승인할 수 없습니다.".to_owned()
+    })?;
+    if !version_supports_sandbox(version) {
+        return Err(format!(
+            "Claude Code {} 이상이 필요하지만 설치된 버전은 {}.{}.{}입니다.",
+            format!(
+                "{}.{}.{}",
+                MIN_SANDBOX_VERSION.0, MIN_SANDBOX_VERSION.1, MIN_SANDBOX_VERSION.2
+            ),
+            version.0,
+            version.1,
+            version.2
+        ));
+    }
+    Ok(label.unwrap_or_else(|| format!("{}.{}.{}", version.0, version.1, version.2)))
+}
+
 const ADAPTER_VERSION: &str = "claude-native-goal-v3";
-const MIN_SANDBOX_VERSION: (u32, u32, u32) = (2, 1, 216);
+const MIN_SANDBOX_VERSION: (u32, u32, u32) = (2, 1, 219);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_PROBE_OUTPUT_BYTES: usize = 1024 * 1024;
 
@@ -190,7 +306,7 @@ fn preview(
                     .as_deref()
                     .unwrap_or("Claude Code")
             ),
-            "Claude Code 2.1.216 이상이 필요합니다.",
+            "Claude Code 2.1.219 이상이 필요합니다.",
         ),
         check(
             "auth",
@@ -667,7 +783,8 @@ mod tests {
     #[test]
     fn version_floor_requires_strict_sandbox_support() {
         assert!(!version_supports_sandbox((2, 1, 215)));
-        assert!(version_supports_sandbox((2, 1, 216)));
+        assert!(!version_supports_sandbox((2, 1, 216)));
+        assert!(version_supports_sandbox((2, 1, 219)));
         assert!(version_supports_sandbox((3, 0, 0)));
     }
 

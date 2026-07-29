@@ -61,11 +61,17 @@ export interface ActionRun {
   title?: string | null;
   workspace: string;
   cwd: string;
+  routeId: string;
   provider: string;
   model: string;
+  effort?: string | null;
   sandbox: string;
   network: string;
   approvalMode: string;
+  stopSupported: boolean;
+  nativeSessionId?: string | null;
+  receiptSource: string;
+  limitations: string[];
   status: ActionRunStatus;
   summary?: string | null;
   elapsed?: string | null;
@@ -83,6 +89,9 @@ export interface ActionRunCardLabels {
   sandbox: string;
   network: string;
   approvalMode: string;
+  nativeReceipt: string;
+  nativeSession: string;
+  limitations: string;
   stop: string;
   stopping: string;
   executionDetails: string;
@@ -130,6 +139,9 @@ const copy: Record<"ko" | "en", ActionRunCardLabels> = {
     sandbox: "샌드박스",
     network: "네트워크",
     approvalMode: "승인",
+    nativeReceipt: "공급자 영수증",
+    nativeSession: "네이티브 세션",
+    limitations: "경로 제한",
     stop: "중지",
     stopping: "중지 중",
     executionDetails: "실행 상세",
@@ -165,6 +177,9 @@ const copy: Record<"ko" | "en", ActionRunCardLabels> = {
     sandbox: "Sandbox",
     network: "Network",
     approvalMode: "Approval",
+    nativeReceipt: "Provider receipt",
+    nativeSession: "Native session",
+    limitations: "Route limitations",
     stop: "Stop",
     stopping: "Stopping",
     executionDetails: "Execution details",
@@ -297,9 +312,10 @@ export function ActionRunCard({
 }: ActionRunCardProps) {
   const labels = { ...copy[language], ...labelOverrides };
   const canStop =
-    run.status === "queued" ||
-    run.status === "preparing" ||
-    run.status === "running";
+    run.stopSupported &&
+    (run.status === "queued" ||
+      run.status === "preparing" ||
+      run.status === "running");
   const detailsOpen =
     defaultDetailsOpen ??
     (run.status === "preparing" ||
@@ -377,6 +393,7 @@ export function ActionRunCard({
           </dt>
           <dd>
             {run.provider} · {run.model}
+            {run.effort ? ` · ${run.effort}` : ""}
           </dd>
         </div>
         <div>
@@ -400,7 +417,35 @@ export function ActionRunCard({
           </dt>
           <dd>{run.network}</dd>
         </div>
+        <div>
+          <dt>
+            <Check size={11} />
+            {labels.nativeReceipt}
+          </dt>
+          <dd>
+            <span>{run.receiptSource}</span>
+            {run.nativeSessionId && (
+              <span title={run.nativeSessionId}>
+                {labels.nativeSession}: {run.nativeSessionId}
+              </span>
+            )}
+          </dd>
+        </div>
       </dl>
+
+      {run.limitations.length > 0 && (
+        <section className="action-run-limitations">
+          <strong>
+            <AlertTriangle size={12} />
+            {labels.limitations}
+          </strong>
+          <ul>
+            {run.limitations.map((limitation) => (
+              <li key={limitation}>{limitation}</li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {run.workspaceObservation && (
         <section
