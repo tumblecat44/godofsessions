@@ -73,6 +73,35 @@ struct ProviderChoice<'a> {
     execution_ready: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum OvernightTaskKind {
+    AssetGeneration,
+    CodeChange,
+    TestRepair,
+    MigrationOrTransform,
+    ResearchOrAudit,
+    ExperimentOrBenchmark,
+    DependencyMaintenance,
+    IncidentRepair,
+    Documentation,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+struct TaskAssessment {
+    kind: OvernightTaskKind,
+    expected_hours: f64,
+    upper_bound_hours: f64,
+}
+
+struct ShortCandidate {
+    candidate: OvernightCandidate,
+    task: TaskAssessment,
+    target: String,
+    proof_key: String,
+    batch_key: String,
+}
+
 #[cfg(test)]
 pub fn build_overnight_plan(
     snapshot: &Snapshot,
@@ -204,6 +233,8 @@ fn discover_candidate_envelope_inner(
         .collect::<BTreeSet<_>>();
 
     let mut candidates = Vec::new();
+    let mut short_candidates = Vec::new();
+    let mut completed_patterns = BTreeSet::new();
     let mut exclusions = Vec::new();
     for (project_key, sessions) in projects.iter_mut() {
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
@@ -292,11 +323,41 @@ fn discover_candidate_envelope_inner(
             .any(|session| session.status == SessionStatus::Failed);
         let context_goal = context_brief.and_then(latest_meaningful_user_goal);
         let goal_subject = context_goal.unwrap_or(title);
+        let task = assess_task(goal_subject);
+        let cwd = latest
+            .cwd
+            .clone()
+            .unwrap_or_else(|| latest.repository.clone().unwrap_or_default());
+        let proof_key = task_pattern_key(&cwd, task.kind, goal_subject);
+        if !failed && context_brief.is_some_and(latest_goal_is_reported_complete) {
+            if task.kind != OvernightTaskKind::Unknown
+                && context_brief
+                    .is_some_and(|brief| latest_completion_has_task_evidence(brief, task.kind))
+            {
+                completed_patterns.insert(proof_key);
+            }
+            exclusions.push(ExcludedProject {
+                project,
+                reason:
+                    "가장 최근 공급자 응답이 요청한 작업과 검증의 완료를 보고해 이미 완료된 작업으로 제외했습니다."
+                        .to_owned(),
+            });
+            continue;
+        }
         if crate::control_board::may_have_external_side_effect(goal_subject) {
             exclusions.push(ExcludedProject {
                 project,
                 reason:
                     "최근 목표에 외부 전송·배포·삭제·결제 가능성이 있어 사람의 승인이 먼저 필요합니다."
+                        .to_owned(),
+            });
+            continue;
+        }
+        if task.kind == OvernightTaskKind::Unknown {
+            exclusions.push(ExcludedProject {
+                project,
+                reason:
+                    "작업 유형과 검증 방법을 안전하게 판별할 근거가 없어 야간 작업으로 제외했습니다."
                         .to_owned(),
             });
             continue;
@@ -341,16 +402,13 @@ fn discover_candidate_envelope_inner(
         }
         let (execution_route_id, execution_surface, capacity_pool, route_reason) =
             route_selection(provider, resume_existing, route);
-        let project_score = (30.0 - latest_age_hours.min(24.0) * 1.25)
-            + (sessions.len().min(5) as f64 * 4.0)
-            + (distinct_providers.min(3) as f64 * 4.0)
-            + if latest.title.is_some() { 10.0 } else { 0.0 }
-            + if latest.cwd.is_some() { 10.0 } else { 0.0 }
-            + if failed { 6.0 } else { 0.0 }
-            + if context_goal.is_some() { 12.0 } else { 0.0 };
-        let score = (project_score + provider_choice.score * 0.35
-            - provider_choice.capacity_ready_after_hours * 2.0)
-            .clamp(0.0, 100.0);
+        let score = overnight_fit_score(
+            &task,
+            failed,
+            context_goal.is_some(),
+            goal_subject,
+            latest_age_hours,
+        );
         let budget_is_ready = budgets
             .iter()
             .any(|budget| budget.provider == provider && budget.state == ResourceState::Ready);
@@ -409,10 +467,6 @@ fn discover_candidate_envelope_inner(
             );
         }
 
-        let cwd = latest
-            .cwd
-            .clone()
-            .unwrap_or_else(|| latest.repository.clone().unwrap_or_default());
         let mut evidence = vec![
             format!(
                 "{}에 {project} 관련 세션 {}개",
@@ -443,6 +497,25 @@ fn discover_candidate_envelope_inner(
                 duration_label(provider_choice.capacity_ready_after_hours)
             ));
         }
+        evidence.extend([
+            format!(
+                "열린 작업: {}",
+                if failed {
+                    "재시도 가능한 실패 근거"
+                } else if context_goal.is_some() {
+                    "최근 사용자 요청이 있고 완료 응답 없음"
+                } else {
+                    "세션 제목에서 진행 중 목표를 추론"
+                }
+            ),
+            format!(
+                "야간 레버리지: 예상 {} · 보수적 상한 {}",
+                duration_label(task.expected_hours),
+                duration_label(task.upper_bound_hours)
+            ),
+            format!("검증: {} 전용 계약", task_kind_label(task.kind)),
+            "실행 경로: 승인 가능한 경로 확인".to_owned(),
+        ]);
 
         let provider_reason = if provider_session.is_some()
             && !resume_existing
@@ -455,7 +528,8 @@ fn discover_candidate_envelope_inner(
         } else {
             provider_choice.reason
         };
-        candidates.push(OvernightCandidate {
+        let (expected_outcome, verification) = task_contract(task.kind);
+        let candidate = OvernightCandidate {
             rank: 0,
             project: project.clone(),
             cwd,
@@ -481,20 +555,31 @@ fn discover_candidate_envelope_inner(
                 .collect(),
             provider_reason,
             capacity_ready_after_hours: provider_choice.capacity_ready_after_hours,
-            expected_outcome: "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고"
-                .to_owned(),
-            verification: vec![
-                "프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것".to_owned(),
-                "변경 범위와 생성된 산출물을 아침 보고에 명시할 것".to_owned(),
-                "검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인을 남길 것".to_owned(),
-            ],
+            expected_outcome,
+            verification,
             risks,
-            estimated_hours: floor_half(
-                (1.5 + sessions.len().min(7) as f64 * 0.5).min(sleep_hours),
-            ),
-        });
+            estimated_hours: task.upper_bound_hours,
+        };
+        if task.upper_bound_hours < 1.0 {
+            short_candidates.push(ShortCandidate {
+                batch_key: format!("{}|{}", proof_key, candidate.provider.as_str()),
+                candidate,
+                target: task_target(goal_subject, task.kind),
+                task,
+                proof_key,
+            });
+        } else {
+            candidates.push(candidate);
+        }
     }
 
+    promote_short_batches(
+        short_candidates,
+        &completed_patterns,
+        &mut candidates,
+        &mut exclusions,
+        route_inventory,
+    );
     candidates.sort_by(|left, right| {
         right
             .score
@@ -533,7 +618,7 @@ fn discover_candidate_envelope_inner(
         options,
         exclusions,
         methodology:
-            "먼저 정확한 실행 형태를 승인·시작할 수 있는 경로가 있는지 확인한 뒤 최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 실행 가능한 후보 안에서는 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다."
+            "먼저 열린 작업인지와 사람 없이 안전한지 확인하고, 작업 유형별 실제 추정·야간 레버리지·검증 계약을 통과한 후보만 남겼습니다. 최근성은 목표가 아직 유효한지 판단하는 작은 신뢰도 보정으로만 쓰며, 남은 사용량은 작업 가치가 아니라 실행 경로와 시작 가능 여부에만 사용합니다. 짧은 작업은 같은 worktree의 검증된 반복 패턴과 고정 manifest가 있고 합산 기대효과가 한 시간을 넘을 때만 배치로 승격합니다."
                 .to_owned(),
     }
 }
@@ -769,7 +854,7 @@ fn fit_candidates_within_sleep_window(
     let mut selected = Vec::new();
     let mut lane_hours = BTreeMap::<CapacityPool, f64>::new();
     let mut workspace_hours = BTreeMap::<String, f64>::new();
-    for mut candidate in candidates {
+    for candidate in candidates {
         let lane_ready_at = lane_hours
             .get(&candidate.capacity_pool)
             .copied()
@@ -790,7 +875,13 @@ fn fit_candidates_within_sleep_window(
             });
             continue;
         }
-        candidate.estimated_hours = candidate.estimated_hours.min(remaining);
+        if candidate.estimated_hours > remaining {
+            exclusions.push(ExcludedProject {
+                project: candidate.project.clone(),
+                reason: allocation_exclusion_reason(&candidate, lane_ready_at, workspace_ready_at),
+            });
+            continue;
+        }
         let ends_at = starts_after_hours + candidate.estimated_hours;
         lane_hours.insert(candidate.capacity_pool, ends_at);
         workspace_hours.insert(workspace_key, ends_at);
@@ -1037,6 +1128,687 @@ fn latest_meaningful_user_goal(brief: &ProjectContextBrief) -> Option<&str> {
                     >= 12
         })
         .map(|excerpt| excerpt.text.as_str())
+}
+
+fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
+    let Some(user_index) = brief.excerpts.iter().rposition(|excerpt| {
+        excerpt.role == ContextRole::User
+            && excerpt
+                .text
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .count()
+                >= 12
+    }) else {
+        return false;
+    };
+    let Some(final_response) = brief.excerpts[user_index + 1..]
+        .iter()
+        .rev()
+        .find(|excerpt| excerpt.role == ContextRole::Assistant)
+    else {
+        return false;
+    };
+    let normalized = final_response.text.to_lowercase();
+    let incomplete = [
+        "not complete",
+        "not completed",
+        "couldn't",
+        "could not",
+        "failed",
+        "blocked",
+        "remaining",
+        "still need",
+        "unable to",
+        "미완료",
+        "완료하지 못",
+        "실패",
+        "막혔",
+        "남았",
+        "추가 작업",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    if incomplete {
+        return false;
+    }
+    [
+        "completed",
+        "finished",
+        "implemented",
+        "tests pass",
+        "test passes",
+        "saved the file",
+        "generated the file",
+        "created the file",
+        "완료",
+        "구현했",
+        "통과",
+        "저장했",
+        "생성했",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn latest_completion_has_task_evidence(
+    brief: &ProjectContextBrief,
+    kind: OvernightTaskKind,
+) -> bool {
+    let Some(response) = brief
+        .excerpts
+        .iter()
+        .rev()
+        .find(|excerpt| excerpt.role == ContextRole::Assistant)
+    else {
+        return false;
+    };
+    let normalized = response.text.to_lowercase();
+    match kind {
+        OvernightTaskKind::AssetGeneration => {
+            let checks = [
+                contains_any(&normalized, &["mime", "인코딩", "encoding"]),
+                contains_any(&normalized, &["dimension", "1600x", "크기", "가로"]),
+                contains_any(&normalized, &["corruption", "손상"]),
+                contains_any(&normalized, &["exists", "존재"]),
+            ];
+            checks.into_iter().filter(|present| *present).count() >= 3
+        }
+        OvernightTaskKind::CodeChange | OvernightTaskKind::TestRepair => contains_any(
+            &normalized,
+            &["tests pass", "test passes", "테스트 통과", "검증 통과"],
+        ),
+        OvernightTaskKind::Unknown => false,
+        _ => contains_any(
+            &normalized,
+            &["verified", "validation", "검증", "완료 증거"],
+        ),
+    }
+}
+
+fn normalized_task_pattern(goal: &str) -> String {
+    goal.to_lowercase()
+        .split_whitespace()
+        .take(24)
+        .map(|word| {
+            if word.chars().any(|character| character.is_ascii_digit())
+                || contains_any(word, &[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"])
+            {
+                "<target>"
+            } else {
+                word.trim_matches(|character: char| !character.is_alphanumeric())
+            }
+        })
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn task_pattern_key(cwd: &str, kind: OvernightTaskKind, goal: &str) -> String {
+    format!(
+        "{}|{}|{}",
+        crate::workspace_identity::key_or_path(cwd),
+        task_kind_label(kind),
+        normalized_task_pattern(goal)
+    )
+}
+
+fn promote_short_batches(
+    short_candidates: Vec<ShortCandidate>,
+    completed_patterns: &BTreeSet<String>,
+    candidates: &mut Vec<OvernightCandidate>,
+    exclusions: &mut Vec<ExcludedProject>,
+    route_inventory: Option<&ExecutionRouteInventory>,
+) {
+    let mut groups = BTreeMap::<String, Vec<ShortCandidate>>::new();
+    for candidate in short_candidates {
+        groups
+            .entry(candidate.batch_key.clone())
+            .or_default()
+            .push(candidate);
+    }
+
+    for mut group in groups.into_values() {
+        group.sort_by(|left, right| left.candidate.project.cmp(&right.candidate.project));
+        let item_count = group.len();
+        let expected_hours = group
+            .iter()
+            .map(|item| item.task.expected_hours)
+            .sum::<f64>();
+        let upper_bound_hours = ceil_quarter(
+            group
+                .iter()
+                .map(|item| item.task.upper_bound_hours)
+                .sum::<f64>(),
+        );
+        let proof_exists = group
+            .first()
+            .is_some_and(|item| completed_patterns.contains(&item.proof_key));
+        let unique_targets = group
+            .iter()
+            .map(|item| item.target.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+            == item_count;
+        let exact_manifest = group
+            .iter()
+            .enumerate()
+            .map(|(index, item)| format!("{}. {}", index + 1, item.target.trim()))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let manifest_fits_contract = exact_manifest.chars().count() <= 560;
+        let batch_route = group
+            .first()
+            .and_then(|item| route_for_new_batch(item.candidate.provider, route_inventory));
+        let route_is_compatible = route_inventory.is_none() || batch_route.is_some();
+        let qualifies = item_count <= 25
+            && expected_hours >= 1.0 - 1e-9
+            && proof_exists
+            && unique_targets
+            && manifest_fits_contract
+            && route_is_compatible;
+
+        if !qualifies {
+            let reason = short_batch_exclusion_reason(
+                item_count,
+                expected_hours,
+                upper_bound_hours,
+                proof_exists,
+                unique_targets,
+                manifest_fits_contract,
+                route_is_compatible,
+            );
+            exclusions.extend(group.into_iter().map(|item| ExcludedProject {
+                project: item.candidate.project,
+                reason: reason.clone(),
+            }));
+            continue;
+        }
+
+        let kind = group[0].task.kind;
+        let mut batch = group.remove(0).candidate;
+        let source_projects = std::iter::once(batch.project.clone())
+            .chain(group.iter().map(|item| item.candidate.project.clone()))
+            .collect::<Vec<_>>();
+        let mut source_session_ids = batch.source_session_ids.clone();
+        source_session_ids.extend(
+            group
+                .iter()
+                .flat_map(|item| item.candidate.source_session_ids.clone()),
+        );
+        source_session_ids.sort();
+        source_session_ids.dedup();
+
+        batch.project = format!(
+            "{}개 {} 배치 · {}",
+            item_count,
+            task_kind_label(kind),
+            source_projects.join(", ")
+        );
+        batch.cwd = workspace_root(&batch.cwd);
+        batch.goal = format!(
+            "고정된 {item_count}개 대상 manifest만 처리하고 항목별 결과를 남길 것: {exact_manifest}"
+        );
+        batch.resume_existing = false;
+        batch.native_session_id = None;
+        if let Some(route) = batch_route {
+            batch.execution_route_id = route.id.clone();
+            batch.execution_surface = route.surface;
+            batch.executor_profile = route.executor_profile.clone();
+            batch.capacity_pool = route.capacity_pool;
+            batch.route_reason =
+                "여러 짧은 작업을 하나의 고정 manifest로 실행할 수 있는 새 작업 경로입니다."
+                    .to_owned();
+        }
+        batch.source_session_ids = source_session_ids;
+        batch.estimated_hours = upper_bound_hours;
+        batch.score = (batch.score + 5.0).min(95.0);
+        let (expected_outcome, mut verification) = task_contract(kind);
+        batch.expected_outcome = format!("{item_count}개 고정 배치: {expected_outcome}");
+        verification.insert(
+            0,
+            format!("승인된 {item_count}개 manifest를 바꾸거나 새 대상을 추가하지 않을 것"),
+        );
+        batch.verification = verification;
+        batch.evidence.extend([
+            format!("배치 승격: 같은 worktree·작업 패턴의 열린 대상 {item_count}개"),
+            format!("대표 성공 근거: 동일 패턴 1건이 작업 유형별 검증 증거와 함께 완료됨"),
+            format!(
+                "배치 추정: 예상 {} · 보수적 상한 {}",
+                duration_label(expected_hours),
+                duration_label(upper_bound_hours)
+            ),
+        ]);
+        batch.risks.push(
+            "승인된 manifest 밖으로 범위를 넓히지 않으며, 항목별 실패를 자동 재시작하지 않습니다."
+                .to_owned(),
+        );
+        candidates.push(batch);
+    }
+}
+
+fn route_for_new_batch<'a>(
+    provider: Provider,
+    inventory: Option<&'a ExecutionRouteInventory>,
+) -> Option<&'a ExecutionRoute> {
+    inventory?.routes.iter().find(|route| {
+        route.model_provider == Some(provider)
+            && route.state == ResourceState::Ready
+            && route.adapter_readiness == crate::model::AdapterReadiness::ContractReady
+            && crate::night_contract::supports_dispatch(route.surface, false)
+    })
+}
+
+fn workspace_root(cwd: &str) -> String {
+    let identity = crate::workspace_identity::key_or_path(cwd);
+    identity
+        .strip_prefix("worktree:")
+        .or_else(|| identity.strip_prefix("path:"))
+        .unwrap_or(cwd)
+        .to_owned()
+}
+
+fn short_batch_exclusion_reason(
+    item_count: usize,
+    expected_hours: f64,
+    upper_bound_hours: f64,
+    proof_exists: bool,
+    unique_targets: bool,
+    manifest_fits_contract: bool,
+    route_is_compatible: bool,
+) -> String {
+    let estimate = format!(
+        "{item_count}개 묶음 예상 {}분, 상한 {}분",
+        (expected_hours * 60.0).round() as i64,
+        (upper_bound_hours * 60.0).round() as i64
+    );
+    if expected_hours < 1.0 - 1e-9 {
+        return format!(
+            "짧은 단일 작업이며 {estimate}으로, 실제 배치 이점이 한 시간 기준에 못 미칩니다."
+        );
+    }
+    if !proof_exists {
+        return format!(
+            "짧은 단일 작업 후보이지만 동일 패턴의 검증된 대표 성공 근거가 없어 배치로 승격하지 않았습니다({estimate})."
+        );
+    }
+    if !unique_targets || !manifest_fits_contract || item_count > 25 {
+        return format!(
+            "짧은 단일 작업 후보의 정확한 대상 manifest를 승인 경계 안에 고정할 수 없어 배치로 승격하지 않았습니다({estimate})."
+        );
+    }
+    if !route_is_compatible {
+        return format!(
+            "짧은 단일 작업 후보를 묶어 새 배치로 시작할 준비된 실행 경로가 없습니다({estimate})."
+        );
+    }
+    format!("짧은 단일 작업으로 예상되어 야간 실행 가치가 부족합니다({estimate}).")
+}
+
+fn task_target(goal: &str, kind: OvernightTaskKind) -> String {
+    if kind == OvernightTaskKind::AssetGeneration {
+        if let Some(path) = goal.split_whitespace().rev().find(|word| {
+            let normalized = word.to_lowercase();
+            contains_any(
+                &normalized,
+                &[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"],
+            )
+        }) {
+            return path
+                .trim_matches(|character: char| {
+                    matches!(character, '"' | '\'' | '`' | ',' | ';' | ')' | '(')
+                })
+                .to_owned();
+        }
+    }
+    goal.trim().to_owned()
+}
+
+fn assess_task(goal: &str) -> TaskAssessment {
+    let normalized = goal.to_lowercase();
+    let item_count = requested_item_count(&normalized).unwrap_or(1).clamp(1, 100) as f64;
+    let asset_generation = [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif",
+        ".svg",
+        "photorealistic",
+        "cinematic photograph",
+        "generate one image",
+        " png ",
+        " jpeg ",
+        " jpg ",
+        " images ",
+        "이미지 생성",
+        "사진 생성",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    if asset_generation {
+        return TaskAssessment {
+            kind: OvernightTaskKind::AssetGeneration,
+            expected_hours: round_one(item_count * 0.1).max(0.1),
+            upper_bound_hours: ceil_quarter(item_count * 0.25).max(0.25),
+        };
+    }
+
+    let (kind, expected_hours, upper_bound_hours) = if contains_any(
+        &normalized,
+        &[
+            "fix failing test",
+            "repair test",
+            "test failure",
+            "flaky test",
+            "깨지는 테스트",
+            "실패하는 테스트",
+        ],
+    ) {
+        (OvernightTaskKind::TestRepair, 1.0, 2.0)
+    } else if contains_any(
+        &normalized,
+        &[
+            "migration",
+            "migrate",
+            "codemod",
+            "transform ",
+            "backfill",
+            "마이그레이션",
+            "변환",
+        ],
+    ) {
+        (
+            OvernightTaskKind::MigrationOrTransform,
+            (item_count * 0.15).max(1.5),
+            (item_count * 0.3).max(3.0),
+        )
+    } else if contains_any(
+        &normalized,
+        &[
+            "research",
+            "audit",
+            "investigate",
+            "analyze",
+            "analysis",
+            "compare",
+            "리서치",
+            "감사",
+            "조사",
+            "분석",
+        ],
+    ) {
+        (OvernightTaskKind::ResearchOrAudit, 2.0, 3.0)
+    } else if contains_any(
+        &normalized,
+        &[
+            "experiment",
+            "benchmark",
+            "evaluation",
+            "evaluate",
+            "load test",
+            "실험",
+            "벤치마크",
+            "평가",
+        ],
+    ) {
+        (OvernightTaskKind::ExperimentOrBenchmark, 2.0, 4.0)
+    } else if contains_any(
+        &normalized,
+        &[
+            "dependency",
+            "dependencies",
+            "upgrade package",
+            "update package",
+            "security update",
+            "의존성",
+            "패키지 업데이트",
+        ],
+    ) {
+        (OvernightTaskKind::DependencyMaintenance, 1.0, 2.0)
+    } else if contains_any(
+        &normalized,
+        &[
+            "incident",
+            "production failure",
+            "outage",
+            "regression in production",
+            "장애",
+            "운영 오류",
+        ],
+    ) {
+        (OvernightTaskKind::IncidentRepair, 1.0, 2.0)
+    } else if contains_any(
+        &normalized,
+        &[
+            "documentation",
+            "write docs",
+            "update docs",
+            "readme",
+            "문서",
+            "가이드",
+        ],
+    ) {
+        (OvernightTaskKind::Documentation, 0.75, 1.25)
+    } else if contains_any(
+        &normalized,
+        &[
+            "implement",
+            "implementation",
+            "refactor",
+            "fix ",
+            "feature",
+            "module",
+            "function",
+            "code",
+            "build",
+            "typecheck",
+            "continue work",
+            "continue the",
+            "continue after",
+            "overnight recommendation",
+            "세션",
+            "구현",
+            "리팩터",
+            "수정",
+        ],
+    ) {
+        (OvernightTaskKind::CodeChange, 1.5, 2.0)
+    } else {
+        (OvernightTaskKind::Unknown, 0.0, 0.0)
+    };
+    TaskAssessment {
+        kind,
+        expected_hours: ceil_quarter(expected_hours),
+        upper_bound_hours: ceil_quarter(upper_bound_hours),
+    }
+}
+
+fn requested_item_count(goal: &str) -> Option<usize> {
+    let words = goal.split_whitespace().collect::<Vec<_>>();
+    words.iter().enumerate().find_map(|(index, word)| {
+        let digits = word.trim_matches(|character: char| !character.is_ascii_digit());
+        let count = (!digits.is_empty())
+            .then(|| digits.parse::<usize>().ok())
+            .flatten()
+            .filter(|count| *count > 0)?;
+        let describes_collection = word.contains('개')
+            || words[index + 1..].iter().take(3).any(|next| {
+                contains_any(
+                    &next.to_lowercase(),
+                    &[
+                        "images",
+                        "files",
+                        "items",
+                        "targets",
+                        "records",
+                        "projects",
+                        "이미지",
+                        "파일",
+                        "항목",
+                        "대상",
+                    ],
+                )
+            });
+        describes_collection.then_some(count)
+    })
+}
+
+fn contains_any(value: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| value.contains(marker))
+}
+
+fn overnight_fit_score(
+    task: &TaskAssessment,
+    failed: bool,
+    has_context_goal: bool,
+    goal: &str,
+    latest_age_hours: f64,
+) -> f64 {
+    let open_work = if failed {
+        20.0
+    } else if has_context_goal {
+        18.0
+    } else {
+        14.0
+    };
+    let unattended_safety = 20.0;
+    let leverage = 20.0 + ((task.expected_hours - 1.0).max(0.0) / 3.0).min(1.0) * 15.0;
+    let normalized_goal = goal.to_lowercase();
+    let priority = if contains_any(
+        &normalized_goal,
+        &[
+            "overnight",
+            "while i sleep",
+            "by morning",
+            "deadline",
+            "오늘 밤",
+            "자는 동안",
+            "아침까지",
+            "마감",
+        ],
+    ) {
+        10.0
+    } else {
+        0.0
+    };
+    let freshness_tiebreaker = (5.0 - latest_age_hours.min(24.0) * (5.0 / 24.0)).max(0.0);
+    let implemented_verifier = 5.0;
+    round_one(
+        open_work
+            + unattended_safety
+            + leverage
+            + priority
+            + freshness_tiebreaker
+            + implemented_verifier,
+    )
+}
+
+fn task_kind_label(kind: OvernightTaskKind) -> &'static str {
+    match kind {
+        OvernightTaskKind::AssetGeneration => "이미지·에셋",
+        OvernightTaskKind::CodeChange => "코드 변경",
+        OvernightTaskKind::TestRepair => "테스트 복구",
+        OvernightTaskKind::MigrationOrTransform => "마이그레이션·변환",
+        OvernightTaskKind::ResearchOrAudit => "리서치·감사",
+        OvernightTaskKind::ExperimentOrBenchmark => "실험·벤치마크",
+        OvernightTaskKind::DependencyMaintenance => "의존성 유지보수",
+        OvernightTaskKind::IncidentRepair => "장애 복구",
+        OvernightTaskKind::Documentation => "문서",
+        OvernightTaskKind::Unknown => "미분류",
+    }
+}
+
+fn task_contract(kind: OvernightTaskKind) -> (String, Vec<String>) {
+    let blocked =
+        "검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인과 실패 대상을 남길 것".to_owned();
+    match kind {
+        OvernightTaskKind::AssetGeneration => (
+            "승인된 대상 목록의 이미지 파일과 파일별 검증 결과, 실패 항목의 아침 보고".to_owned(),
+            vec![
+                "각 정확한 대상 경로에 파일이 존재하는지 확인할 것".to_owned(),
+                "각 파일의 MIME·인코딩·크기(가로×세로)·손상 여부를 검사할 것".to_owned(),
+                "대상 수·성공 수·실패 수와 실패한 경로를 아침 보고에 명시할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::TestRepair => (
+            "재현 가능한 테스트 수정과 집중 회귀 검증, 공개 동작 변화 여부의 아침 보고".to_owned(),
+            vec![
+                "가능하면 수정 전 실패를 재현하고 실패 원인을 기록할 것".to_owned(),
+                "수정과 직접 관련된 집중 테스트가 통과할 것".to_owned(),
+                "의도하지 않은 공개 계약 변화가 없는지 확인할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::MigrationOrTransform => (
+            "고정된 대상 manifest의 변환 결과와 항목별 성공·실패 기록".to_owned(),
+            vec![
+                "승인된 정확한 대상 manifest 밖으로 범위를 넓히지 않을 것".to_owned(),
+                "항목별 결과와 집계 수, 실패 목록을 남길 것".to_owned(),
+                "변환 전후 호환성 검사를 통과할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::ResearchOrAudit => (
+            "출처가 연결된 조사 문서와 범위·미해결 질문의 아침 보고".to_owned(),
+            vec![
+                "조사 결과를 지정된 문서 산출물에 기록할 것".to_owned(),
+                "근거 출처와 조사 범위, 확인하지 못한 영역을 명시할 것".to_owned(),
+                "추론과 출처가 직접 말하는 사실을 구분할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::ExperimentOrBenchmark => (
+            "재현 가능한 실험 설정·로그·평가 지표와 이상 징후 보고".to_owned(),
+            vec![
+                "실험 설정과 비용·반복 상한을 고정할 것".to_owned(),
+                "재현 가능한 로그와 평가 지표를 남길 것".to_owned(),
+                "데이터 누출·이상치·실패 실행을 별도로 표시할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::DependencyMaintenance => (
+            "의존성 변경 내역과 호환성 검증, 릴리스 없이 준비된 변경 세트".to_owned(),
+            vec![
+                "이전·이후 버전과 관련 변경 로그 또는 보안 근거를 기록할 것".to_owned(),
+                "영향 범위의 호환성 테스트를 통과할 것".to_owned(),
+                "자동 배포·게시·릴리스는 하지 않을 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::IncidentRepair => (
+            "장애 재현 근거와 범위가 제한된 수정·회귀 검증, 미확인 위험 보고".to_owned(),
+            vec![
+                "장애 트리거와 관찰된 실패를 기록할 것".to_owned(),
+                "범위가 제한된 수정과 직접 회귀 테스트를 남길 것".to_owned(),
+                "원인 분류가 불명확하면 확장 수정 대신 중단하고 보고할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::Documentation => (
+            "지정된 문서 변경과 링크·구조 검증 결과".to_owned(),
+            vec![
+                "승인된 정확한 문서만 변경할 것".to_owned(),
+                "링크와 문서 구조를 검사할 것".to_owned(),
+                "문서 도구 체인이 요구할 때만 관련 빌드 검증을 실행할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::CodeChange => (
+            "범위가 분리된 변경 세트와 관련 테스트·검증 결과, 남은 장애물의 아침 보고".to_owned(),
+            vec![
+                "변경과 직접 관련된 집중 테스트를 통과할 것".to_owned(),
+                "프로젝트가 제공하고 변경에 관련될 때만 타입 검사·빌드를 실행할 것".to_owned(),
+                "변경 범위와 생성된 산출물을 아침 보고에 명시할 것".to_owned(),
+                blocked,
+            ],
+        ),
+        OvernightTaskKind::Unknown => (
+            String::new(),
+            vec!["구현된 검증기가 없어 실행하지 않을 것".to_owned()],
+        ),
+    }
 }
 
 fn project_key(session: &Session) -> Option<String> {
@@ -2205,7 +2977,7 @@ mod tests {
                     Provider::Claude,
                     "alpha",
                     "alpha",
-                    "Claude work",
+                    "Implement the bounded Claude module change",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -2213,7 +2985,7 @@ mod tests {
                     Provider::Codex,
                     "beta",
                     "beta",
-                    "Codex work",
+                    "Implement the bounded Codex module change",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -2221,7 +2993,7 @@ mod tests {
                     Provider::Grok,
                     "gamma",
                     "gamma",
-                    "Grok work",
+                    "Implement the bounded Grok module change",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -2255,7 +3027,7 @@ mod tests {
             Provider::Claude,
             "alpha",
             "alpha",
-            "Claude work",
+            "Implement the bounded Claude module change",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         );
@@ -2270,7 +3042,7 @@ mod tests {
             Provider::Codex,
             "beta",
             "beta",
-            "Codex work",
+            "Implement the bounded Codex module change",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         );
@@ -2556,7 +3328,7 @@ mod tests {
     }
 
     #[test]
-    fn estimated_duration_never_exceeds_fractional_sleep_budget() {
+    fn task_estimate_is_independent_of_the_selected_sleep_window() {
         let snapshot = snapshot(vec![session(
             Provider::Codex,
             "alpha",
@@ -2566,17 +3338,432 @@ mod tests {
             "2026-07-24T21:30:00Z",
         )]);
 
-        let plan = build_overnight_plan(
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let short_night = discover_candidate_envelope_inner(
             &snapshot,
             vec![budget(Provider::Codex, 10.0)],
+            None,
+            None,
             SleepHours::new(1.3).expect("valid sleep duration"),
+            now,
+            24,
+        );
+        let long_night = discover_candidate_envelope_inner(
+            &snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            None,
+            None,
+            SleepHours::new(10.0).expect("valid sleep duration"),
+            now,
+            24,
+        );
+
+        assert_eq!(short_night.options[0].candidate.estimated_hours, 2.0);
+        assert_eq!(
+            short_night.options[0].candidate.estimated_hours,
+            long_night.options[0].candidate.estimated_hours
+        );
+    }
+
+    #[test]
+    fn recent_single_asset_requests_are_not_overnight_work() {
+        let goals = [
+            (
+                "asset-a",
+                "Generate one 1600x1000 JPEG and save it as office.jpg",
+                3,
+            ),
+            (
+                "asset-b",
+                "Generate one photorealistic image and save it as night-call.jpg",
+                2,
+            ),
+            (
+                "asset-c",
+                "Generate one cinematic photograph and save it as hero.jpg",
+                1,
+            ),
+        ];
+        let sessions = goals
+            .iter()
+            .flat_map(|(project, goal, count)| {
+                (0..*count).map(move |index| {
+                    session(
+                        if index % 2 == 0 {
+                            Provider::Codex
+                        } else {
+                            Provider::Grok
+                        },
+                        &format!("{project}-{index}"),
+                        project,
+                        goal,
+                        SessionStatus::Idle,
+                        "2026-07-24T21:30:00Z",
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: goals
+                .iter()
+                .map(|(project, goal, _)| ProjectContextBrief {
+                    project: (*project).to_owned(),
+                    workspace: Some(format!("/work/{project}")),
+                    session_ids: vec![format!("codex:{project}-0")],
+                    providers: vec![Provider::Codex],
+                    excerpts: vec![ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: format!("codex:{project}-0"),
+                        role: ContextRole::User,
+                        text: (*goal).to_owned(),
+                        timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+                    }],
+                    excerpt_count: 1,
+                    truncated: false,
+                })
+                .collect(),
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let routes = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![
+                route(
+                    "codex:native",
+                    Provider::Codex,
+                    Provider::Codex,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "grok:native",
+                    Provider::Grok,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+
+        let incident_snapshot = snapshot(sessions);
+        let plan = build_overnight_plan_with_context_and_routes(
+            &incident_snapshot,
+            vec![budget(Provider::Codex, 9.0), budget(Provider::Grok, 9.0)],
+            &context,
+            &routes,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let longer_night = build_overnight_plan_with_context_and_routes(
+            &incident_snapshot,
+            vec![budget(Provider::Codex, 9.0), budget(Provider::Grok, 9.0)],
+            &context,
+            &routes,
+            SleepHours::new(10.0).expect("valid sleep duration"),
             DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
         );
 
-        assert_eq!(plan.candidates[0].estimated_hours, 1.0);
-        assert!(plan.candidates[0].estimated_hours <= plan.sleep_hours);
+        assert!(plan.candidates.is_empty());
+        assert_eq!(plan.exclusions.len(), 3);
+        assert!(plan.exclusions.iter().all(|item| {
+            item.reason.contains("짧은 단일 작업")
+                && item.reason.contains("예상 6분")
+                && item.reason.contains("상한 15분")
+        }));
+        assert_eq!(
+            plan.exclusions
+                .iter()
+                .map(|item| &item.reason)
+                .collect::<Vec<_>>(),
+            longer_night
+                .exclusions
+                .iter()
+                .map(|item| &item.reason)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn substantial_asset_batch_gets_an_asset_specific_estimate_and_contract() {
+        let snapshot = snapshot(vec![session(
+            Provider::Codex,
+            "asset-batch",
+            "catalog",
+            "Generate 20 PNG images for the catalog",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "catalog".to_owned(),
+                workspace: Some("/work/catalog".to_owned()),
+                session_ids: vec!["codex:asset-batch".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:asset-batch".to_owned(),
+                    role: ContextRole::User,
+                    text: "Generate 20 PNG images listed in catalog-manifest.txt and save each exact target path."
+                        .to_owned(),
+                    timestamp: Some("2026-07-24T21:31:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].estimated_hours, 5.0);
+        assert!(plan.candidates[0].verification.iter().any(|item| {
+            item.contains("MIME") && item.contains("크기") && item.contains("손상")
+        }));
+        assert!(plan.candidates[0]
+            .verification
+            .iter()
+            .all(|item| !item.contains("타입 검사") && !item.contains("빌드")));
+        assert!(plan.run_drafts[0].contract.verification.contains("MIME"));
+        assert!(!plan.run_drafts[0]
+            .contract
+            .verification
+            .contains("타입 검사"));
+    }
+
+    #[test]
+    fn spare_provider_capacity_does_not_inflate_task_value() {
+        let snapshot = snapshot(vec![session(
+            Provider::Codex,
+            "same-work",
+            "alpha",
+            "Implement the bounded parser refactor and focused regression tests",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let abundant = build_overnight_plan(
+            &snapshot,
+            vec![budget(Provider::Codex, 0.0)],
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+        let constrained = build_overnight_plan(
+            &snapshot,
+            vec![budget(Provider::Codex, 90.0)],
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+
+        assert_eq!(
+            abundant.candidates[0].score,
+            constrained.candidates[0].score
+        );
+        assert!(abundant.candidates[0].score < 100.0);
+    }
+
+    #[test]
+    fn unknown_task_shape_fails_closed_even_when_it_is_very_recent() {
+        let plan = build_overnight_plan(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "ambiguous",
+                "alpha",
+                "Quick thing from a minute ago",
+                SessionStatus::Idle,
+                "2026-07-24T21:59:00Z",
+            )]),
+            vec![budget(Provider::Codex, 0.0)],
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("작업 유형") && item.reason.contains("검증")));
+    }
+
+    #[test]
+    fn proven_similar_short_tasks_in_one_worktree_can_form_a_bounded_batch() {
+        let repository = temporary_repository();
+        let mut sessions = Vec::new();
+        let mut briefs = Vec::new();
+        for index in 0..=10 {
+            let project = format!("asset-{index}");
+            let native_id = format!("asset-session-{index}");
+            let directory = repository.path().join(format!("assets/{index}"));
+            std::fs::create_dir_all(&directory).expect("asset directory");
+            let goal = format!("Generate one PNG image and save it as exact target-{index}.png");
+            let mut item = session(
+                Provider::Codex,
+                &native_id,
+                &project,
+                &goal,
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            );
+            item.cwd = Some(directory.display().to_string());
+            sessions.push(item);
+
+            let mut excerpts = vec![ContextExcerpt {
+                provider: Provider::Codex,
+                session_id: format!("codex:{native_id}"),
+                role: ContextRole::User,
+                text: goal,
+                timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+            }];
+            if index == 0 {
+                excerpts.push(ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: format!("codex:{native_id}"),
+                    role: ContextRole::Assistant,
+                    text: "Completed the file and verified it exists with MIME image/png, 1600x1000 dimensions, and no corruption."
+                        .to_owned(),
+                    timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
+                });
+            }
+            briefs.push(ProjectContextBrief {
+                project,
+                workspace: Some(directory.display().to_string()),
+                session_ids: vec![format!("codex:{native_id}")],
+                providers: vec![Provider::Codex],
+                excerpt_count: excerpts.len(),
+                excerpts,
+                truncated: false,
+            });
+        }
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: briefs,
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot(sessions),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        let batch = &plan.candidates[0];
+        assert!(batch.project.contains("10개"));
+        assert!(batch.goal.contains("고정된 10개 대상 manifest"));
+        assert_eq!(batch.source_session_ids.len(), 10);
+        assert_eq!(batch.estimated_hours, 2.5);
+        assert_eq!(
+            batch.cwd,
+            repository
+                .path()
+                .canonicalize()
+                .expect("canonical repository")
+                .display()
+                .to_string()
+        );
+        assert!(batch.verification.iter().any(|item| item.contains("MIME")));
+        assert!(batch
+            .verification
+            .iter()
+            .all(|item| !item.contains("타입 검사") && !item.contains("빌드")));
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == "asset-0" && item.reason.contains("이미 완료")));
+    }
+
+    #[test]
+    fn a_provider_final_response_that_reports_completion_is_not_open_work() {
+        let project = "completed-refactor";
+        let goal = "Refactor the authentication module and run its regression tests";
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: project.to_owned(),
+                workspace: Some(format!("/work/{project}")),
+                session_ids: vec!["codex:completed".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:completed".to_owned(),
+                        role: ContextRole::User,
+                        text: goal.to_owned(),
+                        timestamp: Some("2026-07-24T21:20:00Z".to_owned()),
+                    },
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:completed".to_owned(),
+                        role: ContextRole::Assistant,
+                        text: "Completed the refactor. The focused regression tests pass."
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
+                    },
+                ],
+                excerpt_count: 2,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "completed",
+                project,
+                goal,
+                SessionStatus::Idle,
+                "2026-07-24T21:35:00Z",
+            )]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == project && item.reason.contains("이미 완료")));
     }
 
     fn temporary_repository() -> tempfile::TempDir {

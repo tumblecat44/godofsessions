@@ -1426,7 +1426,7 @@ function CandidateCard({
           <small>
             {modelJudged
               ? copy("구독 모델 판단", "MODEL JUDGMENT")
-              : copy("추천 지수", "FIT SCORE")}
+              : copy("야간 적합도", "NIGHT FIT")}
           </small>
         </div>
       </header>
