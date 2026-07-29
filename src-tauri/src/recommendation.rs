@@ -115,7 +115,7 @@ struct TaskAssessment {
 struct ShortCandidate {
     candidate: OvernightCandidate,
     task: TaskAssessment,
-    target: String,
+    target: Option<String>,
     objective: String,
     proof_key: String,
     batch_key: String,
@@ -128,7 +128,68 @@ pub fn build_overnight_plan(
     sleep_hours: SleepHours,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
+    let context = synthetic_request_context(snapshot, now);
+    build_overnight_plan_inner(snapshot, budgets, Some(&context), None, sleep_hours, now)
+}
+
+#[cfg(test)]
+fn build_overnight_plan_without_context(
+    snapshot: &Snapshot,
+    budgets: Vec<ResourceBudget>,
+    sleep_hours: SleepHours,
+    now: DateTime<Utc>,
+) -> OvernightPlan {
     build_overnight_plan_inner(snapshot, budgets, None, None, sleep_hours, now)
+}
+
+#[cfg(test)]
+fn synthetic_request_context(snapshot: &Snapshot, now: DateTime<Utc>) -> ContextIndex {
+    let mut latest_by_workspace = BTreeMap::<String, &Session>::new();
+    for session in &snapshot.sessions {
+        let key = session
+            .cwd
+            .clone()
+            .or_else(|| session.repository.clone())
+            .unwrap_or_else(|| session.id.clone());
+        let replace = latest_by_workspace.get(&key).is_none_or(|current| {
+            session.updated_at.as_deref().unwrap_or_default()
+                > current.updated_at.as_deref().unwrap_or_default()
+        });
+        if replace {
+            latest_by_workspace.insert(key, session);
+        }
+    }
+    ContextIndex {
+        generated_at: now.to_rfc3339(),
+        window_hours: 24,
+        projects: latest_by_workspace
+            .into_iter()
+            .map(|(workspace, session)| ProjectContextBrief {
+                project: session
+                    .repository
+                    .clone()
+                    .unwrap_or_else(|| session.native_id.clone()),
+                workspace: Some(workspace),
+                session_ids: vec![session.id.clone()],
+                providers: vec![session.provider],
+                excerpts: vec![ContextExcerpt {
+                    provider: session.provider,
+                    session_id: session.id.clone(),
+                    role: ContextRole::User,
+                    text: session
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| "Synthetic test request".to_owned()),
+                    timestamp: session.updated_at.clone(),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            })
+            .collect(),
+        warnings: Vec::new(),
+        ephemeral: true,
+        methodology: "Synthetic user requests for deterministic unit tests.".to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -253,7 +314,10 @@ fn discover_candidate_envelope_inner(
 
     let mut candidates = Vec::new();
     let mut short_candidates = Vec::new();
-    let mut completed_patterns = BTreeSet::new();
+    // Provider-authored prose is not independent verification evidence. Keep this
+    // empty until the recommendation input carries trusted local verifier receipts
+    // or an acknowledged Morning Review verdict.
+    let completed_patterns = BTreeSet::new();
     let mut exclusions = Vec::new();
     for (project_key, sessions) in projects.iter_mut() {
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
@@ -347,12 +411,6 @@ fn discover_candidate_envelope_inner(
             .unwrap_or_else(|| latest.repository.clone().unwrap_or_default());
         let proof_key = task_pattern_key(&cwd, task.kind, goal_subject);
         if !failed && context_brief.is_some_and(latest_goal_is_reported_complete) {
-            if task.kind != OvernightTaskKind::Unknown
-                && context_brief
-                    .is_some_and(|brief| latest_completion_has_task_evidence(brief, task.kind))
-            {
-                completed_patterns.insert(proof_key);
-            }
             exclusions.push(ExcludedProject {
                 project,
                 reason:
@@ -385,6 +443,15 @@ fn discover_candidate_envelope_inner(
                 project,
                 reason:
                     "작업 유형과 검증 방법을 안전하게 판별할 근거가 없어 야간 작업으로 제외했습니다."
+                        .to_owned(),
+            });
+            continue;
+        }
+        if requires_expanded_manifest(goal_subject, task.kind) {
+            exclusions.push(ExcludedProject {
+                project,
+                reason:
+                    "여러 대상을 가리키는 작업이지만 정확한 대상과 항목별 매개변수를 승인 경계에 고정할 수 없어 제외했습니다."
                         .to_owned(),
             });
             continue;
@@ -1172,116 +1239,62 @@ fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
         return false;
     };
     let normalized = final_response.text.to_lowercase();
-    let incomplete = [
-        "not complete",
-        "not completed",
-        "not implemented",
-        "not generated",
-        "not verified",
-        "not passed",
-        "not fully",
-        "has not passed",
-        "have not passed",
-        "couldn't",
-        "could not",
-        "wasn't",
-        "isn't",
-        "failed",
-        "blocked",
-        "remaining",
-        "still need",
-        "unable to",
-        "미완료",
-        "완료하지 못",
-        "실패",
-        "막혔",
-        "남았",
-        "추가 작업",
-        "구현하지 못",
-        "생성하지 못",
-        "검증하지 못",
-        "확인하지 못",
-        "통과하지 못",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker));
-    if incomplete {
+    if response_has_concrete_remaining_work(&normalized)
+        || response_requires_human(&normalized)
+        || contains_any(
+            &normalized,
+            &[
+                "not complete",
+                "not completed",
+                "not fully",
+                "partial",
+                "only;",
+                "미완료",
+                "일부만",
+            ],
+        )
+    {
         return false;
     }
-    [
-        "completed",
-        "finished",
-        "implemented",
-        "tests pass",
-        "test passes",
-        "saved the file",
-        "generated the file",
-        "created the file",
-        "완료",
-        "구현했",
-        "통과",
-        "저장했",
-        "생성했",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker))
-}
-
-fn latest_completion_has_task_evidence(
-    brief: &ProjectContextBrief,
-    kind: OvernightTaskKind,
-) -> bool {
-    let Some((_, Some(response))) = latest_goal_and_response(brief) else {
-        return false;
-    };
-    let normalized = response.text.to_lowercase();
-    if contains_any(
+    contains_any(
         &normalized,
         &[
-            "not verified",
-            "could not verify",
-            "wasn't verified",
-            "검증하지 못",
-            "확인하지 못",
-            "손상 여부 미확인",
+            "all requested work is complete",
+            "completed all requested work",
+            "the entire task is complete",
+            "the whole task is complete",
+            "fully completed the request",
+            "요청한 작업을 모두 완료",
+            "전체 작업을 완료",
+            "모든 요청 사항을 완료",
         ],
-    ) {
-        return false;
-    }
-    match kind {
-        OvernightTaskKind::AssetGeneration => {
-            let checks = [
-                contains_any(&normalized, &["mime", "인코딩", "encoding"]),
-                contains_any(&normalized, &["dimension", "1600x", "크기", "가로"]),
-                contains_any(&normalized, &["corruption", "손상"]),
-                contains_any(&normalized, &["exists", "존재"]),
-            ];
-            checks.into_iter().filter(|present| *present).count() >= 3
-        }
-        OvernightTaskKind::CodeChange | OvernightTaskKind::TestRepair => contains_any(
-            &normalized,
-            &["tests pass", "test passes", "테스트 통과", "검증 통과"],
-        ),
-        OvernightTaskKind::Unknown => false,
-        _ => contains_any(
-            &normalized,
-            &["verified", "validation", "검증", "완료 증거"],
-        ),
-    }
+    )
 }
 
 fn assess_open_work(
     failed: bool,
     brief: Option<&ProjectContextBrief>,
-    title: &str,
-    status: SessionStatus,
+    _title: &str,
+    _status: SessionStatus,
 ) -> OpenWorkEvidence {
-    if failed {
-        return OpenWorkEvidence::RetryableFailure;
-    }
     if let Some(brief) = brief {
         if let Some((goal, response)) = latest_goal_and_response(brief) {
             let request = goal.text.to_lowercase();
+            let response_text = response.map(|item| item.text.to_lowercase());
+            let combined = format!(
+                "{request}\n{}",
+                response_text.as_deref().unwrap_or_default()
+            );
+            if response_requires_human(&combined) {
+                return OpenWorkEvidence::Ambiguous;
+            }
+            if failed {
+                return response_text
+                    .as_deref()
+                    .is_some_and(response_has_technical_failure)
+                    .then_some(OpenWorkEvidence::RetryableFailure)
+                    .unwrap_or(OpenWorkEvidence::Ambiguous);
+            }
             if contains_any(
                 &request,
                 &[
@@ -1297,35 +1310,112 @@ fn assess_open_work(
             ) {
                 return OpenWorkEvidence::ExplicitDeferral;
             }
-            if response.is_some() {
-                return OpenWorkEvidence::IncompleteHandoff;
+            if let Some(response) = response_text {
+                return response_has_concrete_remaining_work(&response)
+                    .then_some(OpenWorkEvidence::IncompleteHandoff)
+                    .unwrap_or(OpenWorkEvidence::Ambiguous);
             }
             return OpenWorkEvidence::PendingUserRequest;
         }
     }
-    if status == SessionStatus::Unknown {
-        return OpenWorkEvidence::Ambiguous;
+    OpenWorkEvidence::Ambiguous
+}
+
+fn response_requires_human(response: &str) -> bool {
+    let mut unresolved = response.to_owned();
+    for safe_phrase in [
+        "no input or approval is needed",
+        "no approval is needed",
+        "without human input",
+        "사람의 입력 없이",
+        "승인이 필요하지 않",
+    ] {
+        unresolved = unresolved.replace(safe_phrase, "");
     }
-    let normalized_title = title.to_lowercase();
-    if contains_any(
-        &normalized_title,
+    contains_any(
+        &unresolved,
         &[
-            "continue",
-            "resume",
-            "overnight",
-            "next milestone",
-            "remaining work",
-            "계속",
-            "이어서",
-            "재개",
-            "오늘 밤",
-            "남은 작업",
+            "api key",
+            "credential",
+            "secret",
+            "log in",
+            "login required",
+            "need your input",
+            "need approval",
+            "need confirmation",
+            "choose one",
+            "your decision",
+            "provide access",
+            "provide the",
+            "waiting for you",
+            "api 키",
+            "자격 증명",
+            "로그인",
+            "승인 필요",
+            "확인 필요",
+            "선택해",
+            "결정 필요",
+            "입력이 필요",
         ],
-    ) {
-        OpenWorkEvidence::ExplicitDeferral
-    } else {
-        OpenWorkEvidence::Ambiguous
-    }
+    )
+}
+
+fn response_has_technical_failure(response: &str) -> bool {
+    contains_any(
+        response,
+        &[
+            "test failed",
+            "tests failed",
+            "build failed",
+            "typecheck failed",
+            "assertion error",
+            "compiler error",
+            "runtime error",
+            "timed out",
+            "timeout",
+            "crashed",
+            "테스트 실패",
+            "빌드 실패",
+            "타입 검사 실패",
+            "컴파일 오류",
+            "시간 초과",
+        ],
+    )
+}
+
+fn response_has_concrete_remaining_work(response: &str) -> bool {
+    contains_any(
+        response,
+        &[
+            "not implemented",
+            "not generated",
+            "not verified",
+            "not passed",
+            "has not passed",
+            "have not passed",
+            "couldn't",
+            "could not",
+            "failed",
+            "blocked",
+            "remaining",
+            "remains unfinished",
+            "still need",
+            "still needs",
+            "needs to be fixed",
+            "unable to",
+            "미완료",
+            "완료하지 못",
+            "실패",
+            "막혔",
+            "남았",
+            "추가 작업",
+            "구현하지 못",
+            "생성하지 못",
+            "검증하지 못",
+            "확인하지 못",
+            "통과하지 못",
+        ],
+    )
 }
 
 fn open_work_evidence_label(evidence: OpenWorkEvidence) -> &'static str {
@@ -1411,7 +1501,9 @@ fn promote_short_batches(
         let manifest_targets = group
             .iter()
             .map(|item| {
-                worktree_relative_target(&item.candidate.cwd, &item.target, &batch_workspace)
+                item.target.as_deref().and_then(|target| {
+                    worktree_relative_target(&item.candidate.cwd, target, &batch_workspace)
+                })
             })
             .collect::<Option<Vec<_>>>();
         let unique_targets = manifest_targets
@@ -1635,23 +1727,48 @@ fn short_batch_exclusion_reason(
     format!("짧은 단일 작업으로 예상되어 야간 실행 가치가 부족합니다({estimate}).")
 }
 
-fn task_target(goal: &str, kind: OvernightTaskKind) -> String {
-    if kind == OvernightTaskKind::AssetGeneration {
-        if let Some(path) = goal.split_whitespace().rev().find(|word| {
-            let normalized = word.to_lowercase();
-            contains_any(
-                &normalized,
-                &[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"],
-            )
-        }) {
-            return path
-                .trim_matches(|character: char| {
-                    matches!(character, '"' | '\'' | '`' | ',' | ';' | ')' | '(')
-                })
-                .to_owned();
-        }
+fn task_target(goal: &str, kind: OvernightTaskKind) -> Option<String> {
+    if kind != OvernightTaskKind::AssetGeneration {
+        return None;
     }
-    goal.trim().to_owned()
+    let normalized = goal.to_lowercase();
+    let marker = [
+        "save it as ",
+        "save as ",
+        "write it to ",
+        "write to ",
+        "output to ",
+        "overwrite ",
+        "저장 경로 ",
+        "저장해 ",
+    ]
+    .iter()
+    .filter_map(|marker| normalized.find(marker).map(|index| (index, marker.len())))
+    .min_by_key(|(index, _)| *index)?;
+    let suffix = &goal[marker.0 + marker.1..];
+    let path = suffix
+        .split_whitespace()
+        .next()?
+        .trim_matches(|character: char| {
+            matches!(
+                character,
+                '"' | '\'' | '`' | ',' | ';' | ')' | '(' | ':' | '.'
+            )
+        });
+    let normalized_path = path.to_lowercase();
+    contains_any(
+        &normalized_path,
+        &[".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"],
+    )
+    .then(|| path.to_owned())
+}
+
+fn requires_expanded_manifest(goal: &str, kind: OvernightTaskKind) -> bool {
+    requested_item_count(&goal.to_lowercase()).is_some_and(|count| count > 1)
+        && matches!(
+            kind,
+            OvernightTaskKind::AssetGeneration | OvernightTaskKind::MigrationOrTransform
+        )
 }
 
 fn assess_task(goal: &str) -> TaskAssessment {
@@ -1702,6 +1819,10 @@ fn assess_task(goal: &str) -> TaskAssessment {
         );
     }
 
+    if is_code_action(&normalized) {
+        return assess_code_task(&normalized, requested_count);
+    }
+
     if contains_any(
         &normalized,
         &[
@@ -1715,10 +1836,10 @@ fn assess_task(goal: &str) -> TaskAssessment {
     ) {
         return assessment(
             OvernightTaskKind::TestRepair,
-            1.0,
-            2.0,
-            EstimateConfidence::Medium,
-            vec!["실패 재현·수정·집중 회귀 검증".to_owned()],
+            0.5,
+            1.25,
+            EstimateConfidence::Low,
+            vec!["단일 실패 테스트라는 작업 라벨만 확인됨".to_owned()],
         );
     } else if contains_any(
         &normalized,
@@ -1732,21 +1853,23 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "변환",
         ],
     ) {
-        return assessment(
-            OvernightTaskKind::MigrationOrTransform,
-            (item_count * 0.15).max(1.5),
-            (item_count * 0.3).max(3.0),
-            if requested_count.is_some() {
-                EstimateConfidence::High
-            } else {
-                EstimateConfidence::Medium
-            },
-            vec![if let Some(count) = requested_count {
-                format!("명시된 변환 대상 {count}개")
-            } else {
-                "대상 수가 없는 마이그레이션 범위".to_owned()
-            }],
-        );
+        return if let Some(count) = requested_count.filter(|count| *count > 1) {
+            assessment(
+                OvernightTaskKind::MigrationOrTransform,
+                (count as f64 * 0.15).max(1.0),
+                (count as f64 * 0.3).max(1.5),
+                EstimateConfidence::High,
+                vec![format!("명시된 변환 대상 {count}개")],
+            )
+        } else {
+            assessment(
+                OvernightTaskKind::MigrationOrTransform,
+                0.75,
+                1.5,
+                EstimateConfidence::Low,
+                vec!["대상 수·실행 이력이 없는 단일 변환 라벨".to_owned()],
+            )
+        };
     } else if contains_any(
         &normalized,
         &[
@@ -1762,13 +1885,37 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "분석",
         ],
     ) {
-        return assessment(
-            OvernightTaskKind::ResearchOrAudit,
-            2.0,
-            3.0,
-            EstimateConfidence::Medium,
-            vec!["출처 조사·범위 확인·문서 산출물".to_owned()],
-        );
+        let broad_scope = requested_count.is_some()
+            || contains_any(
+                &normalized,
+                &[
+                    "repository-wide",
+                    "repo-wide",
+                    "entire repository",
+                    "all files",
+                    "all projects",
+                    "전체 저장소",
+                    "모든 파일",
+                    "모든 프로젝트",
+                ],
+            );
+        return if broad_scope {
+            assessment(
+                OvernightTaskKind::ResearchOrAudit,
+                2.0,
+                3.0,
+                EstimateConfidence::Medium,
+                vec!["명시된 전역 범위 또는 대상 수".to_owned()],
+            )
+        } else {
+            assessment(
+                OvernightTaskKind::ResearchOrAudit,
+                0.5,
+                1.0,
+                EstimateConfidence::Low,
+                vec!["범위·출처 수가 없는 조사 라벨".to_owned()],
+            )
+        };
     } else if contains_any(
         &normalized,
         &[
@@ -1782,13 +1929,35 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "평가",
         ],
     ) {
-        return assessment(
-            OvernightTaskKind::ExperimentOrBenchmark,
-            2.0,
-            4.0,
-            EstimateConfidence::Medium,
-            vec!["실험 실행·로그·재현 평가".to_owned()],
-        );
+        let repeated_scope = requested_count.is_some()
+            || contains_any(
+                &normalized,
+                &[
+                    "benchmark suite",
+                    "load test",
+                    "all configurations",
+                    "벤치마크 스위트",
+                    "부하 테스트",
+                    "모든 구성",
+                ],
+            );
+        return if repeated_scope {
+            assessment(
+                OvernightTaskKind::ExperimentOrBenchmark,
+                2.0,
+                4.0,
+                EstimateConfidence::Medium,
+                vec!["반복 실행 범위가 명시된 실험".to_owned()],
+            )
+        } else {
+            assessment(
+                OvernightTaskKind::ExperimentOrBenchmark,
+                0.75,
+                1.5,
+                EstimateConfidence::Low,
+                vec!["반복 수·실행 시간이 없는 실험 라벨".to_owned()],
+            )
+        };
     } else if contains_any(
         &normalized,
         &[
@@ -1801,13 +1970,35 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "패키지 업데이트",
         ],
     ) {
-        return assessment(
-            OvernightTaskKind::DependencyMaintenance,
-            1.0,
-            2.0,
-            EstimateConfidence::Medium,
-            vec!["버전 조사·호환성 검증".to_owned()],
-        );
+        let broad_scope = requested_count.is_some()
+            || contains_any(
+                &normalized,
+                &[
+                    "all dependencies",
+                    "workspace dependencies",
+                    "dependency audit",
+                    "모든 의존성",
+                    "워크스페이스 의존성",
+                    "의존성 감사",
+                ],
+            );
+        return if broad_scope {
+            assessment(
+                OvernightTaskKind::DependencyMaintenance,
+                1.5,
+                2.5,
+                EstimateConfidence::Medium,
+                vec!["명시된 다중 의존성 범위".to_owned()],
+            )
+        } else {
+            assessment(
+                OvernightTaskKind::DependencyMaintenance,
+                0.5,
+                1.25,
+                EstimateConfidence::Low,
+                vec!["패키지 수·호환성 범위가 없는 유지보수 라벨".to_owned()],
+            )
+        };
     } else if contains_any(
         &normalized,
         &[
@@ -1821,10 +2012,10 @@ fn assess_task(goal: &str) -> TaskAssessment {
     ) {
         return assessment(
             OvernightTaskKind::IncidentRepair,
-            1.0,
-            2.0,
+            0.5,
+            1.25,
             EstimateConfidence::Low,
-            vec!["장애 재현·제한된 수정·회귀 검증".to_owned()],
+            vec!["재현 범위·로컬 검증 경계가 없는 장애 라벨".to_owned()],
         );
     } else if contains_any(
         &normalized,
@@ -1844,8 +2035,19 @@ fn assess_task(goal: &str) -> TaskAssessment {
             EstimateConfidence::Low,
             vec!["단일 문서·링크 검증 기본값".to_owned()],
         );
-    } else if contains_any(
-        &normalized,
+    }
+    assessment(
+        OvernightTaskKind::Unknown,
+        0.0,
+        0.0,
+        EstimateConfidence::Low,
+        vec!["분류 가능한 산출물·검증 단서 없음".to_owned()],
+    )
+}
+
+fn is_code_action(goal: &str) -> bool {
+    contains_any(
+        goal,
         &[
             "implement",
             "implementation",
@@ -1866,85 +2068,98 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "리팩터",
             "수정",
         ],
-    ) {
-        let small_scope = contains_any(
-            &normalized,
-            &[
-                "one typo",
-                "single typo",
-                "one-line",
-                "one line",
-                "rename one",
-                "quick fix",
-                "copy change",
-                "오타",
-                "한 줄",
-                "문구 수정",
-            ],
-        );
-        if small_scope {
-            return assessment(
-                OvernightTaskKind::CodeChange,
-                0.25,
-                0.75,
-                EstimateConfidence::High,
-                vec!["명시된 단일 소규모 코드 변경".to_owned()],
-            );
-        }
-        if let Some(count) = requested_count.filter(|count| *count > 1) {
-            return assessment(
-                OvernightTaskKind::CodeChange,
-                (count as f64 * 0.2).max(1.0),
-                ceil_quarter(count as f64 * 0.4).max(1.5),
-                EstimateConfidence::Medium,
-                vec![
-                    format!("명시된 코드 대상 {count}개"),
-                    "집중 검증".to_owned(),
-                ],
-            );
-        }
-        let substantial_scope = contains_any(
-            &normalized,
-            &[
-                "implementation",
-                "refactor",
-                "module",
-                "feature",
-                "integration",
-                "regression test",
-                "focused test",
-                "test passes",
-                "tests pass",
-                "구현",
-                "리팩터",
-                "모듈",
-                "기능",
-                "회귀 테스트",
-            ],
-        );
-        if substantial_scope {
-            return assessment(
-                OvernightTaskKind::CodeChange,
-                1.25,
-                2.0,
-                EstimateConfidence::Medium,
-                vec!["경계가 명시된 코드 범위".to_owned(), "집중 검증".to_owned()],
-            );
-        }
+    )
+}
+
+fn assess_code_task(normalized: &str, requested_count: Option<usize>) -> TaskAssessment {
+    let small_scope = contains_any(
+        normalized,
+        &[
+            "one typo",
+            "single typo",
+            "one-line",
+            "one line",
+            "rename one",
+            "quick fix",
+            "copy change",
+            "typo",
+            "오타",
+            "한 줄",
+            "문구 수정",
+        ],
+    );
+    if small_scope {
         return assessment(
             OvernightTaskKind::CodeChange,
-            0.5,
+            0.25,
+            0.75,
+            EstimateConfidence::High,
+            vec!["명시된 단일 소규모 코드 변경".to_owned()],
+        );
+    }
+    if let Some(count) = requested_count.filter(|count| *count > 1) {
+        return assessment(
+            OvernightTaskKind::CodeChange,
+            (count as f64 * 0.2).max(1.0),
+            ceil_quarter(count as f64 * 0.4).max(1.5),
+            EstimateConfidence::Medium,
+            vec![
+                format!("명시된 코드 대상 {count}개"),
+                "집중 검증".to_owned(),
+            ],
+        );
+    }
+    let concrete_artifact = contains_any(
+        normalized,
+        &[
+            "implement ",
+            "module",
+            "function",
+            "feature",
+            "integration",
+            "parser",
+            ".rs",
+            ".ts",
+            ".tsx",
+            ".py",
+            "모듈",
+            "함수",
+            "기능",
+        ],
+    );
+    let concrete_verification = contains_any(
+        normalized,
+        &[
+            "regression test",
+            "focused test",
+            "test passes",
+            "tests pass",
+            "typecheck",
+            "build",
+            "회귀 테스트",
+            "집중 테스트",
+            "타입 검사",
+            "빌드",
+        ],
+    );
+    if concrete_artifact && concrete_verification {
+        return assessment(
+            OvernightTaskKind::CodeChange,
             1.25,
-            EstimateConfidence::Low,
-            vec!["파일·항목 수가 없는 코드 변경 fallback".to_owned()],
+            2.0,
+            EstimateConfidence::Medium,
+            vec![
+                "명시된 코드 산출물 경계".to_owned(),
+                "집중 검증 경계".to_owned(),
+            ],
         );
     }
     assessment(
-        OvernightTaskKind::Unknown,
-        0.0,
-        0.0,
+        OvernightTaskKind::CodeChange,
+        0.5,
+        1.25,
         EstimateConfidence::Low,
-        vec!["분류 가능한 산출물·검증 단서 없음".to_owned()],
+        vec!["산출물·검증 범위가 불완전한 코드 변경 fallback".to_owned()],
     )
 }
 
@@ -2643,18 +2858,14 @@ mod tests {
             Provider::Grok,
             "grok-session",
             "alpha",
-            "Continue the overnight implementation",
+            "Continue the overnight parser module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
-        let context = ContextIndex {
-            generated_at: "2026-07-24T22:00:00Z".to_owned(),
-            window_hours: 24,
-            projects: Vec::new(),
-            warnings: Vec::new(),
-            ephemeral: true,
-            methodology: "test".to_owned(),
-        };
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let context = synthetic_request_context(&snapshot, now);
         let mut hermes = route(
             "hermes:default",
             Provider::Hermes,
@@ -2683,9 +2894,7 @@ mod tests {
             &context,
             &inventory,
             SleepHours::new(7.0).expect("valid sleep duration"),
-            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
+            now,
         );
         let candidate = &plan.candidates[0];
 
@@ -2708,7 +2917,7 @@ mod tests {
                 Provider::Grok,
                 "grok-session",
                 "alpha",
-                "Continue the overnight implementation",
+                "Continue the overnight parser module implementation with focused tests",
                 SessionStatus::Idle,
                 "2026-07-24T21:50:00Z",
             ),
@@ -2716,11 +2925,14 @@ mod tests {
                 Provider::Codex,
                 "codex-session",
                 "alpha",
-                "Implement and verify the next milestone",
+                "Implement the next parser module milestone and run focused tests",
                 SessionStatus::Idle,
                 "2026-07-24T20:00:00Z",
             ),
         ]);
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
         let inventory = ExecutionRouteInventory {
             generated_at: "2026-07-24T22:00:00Z".to_owned(),
             routes: vec![
@@ -2744,19 +2956,10 @@ mod tests {
         let plan = build_overnight_plan_with_context_and_routes(
             &snapshot,
             vec![budget(Provider::Grok, 0.0), budget(Provider::Codex, 65.0)],
-            &ContextIndex {
-                generated_at: "2026-07-24T22:00:00Z".to_owned(),
-                window_hours: 24,
-                projects: Vec::new(),
-                warnings: Vec::new(),
-                ephemeral: true,
-                methodology: "test".to_owned(),
-            },
+            &synthetic_request_context(&snapshot, now),
             &inventory,
             SleepHours::new(7.0).expect("valid sleep duration"),
-            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
+            now,
         );
         let candidate = &plan.candidates[0];
 
@@ -2776,10 +2979,13 @@ mod tests {
             Provider::Grok,
             "grok-session",
             "alpha",
-            "Continue the overnight implementation",
+            "Continue the overnight parser module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
         let mut unavailable_route = route(
             "grok:native",
             Provider::Grok,
@@ -2796,19 +3002,10 @@ mod tests {
         let plan = build_overnight_plan_with_context_and_routes(
             &snapshot,
             vec![budget(Provider::Grok, 10.0)],
-            &ContextIndex {
-                generated_at: "2026-07-24T22:00:00Z".to_owned(),
-                window_hours: 24,
-                projects: Vec::new(),
-                warnings: Vec::new(),
-                ephemeral: true,
-                methodology: "test".to_owned(),
-            },
+            &synthetic_request_context(&snapshot, now),
             &inventory,
             SleepHours::new(7.0).expect("valid sleep duration"),
-            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
+            now,
         );
 
         assert!(plan.candidates.is_empty());
@@ -2989,7 +3186,7 @@ mod tests {
             Provider::Claude,
             "familiar",
             "alpha",
-            "Continue implementation",
+            "Continue parser module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
@@ -3041,14 +3238,6 @@ mod tests {
             (UNKNOWN_PLAN_CAPACITY_SCORE, 1.0)
         );
 
-        let context = ContextIndex {
-            generated_at: now.to_rfc3339(),
-            window_hours: 24,
-            projects: Vec::new(),
-            warnings: Vec::new(),
-            ephemeral: true,
-            methodology: "test".to_owned(),
-        };
         let inventory = ExecutionRouteInventory {
             generated_at: now.to_rfc3339(),
             routes: vec![
@@ -3068,15 +3257,17 @@ mod tests {
             warnings: Vec::new(),
             methodology: "test".to_owned(),
         };
+        let reset_snapshot = snapshot(vec![session(
+            Provider::Grok,
+            "reset-session",
+            "alpha",
+            "Continue substantial module implementation after quota reset with focused tests",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let context = synthetic_request_context(&reset_snapshot, now);
         let plan = build_overnight_plan_with_context_and_routes(
-            &snapshot(vec![session(
-                Provider::Grok,
-                "reset-session",
-                "alpha",
-                "Continue substantial module implementation after quota reset",
-                SessionStatus::Idle,
-                "2026-07-24T21:30:00Z",
-            )]),
+            &reset_snapshot,
             vec![recovering],
             &context,
             &inventory,
@@ -3129,7 +3320,7 @@ mod tests {
             Provider::Claude,
             "familiar",
             "alpha",
-            "Continue implementation",
+            "Continue parser module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
@@ -3168,7 +3359,7 @@ mod tests {
                     Provider::Claude,
                     "claude-alpha",
                     "alpha",
-                    "Continue the same implementation",
+                    "Continue the same parser module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:20:00Z",
                 ),
@@ -3176,7 +3367,7 @@ mod tests {
                     Provider::Codex,
                     "codex-alpha",
                     "alpha",
-                    "Continue the same implementation",
+                    "Continue the same parser module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -3395,7 +3586,7 @@ mod tests {
                     Provider::Claude,
                     "alpha",
                     "alpha",
-                    "Continue the bounded Claude module implementation",
+                    "Continue the bounded Claude module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -3403,7 +3594,7 @@ mod tests {
                     Provider::Codex,
                     "beta",
                     "beta",
-                    "Continue the bounded Codex module implementation",
+                    "Continue the bounded Codex module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -3411,7 +3602,7 @@ mod tests {
                     Provider::Grok,
                     "gamma",
                     "gamma",
-                    "Continue the bounded Grok module implementation",
+                    "Continue the bounded Grok module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -3445,7 +3636,7 @@ mod tests {
             Provider::Claude,
             "alpha",
             "alpha",
-            "Continue the bounded Claude module implementation",
+            "Continue the bounded Claude module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         );
@@ -3460,7 +3651,7 @@ mod tests {
             Provider::Codex,
             "beta",
             "beta",
-            "Continue the bounded Codex module implementation",
+            "Continue the bounded Codex module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         );
@@ -3565,14 +3756,6 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        let context = ContextIndex {
-            generated_at: now.to_rfc3339(),
-            window_hours: PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS,
-            projects: Vec::new(),
-            warnings: Vec::new(),
-            ephemeral: true,
-            methodology: "test".to_owned(),
-        };
         let inventory = ExecutionRouteInventory {
             generated_at: now.to_rfc3339(),
             routes: vec![route(
@@ -3591,14 +3774,16 @@ mod tests {
                     Provider::Codex,
                     project,
                     project,
-                    "Continue verified implementation",
+                    "Continue verified parser module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 )
             })
             .collect();
+        let candidate_snapshot = snapshot(sessions);
+        let context = synthetic_request_context(&candidate_snapshot, now);
         discover_portfolio_candidates_with_context_and_routes(
-            &snapshot(sessions),
+            &candidate_snapshot,
             vec![budget(Provider::Codex, 10.0)],
             &context,
             &inventory,
@@ -3751,7 +3936,7 @@ mod tests {
             Provider::Codex,
             "alpha",
             "alpha",
-            "Continue implementation",
+            "Continue parser module implementation with focused tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
@@ -3759,10 +3944,11 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
+        let context = synthetic_request_context(&snapshot, now);
         let short_night = discover_candidate_envelope_inner(
             &snapshot,
             vec![budget(Provider::Codex, 10.0)],
-            None,
+            Some(&context),
             None,
             SleepHours::new(1.3).expect("valid sleep duration"),
             now,
@@ -3771,7 +3957,7 @@ mod tests {
         let long_night = discover_candidate_envelope_inner(
             &snapshot,
             vec![budget(Provider::Codex, 10.0)],
-            None,
+            Some(&context),
             None,
             SleepHours::new(10.0).expect("valid sleep duration"),
             now,
@@ -3911,7 +4097,7 @@ mod tests {
     }
 
     #[test]
-    fn substantial_asset_batch_gets_an_asset_specific_estimate_and_contract() {
+    fn a_referenced_multi_asset_manifest_is_not_a_frozen_approval_boundary() {
         let snapshot = snapshot(vec![session(
             Provider::Codex,
             "asset-batch",
@@ -3954,20 +4140,12 @@ mod tests {
                 .with_timezone(&Utc),
         );
 
-        assert_eq!(plan.candidates.len(), 1);
-        assert_eq!(plan.candidates[0].estimated_hours, 5.0);
-        assert!(plan.candidates[0].verification.iter().any(|item| {
-            item.contains("MIME") && item.contains("크기") && item.contains("손상")
+        assert!(plan.candidates.is_empty());
+        assert!(plan.exclusions.iter().any(|item| {
+            item.project == "catalog"
+                && item.reason.contains("정확한 대상")
+                && item.reason.contains("승인")
         }));
-        assert!(plan.candidates[0]
-            .verification
-            .iter()
-            .all(|item| !item.contains("타입 검사") && !item.contains("빌드")));
-        assert!(plan.run_drafts[0].contract.verification.contains("MIME"));
-        assert!(!plan.run_drafts[0]
-            .contract
-            .verification
-            .contains("타입 검사"));
     }
 
     #[test]
@@ -4117,7 +4295,7 @@ mod tests {
         assert!(plan
             .exclusions
             .iter()
-            .any(|item| item.reason.contains("짧은 단일 작업")));
+            .any(|item| item.reason.contains("정확한 대상") && item.reason.contains("승인")));
     }
 
     #[test]
@@ -4156,7 +4334,7 @@ mod tests {
 
     #[test]
     fn unknown_task_shape_fails_closed_even_when_it_is_very_recent() {
-        let plan = build_overnight_plan(
+        let plan = build_overnight_plan_without_context(
             &snapshot(vec![session(
                 Provider::Codex,
                 "ambiguous",
@@ -4181,7 +4359,7 @@ mod tests {
 
     #[test]
     fn a_known_task_shape_without_open_work_evidence_fails_closed() {
-        let plan = build_overnight_plan(
+        let plan = build_overnight_plan_without_context(
             &snapshot(vec![session(
                 Provider::Codex,
                 "ambiguous-code",
@@ -4205,7 +4383,7 @@ mod tests {
     }
 
     #[test]
-    fn proven_similar_short_tasks_in_one_worktree_can_form_a_bounded_batch() {
+    fn provider_text_alone_cannot_prove_a_representative_for_batch_promotion() {
         let repository = temporary_repository();
         let mut sessions = Vec::new();
         let mut briefs = Vec::new();
@@ -4272,34 +4450,11 @@ mod tests {
                 .with_timezone(&Utc),
         );
 
-        assert_eq!(plan.candidates.len(), 1);
-        let batch = &plan.candidates[0];
-        assert!(batch.project.contains("10개"));
-        assert!(batch.goal.contains("고정된 10개 대상 manifest"));
-        assert!(batch.goal.contains("assets/1/card.png"));
-        assert!(batch.goal.contains("assets/10/card.png"));
-        assert!(batch.goal.contains("Generate card.png scene 1"));
-        assert!(batch.goal.contains("Generate card.png scene 10"));
-        assert_eq!(batch.source_session_ids.len(), 10);
-        assert_eq!(batch.estimated_hours, 2.5);
-        assert_eq!(
-            batch.cwd,
-            repository
-                .path()
-                .canonicalize()
-                .expect("canonical repository")
-                .display()
-                .to_string()
-        );
-        assert!(batch.verification.iter().any(|item| item.contains("MIME")));
-        assert!(batch
-            .verification
-            .iter()
-            .all(|item| !item.contains("타입 검사") && !item.contains("빌드")));
+        assert!(plan.candidates.is_empty());
         assert!(plan
             .exclusions
             .iter()
-            .any(|item| item.project == "asset-0" && item.reason.contains("이미 완료")));
+            .any(|item| item.reason.contains("대표 성공 근거")));
     }
 
     #[test]
@@ -4326,7 +4481,7 @@ mod tests {
                         provider: Provider::Codex,
                         session_id: "codex:completed".to_owned(),
                         role: ContextRole::Assistant,
-                        text: "Completed the refactor. The focused regression tests pass."
+                        text: "All requested work is complete. The focused regression tests pass."
                             .to_owned(),
                         timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
                     },
@@ -4387,7 +4542,7 @@ mod tests {
                         provider: Provider::Codex,
                         session_id: "codex:latest".to_owned(),
                         role: ContextRole::Assistant,
-                        text: "Completed the refactor. The focused regression tests pass."
+                        text: "All requested work is complete. The focused regression tests pass."
                             .to_owned(),
                         timestamp: Some("2026-07-24T21:40:00Z".to_owned()),
                     },
@@ -4458,7 +4613,7 @@ mod tests {
                         provider: Provider::Claude,
                         session_id: "claude:other".to_owned(),
                         role: ContextRole::Assistant,
-                        text: "Completed the refactor. The focused regression tests pass."
+                        text: "All requested work is complete. The focused regression tests pass."
                             .to_owned(),
                         timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
                     },
@@ -4555,6 +4710,169 @@ mod tests {
             .any(|item| item.reason.contains("이미 완료")));
     }
 
+    #[test]
+    fn generic_or_human_gated_responses_do_not_prove_open_unattended_work() {
+        let done = exchange_brief(
+            "Implement the parser module and run focused tests",
+            "Done. All checks are green.",
+        );
+        let needs_secret = exchange_brief(
+            "Implement the parser module and run focused tests",
+            "The run failed because I need your API key.",
+        );
+        let technical_failure = exchange_brief(
+            "Implement the parser module and run focused tests",
+            "The focused test failed with an assertion error; no input or approval is needed.",
+        );
+
+        assert_eq!(
+            assess_open_work(
+                false,
+                Some(&done),
+                "Continue implementation",
+                SessionStatus::Idle
+            ),
+            OpenWorkEvidence::Ambiguous
+        );
+        assert_eq!(
+            assess_open_work(
+                true,
+                Some(&needs_secret),
+                "Continue implementation",
+                SessionStatus::Failed
+            ),
+            OpenWorkEvidence::Ambiguous
+        );
+        assert_eq!(
+            assess_open_work(
+                true,
+                Some(&technical_failure),
+                "Continue implementation",
+                SessionStatus::Failed
+            ),
+            OpenWorkEvidence::RetryableFailure
+        );
+    }
+
+    #[test]
+    fn only_concrete_remaining_work_is_an_incomplete_handoff() {
+        let acknowledged = exchange_brief(
+            "Implement the parser module and run focused tests",
+            "I reviewed the request and understand the scope.",
+        );
+        let remaining = exchange_brief(
+            "Implement the parser module and run focused tests",
+            "The parser is implemented; the focused regression test still needs to be fixed.",
+        );
+
+        assert_eq!(
+            assess_open_work(
+                false,
+                Some(&acknowledged),
+                "Continue implementation",
+                SessionStatus::Idle
+            ),
+            OpenWorkEvidence::Ambiguous
+        );
+        assert_eq!(
+            assess_open_work(
+                false,
+                Some(&remaining),
+                "Continue implementation",
+                SessionStatus::Idle
+            ),
+            OpenWorkEvidence::IncompleteHandoff
+        );
+    }
+
+    #[test]
+    fn output_target_parsing_never_confuses_a_reference_asset_for_the_output() {
+        assert_eq!(
+            task_target(
+                "Generate thumbnail.png using reference style.jpg",
+                OvernightTaskKind::AssetGeneration
+            ),
+            None
+        );
+        assert_eq!(
+            task_target(
+                "Generate an image using reference style.jpg and save it as thumbnail.png",
+                OvernightTaskKind::AssetGeneration
+            )
+            .as_deref(),
+            Some("thumbnail.png")
+        );
+    }
+
+    #[test]
+    fn code_actions_win_over_incidental_research_or_documentation_words() {
+        assert_eq!(
+            assess_task("Implement a compare function with focused tests").kind,
+            OvernightTaskKind::CodeChange
+        );
+        assert_eq!(
+            assess_task("Refactor the documentation parser and run focused tests").kind,
+            OvernightTaskKind::CodeChange
+        );
+        let tiny_test_fix = assess_task("Fix failing test typo");
+        assert_eq!(tiny_test_fix.kind, OvernightTaskKind::CodeChange);
+        assert!(tiny_test_fix.expected_hours < 1.0);
+    }
+
+    #[test]
+    fn label_only_work_does_not_gain_an_overnight_duration_floor() {
+        for goal in [
+            "Research this question",
+            "Update a dependency",
+            "Investigate the production incident",
+            "Repair the flaky test",
+            "Migrate this setting",
+        ] {
+            assert!(
+                assess_task(goal).expected_hours < 1.0,
+                "{goal} received an overnight estimate"
+            );
+        }
+        assert!(assess_task("Audit all 20 files in the parser package").expected_hours >= 1.0);
+    }
+
+    #[test]
+    fn partial_success_is_not_whole_goal_completion() {
+        let brief = exchange_brief(
+            "Implement the parser and renderer and run focused tests",
+            "Implemented the parser only; the renderer remains unfinished. Parser tests pass.",
+        );
+
+        assert!(!latest_goal_is_reported_complete(&brief));
+    }
+
+    fn exchange_brief(user: &str, assistant: &str) -> ProjectContextBrief {
+        ProjectContextBrief {
+            project: "exchange".to_owned(),
+            workspace: Some("/work/exchange".to_owned()),
+            session_ids: vec!["codex:exchange".to_owned()],
+            providers: vec![Provider::Codex],
+            excerpts: vec![
+                ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:exchange".to_owned(),
+                    role: ContextRole::User,
+                    text: user.to_owned(),
+                    timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+                },
+                ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:exchange".to_owned(),
+                    role: ContextRole::Assistant,
+                    text: assistant.to_owned(),
+                    timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
+                },
+            ],
+            excerpt_count: 2,
+            truncated: false,
+        }
+    }
+
     fn temporary_repository() -> tempfile::TempDir {
         let directory = tempfile::tempdir().expect("temporary repository");
         let root = directory.path();
@@ -4597,23 +4915,14 @@ mod tests {
                 workspace: Some("/work/alpha".to_owned()),
                 session_ids: vec!["codex:alpha".to_owned()],
                 providers: vec![Provider::Codex],
-                excerpts: vec![
-                    ContextExcerpt {
-                        provider: Provider::Codex,
-                        session_id: "codex:alpha".to_owned(),
-                        role: ContextRole::User,
-                        text: "인증 리팩터링을 끝내고 회귀 테스트까지 돌려줘".to_owned(),
-                        timestamp: Some("2026-07-24T21:20:00Z".to_owned()),
-                    },
-                    ContextExcerpt {
-                        provider: Provider::Codex,
-                        session_id: "codex:alpha".to_owned(),
-                        role: ContextRole::Assistant,
-                        text: "먼저 경계를 확인하겠습니다.".to_owned(),
-                        timestamp: Some("2026-07-24T21:21:00Z".to_owned()),
-                    },
-                ],
-                excerpt_count: 2,
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:alpha".to_owned(),
+                    role: ContextRole::User,
+                    text: "인증 모듈 리팩터링을 끝내고 회귀 테스트까지 돌려줘".to_owned(),
+                    timestamp: Some("2026-07-24T21:20:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
                 truncated: false,
             }],
             warnings: Vec::new(),
@@ -4633,7 +4942,7 @@ mod tests {
 
         assert!(plan.candidates[0]
             .goal
-            .contains("인증 리팩터링을 끝내고 회귀 테스트까지"));
+            .contains("인증 모듈 리팩터링을 끝내고 회귀 테스트까지"));
         assert!(plan.candidates[0]
             .evidence
             .iter()

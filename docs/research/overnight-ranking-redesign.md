@@ -3,7 +3,9 @@
 ## Status
 
 **Approved on 2026-07-28. The core selection redesign is implemented with
-synthetic regression coverage; calibration telemetry remains a follow-up.**
+synthetic regression coverage. Batch promotion intentionally remains
+fail-closed until trusted local verifier receipts or an acknowledged Morning
+Review verdict are available; calibration telemetry is also a follow-up.**
 
 This design derives from
 [`overnight-task-selection.md`](./overnight-task-selection.md) and
@@ -83,6 +85,13 @@ Before scoring individual items, cluster related work by:
 A batch has a manifest of exact targets and a hard maximum item count. It does
 not widen itself after approval. Each item keeps its own result and failure
 record; one ambiguous start does not trigger an automatic retry.
+
+Provider-authored completion prose is not representative proof. In the current
+implementation it may close an already-finished item only when it explicitly
+states whole-goal completion, but it cannot unlock batch promotion. Until a
+trusted local verifier receipt or acknowledged Morning Review verdict is
+present in the recommendation input, candidate batches are excluded rather
+than promoted.
 
 Promotion requires one of:
 
