@@ -4,8 +4,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
-    Capability, CapacityPool, ContextIndex, ContextRole, ExcludedProject, ExecutionRoute,
-    ExecutionRouteInventory, NightSchedule, NightScheduleLane, NightScheduleSlot,
+    Capability, CapacityPool, ContextExcerpt, ContextIndex, ContextRole, ExcludedProject,
+    ExecutionRoute, ExecutionRouteInventory, NightSchedule, NightScheduleLane, NightScheduleSlot,
     OvernightCandidate, OvernightPlan, ProjectContextBrief, Provider, RecommendationConfidence,
     ResourceBudget, ResourceState, ScheduleWaitReason, Session, SessionStatus, Snapshot,
 };
@@ -87,17 +87,36 @@ enum OvernightTaskKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenWorkEvidence {
+    ExplicitDeferral,
+    RetryableFailure,
+    PendingUserRequest,
+    IncompleteHandoff,
+    Ambiguous,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EstimateConfidence {
+    High,
+    Medium,
+    Low,
+}
+
 #[derive(Debug, Clone)]
 struct TaskAssessment {
     kind: OvernightTaskKind,
     expected_hours: f64,
     upper_bound_hours: f64,
+    estimate_confidence: EstimateConfidence,
+    estimate_basis: Vec<String>,
 }
 
 struct ShortCandidate {
     candidate: OvernightCandidate,
     task: TaskAssessment,
     target: String,
+    objective: String,
     proof_key: String,
     batch_key: String,
 }
@@ -318,9 +337,7 @@ fn discover_candidate_envelope_inner(
             .as_deref()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("최근 작업");
-        let failed = sessions
-            .iter()
-            .any(|session| session.status == SessionStatus::Failed);
+        let failed = latest.status == SessionStatus::Failed;
         let context_goal = context_brief.and_then(latest_meaningful_user_goal);
         let goal_subject = context_goal.unwrap_or(title);
         let task = assess_task(goal_subject);
@@ -340,6 +357,16 @@ fn discover_candidate_envelope_inner(
                 project,
                 reason:
                     "가장 최근 공급자 응답이 요청한 작업과 검증의 완료를 보고해 이미 완료된 작업으로 제외했습니다."
+                        .to_owned(),
+            });
+            continue;
+        }
+        let open_work = assess_open_work(failed, context_brief, title, latest.status);
+        if open_work == OpenWorkEvidence::Ambiguous {
+            exclusions.push(ExcludedProject {
+                project,
+                reason:
+                    "작업 유형은 추정할 수 있지만 아직 열린 작업이라는 근거를 확인할 수 없어 제외했습니다."
                         .to_owned(),
             });
             continue;
@@ -402,13 +429,7 @@ fn discover_candidate_envelope_inner(
         }
         let (execution_route_id, execution_surface, capacity_pool, route_reason) =
             route_selection(provider, resume_existing, route);
-        let score = overnight_fit_score(
-            &task,
-            failed,
-            context_goal.is_some(),
-            goal_subject,
-            latest_age_hours,
-        );
+        let score = overnight_fit_score(&task, open_work, goal_subject, latest_age_hours);
         let budget_is_ready = budgets
             .iter()
             .any(|budget| budget.provider == provider && budget.state == ResourceState::Ready);
@@ -498,20 +519,16 @@ fn discover_candidate_envelope_inner(
             ));
         }
         evidence.extend([
-            format!(
-                "열린 작업: {}",
-                if failed {
-                    "재시도 가능한 실패 근거"
-                } else if context_goal.is_some() {
-                    "최근 사용자 요청이 있고 완료 응답 없음"
-                } else {
-                    "세션 제목에서 진행 중 목표를 추론"
-                }
-            ),
+            format!("열린 작업: {}", open_work_evidence_label(open_work)),
             format!(
                 "야간 레버리지: 예상 {} · 보수적 상한 {}",
                 duration_label(task.expected_hours),
                 duration_label(task.upper_bound_hours)
+            ),
+            format!(
+                "추정 근거: {} · 신뢰도 {}",
+                task.estimate_basis.join(", "),
+                estimate_confidence_label(task.estimate_confidence)
             ),
             format!("검증: {} 전용 계약", task_kind_label(task.kind)),
             "실행 경로: 승인 가능한 경로 확인".to_owned(),
@@ -560,11 +577,12 @@ fn discover_candidate_envelope_inner(
             risks,
             estimated_hours: task.upper_bound_hours,
         };
-        if task.upper_bound_hours < 1.0 {
+        if task.expected_hours < 1.0 {
             short_candidates.push(ShortCandidate {
                 batch_key: format!("{}|{}", proof_key, candidate.provider.as_str()),
                 candidate,
                 target: task_target(goal_subject, task.kind),
+                objective: goal_subject.to_owned(),
                 task,
                 proof_key,
             });
@@ -679,8 +697,14 @@ fn finalize_deterministic_plan(
             });
             continue;
         }
-        let estimated_hours = candidate.estimated_hours.min(remaining);
-        let ends_at = starts_after_hours + estimated_hours;
+        if candidate.estimated_hours > remaining {
+            unselected.push(PortfolioAdvisorOptionDecision {
+                option_id: option.option_id.clone(),
+                reason: allocation_exclusion_reason(candidate, lane_ready_at, workspace_ready_at),
+            });
+            continue;
+        }
+        let ends_at = starts_after_hours + candidate.estimated_hours;
         lane_hours.insert(candidate.capacity_pool, ends_at);
         workspace_hours.insert(workspace_key, ends_at);
         selected.push(PortfolioAdvisorOptionDecision {
@@ -1114,23 +1138,12 @@ fn empty_route_inventory(now: DateTime<Utc>) -> ExecutionRouteInventory {
 }
 
 fn latest_meaningful_user_goal(brief: &ProjectContextBrief) -> Option<&str> {
-    brief
-        .excerpts
-        .iter()
-        .rev()
-        .find(|excerpt| {
-            excerpt.role == ContextRole::User
-                && excerpt
-                    .text
-                    .chars()
-                    .filter(|character| !character.is_whitespace())
-                    .count()
-                    >= 12
-        })
-        .map(|excerpt| excerpt.text.as_str())
+    latest_goal_and_response(brief).map(|(goal, _)| goal.text.as_str())
 }
 
-fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
+fn latest_goal_and_response(
+    brief: &ProjectContextBrief,
+) -> Option<(&ContextExcerpt, Option<&ContextExcerpt>)> {
     let Some(user_index) = brief.excerpts.iter().rposition(|excerpt| {
         excerpt.role == ContextRole::User
             && excerpt
@@ -1140,21 +1153,39 @@ fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
                 .count()
                 >= 12
     }) else {
-        return false;
+        return None;
     };
-    let Some(final_response) = brief.excerpts[user_index + 1..]
+    let goal = &brief.excerpts[user_index];
+    let response = brief.excerpts[user_index + 1..]
         .iter()
         .rev()
-        .find(|excerpt| excerpt.role == ContextRole::Assistant)
-    else {
+        .find(|excerpt| {
+            excerpt.role == ContextRole::Assistant
+                && excerpt.session_id == goal.session_id
+                && excerpt.provider == goal.provider
+        });
+    Some((goal, response))
+}
+
+fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
+    let Some((_, Some(final_response))) = latest_goal_and_response(brief) else {
         return false;
     };
     let normalized = final_response.text.to_lowercase();
     let incomplete = [
         "not complete",
         "not completed",
+        "not implemented",
+        "not generated",
+        "not verified",
+        "not passed",
+        "not fully",
+        "has not passed",
+        "have not passed",
         "couldn't",
         "could not",
+        "wasn't",
+        "isn't",
         "failed",
         "blocked",
         "remaining",
@@ -1166,6 +1197,11 @@ fn latest_goal_is_reported_complete(brief: &ProjectContextBrief) -> bool {
         "막혔",
         "남았",
         "추가 작업",
+        "구현하지 못",
+        "생성하지 못",
+        "검증하지 못",
+        "확인하지 못",
+        "통과하지 못",
     ]
     .iter()
     .any(|marker| normalized.contains(marker));
@@ -1195,15 +1231,23 @@ fn latest_completion_has_task_evidence(
     brief: &ProjectContextBrief,
     kind: OvernightTaskKind,
 ) -> bool {
-    let Some(response) = brief
-        .excerpts
-        .iter()
-        .rev()
-        .find(|excerpt| excerpt.role == ContextRole::Assistant)
-    else {
+    let Some((_, Some(response))) = latest_goal_and_response(brief) else {
         return false;
     };
     let normalized = response.text.to_lowercase();
+    if contains_any(
+        &normalized,
+        &[
+            "not verified",
+            "could not verify",
+            "wasn't verified",
+            "검증하지 못",
+            "확인하지 못",
+            "손상 여부 미확인",
+        ],
+    ) {
+        return false;
+    }
     match kind {
         OvernightTaskKind::AssetGeneration => {
             let checks = [
@@ -1223,6 +1267,82 @@ fn latest_completion_has_task_evidence(
             &normalized,
             &["verified", "validation", "검증", "완료 증거"],
         ),
+    }
+}
+
+fn assess_open_work(
+    failed: bool,
+    brief: Option<&ProjectContextBrief>,
+    title: &str,
+    status: SessionStatus,
+) -> OpenWorkEvidence {
+    if failed {
+        return OpenWorkEvidence::RetryableFailure;
+    }
+    if let Some(brief) = brief {
+        if let Some((goal, response)) = latest_goal_and_response(brief) {
+            let request = goal.text.to_lowercase();
+            if contains_any(
+                &request,
+                &[
+                    "overnight",
+                    "while i sleep",
+                    "by morning",
+                    "continue later",
+                    "오늘 밤",
+                    "자는 동안",
+                    "아침까지",
+                    "나중에 계속",
+                ],
+            ) {
+                return OpenWorkEvidence::ExplicitDeferral;
+            }
+            if response.is_some() {
+                return OpenWorkEvidence::IncompleteHandoff;
+            }
+            return OpenWorkEvidence::PendingUserRequest;
+        }
+    }
+    if status == SessionStatus::Unknown {
+        return OpenWorkEvidence::Ambiguous;
+    }
+    let normalized_title = title.to_lowercase();
+    if contains_any(
+        &normalized_title,
+        &[
+            "continue",
+            "resume",
+            "overnight",
+            "next milestone",
+            "remaining work",
+            "계속",
+            "이어서",
+            "재개",
+            "오늘 밤",
+            "남은 작업",
+        ],
+    ) {
+        OpenWorkEvidence::ExplicitDeferral
+    } else {
+        OpenWorkEvidence::Ambiguous
+    }
+}
+
+fn open_work_evidence_label(evidence: OpenWorkEvidence) -> &'static str {
+    match evidence {
+        OpenWorkEvidence::ExplicitDeferral => "명시적인 계속·야간 인계",
+        OpenWorkEvidence::RetryableFailure => "재시도 가능한 실패",
+        OpenWorkEvidence::PendingUserRequest => "최근 사용자 요청 뒤 완료 응답 없음",
+        OpenWorkEvidence::IncompleteHandoff => "최근 응답 뒤 구체적인 작업이 남음",
+        OpenWorkEvidence::Ambiguous => "확인되지 않음",
+    }
+}
+
+fn estimate_confidence_label(confidence: EstimateConfidence) -> &'static str {
+    match confidence {
+        EstimateConfidence::High => "높음",
+        EstimateConfidence::Medium => "중간",
+        EstimateConfidence::Low => "낮음",
     }
 }
 
@@ -1284,19 +1404,34 @@ fn promote_short_batches(
         let proof_exists = group
             .first()
             .is_some_and(|item| completed_patterns.contains(&item.proof_key));
-        let unique_targets = group
+        let batch_workspace = group
+            .first()
+            .map(|item| workspace_root(&item.candidate.cwd))
+            .unwrap_or_default();
+        let manifest_targets = group
             .iter()
-            .map(|item| item.target.as_str())
-            .collect::<BTreeSet<_>>()
-            .len()
-            == item_count;
-        let exact_manifest = group
-            .iter()
-            .enumerate()
-            .map(|(index, item)| format!("{}. {}", index + 1, item.target.trim()))
-            .collect::<Vec<_>>()
-            .join(" | ");
-        let manifest_fits_contract = exact_manifest.chars().count() <= 560;
+            .map(|item| {
+                worktree_relative_target(&item.candidate.cwd, &item.target, &batch_workspace)
+            })
+            .collect::<Option<Vec<_>>>();
+        let unique_targets = manifest_targets
+            .as_ref()
+            .is_some_and(|targets| targets.iter().collect::<BTreeSet<_>>().len() == item_count);
+        let exact_manifest = manifest_targets
+            .as_ref()
+            .map(|targets| {
+                group
+                    .iter()
+                    .zip(targets)
+                    .enumerate()
+                    .map(|(index, (item, target))| {
+                        format!("{}. {} <= {}", index + 1, target, item.objective.trim())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+        let manifest_fits_contract = exact_manifest.chars().count() <= 620;
         let batch_route = group
             .first()
             .and_then(|item| route_for_new_batch(item.candidate.provider, route_inventory));
@@ -1327,9 +1462,6 @@ fn promote_short_batches(
 
         let kind = group[0].task.kind;
         let mut batch = group.remove(0).candidate;
-        let source_projects = std::iter::once(batch.project.clone())
-            .chain(group.iter().map(|item| item.candidate.project.clone()))
-            .collect::<Vec<_>>();
         let mut source_session_ids = batch.source_session_ids.clone();
         source_session_ids.extend(
             group
@@ -1339,13 +1471,8 @@ fn promote_short_batches(
         source_session_ids.sort();
         source_session_ids.dedup();
 
-        batch.project = format!(
-            "{}개 {} 배치 · {}",
-            item_count,
-            task_kind_label(kind),
-            source_projects.join(", ")
-        );
-        batch.cwd = workspace_root(&batch.cwd);
+        batch.project = format!("{item_count}개 {} 배치", task_kind_label(kind));
+        batch.cwd = batch_workspace;
         batch.goal = format!(
             "고정된 {item_count}개 대상 manifest만 처리하고 항목별 결과를 남길 것: {exact_manifest}"
         );
@@ -1359,10 +1486,25 @@ fn promote_short_batches(
             batch.route_reason =
                 "여러 짧은 작업을 하나의 고정 manifest로 실행할 수 있는 새 작업 경로입니다."
                     .to_owned();
+            batch.provider_reason = format!(
+                "{} 모델의 검증된 반복 배치를 {} 실행 경로에서 새 세션으로 시작합니다.",
+                provider_display_name(batch.provider),
+                provider_display_name(route.surface)
+            );
+            batch
+                .risks
+                .retain(|risk| !risk.starts_with("실행 경로 제약:"));
+            batch.risks.extend(
+                route
+                    .limitations
+                    .iter()
+                    .take(3)
+                    .map(|limitation| format!("실행 경로 제약: {limitation}")),
+            );
         }
         batch.source_session_ids = source_session_ids;
         batch.estimated_hours = upper_bound_hours;
-        batch.score = (batch.score + 5.0).min(95.0);
+        batch.score = batch_fit_score(expected_hours, &batch.goal);
         let (expected_outcome, mut verification) = task_contract(kind);
         batch.expected_outcome = format!("{item_count}개 고정 배치: {expected_outcome}");
         verification.insert(
@@ -1406,6 +1548,54 @@ fn workspace_root(cwd: &str) -> String {
         .or_else(|| identity.strip_prefix("path:"))
         .unwrap_or(cwd)
         .to_owned()
+}
+
+fn worktree_relative_target(cwd: &str, target: &str, root: &str) -> Option<String> {
+    let base = std::path::Path::new(cwd)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(cwd));
+    let target = std::path::Path::new(target);
+    if target.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+        )
+    }) {
+        return None;
+    }
+    let full_path = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        base.join(target)
+    };
+    let relative = full_path.strip_prefix(root).ok()?;
+    if relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    relative.to_str().map(str::to_owned)
+}
+
+fn batch_fit_score(expected_hours: f64, goal: &str) -> f64 {
+    let leverage = 20.0 + ((expected_hours - 1.0).max(0.0) / 3.0).min(1.0) * 15.0;
+    let priority = contains_any(
+        &goal.to_lowercase(),
+        &[
+            "overnight",
+            "while i sleep",
+            "by morning",
+            "deadline",
+            "오늘 밤",
+            "자는 동안",
+            "아침까지",
+            "마감",
+        ],
+    )
+    .then_some(10.0)
+    .unwrap_or_default();
+    round_one(18.0 + 20.0 + leverage + priority + 5.0 + 3.0)
 }
 
 fn short_batch_exclusion_reason(
@@ -1466,35 +1656,53 @@ fn task_target(goal: &str, kind: OvernightTaskKind) -> String {
 
 fn assess_task(goal: &str) -> TaskAssessment {
     let normalized = goal.to_lowercase();
-    let item_count = requested_item_count(&normalized).unwrap_or(1).clamp(1, 100) as f64;
-    let asset_generation = [
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".gif",
-        ".svg",
-        "photorealistic",
-        "cinematic photograph",
-        "generate one image",
-        " png ",
-        " jpeg ",
-        " jpg ",
-        " images ",
-        "이미지 생성",
-        "사진 생성",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker));
-    if asset_generation {
-        return TaskAssessment {
-            kind: OvernightTaskKind::AssetGeneration,
-            expected_hours: round_one(item_count * 0.1).max(0.1),
-            upper_bound_hours: ceil_quarter(item_count * 0.25).max(0.25),
-        };
+    let requested_count = requested_item_count(&normalized);
+    let item_count = requested_count.unwrap_or(1).clamp(1, 100) as f64;
+    let asset_format = contains_any(
+        &normalized,
+        &[
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif",
+            ".svg",
+            " png ",
+            " jpeg ",
+            " jpg ",
+            " images ",
+            "image ",
+            "이미지",
+            "사진",
+        ],
+    );
+    let asset_action = contains_any(
+        &normalized,
+        &[
+            "generate",
+            "create image",
+            "render ",
+            "photorealistic",
+            "cinematic photograph",
+            "이미지 생성",
+            "사진 생성",
+            "이미지를 만들어",
+        ],
+    );
+    if asset_format && asset_action {
+        return assessment(
+            OvernightTaskKind::AssetGeneration,
+            round_one(item_count * 0.1).max(0.1),
+            ceil_quarter(item_count * 0.25).max(0.25),
+            EstimateConfidence::High,
+            vec![
+                format!("명시된 이미지 대상 {}개", item_count as usize),
+                "항목당 생성·파일 검증 시간".to_owned(),
+            ],
+        );
     }
 
-    let (kind, expected_hours, upper_bound_hours) = if contains_any(
+    if contains_any(
         &normalized,
         &[
             "fix failing test",
@@ -1505,7 +1713,13 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "실패하는 테스트",
         ],
     ) {
-        (OvernightTaskKind::TestRepair, 1.0, 2.0)
+        return assessment(
+            OvernightTaskKind::TestRepair,
+            1.0,
+            2.0,
+            EstimateConfidence::Medium,
+            vec!["실패 재현·수정·집중 회귀 검증".to_owned()],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1518,11 +1732,21 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "변환",
         ],
     ) {
-        (
+        return assessment(
             OvernightTaskKind::MigrationOrTransform,
             (item_count * 0.15).max(1.5),
             (item_count * 0.3).max(3.0),
-        )
+            if requested_count.is_some() {
+                EstimateConfidence::High
+            } else {
+                EstimateConfidence::Medium
+            },
+            vec![if let Some(count) = requested_count {
+                format!("명시된 변환 대상 {count}개")
+            } else {
+                "대상 수가 없는 마이그레이션 범위".to_owned()
+            }],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1538,7 +1762,13 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "분석",
         ],
     ) {
-        (OvernightTaskKind::ResearchOrAudit, 2.0, 3.0)
+        return assessment(
+            OvernightTaskKind::ResearchOrAudit,
+            2.0,
+            3.0,
+            EstimateConfidence::Medium,
+            vec!["출처 조사·범위 확인·문서 산출물".to_owned()],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1552,7 +1782,13 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "평가",
         ],
     ) {
-        (OvernightTaskKind::ExperimentOrBenchmark, 2.0, 4.0)
+        return assessment(
+            OvernightTaskKind::ExperimentOrBenchmark,
+            2.0,
+            4.0,
+            EstimateConfidence::Medium,
+            vec!["실험 실행·로그·재현 평가".to_owned()],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1565,7 +1801,13 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "패키지 업데이트",
         ],
     ) {
-        (OvernightTaskKind::DependencyMaintenance, 1.0, 2.0)
+        return assessment(
+            OvernightTaskKind::DependencyMaintenance,
+            1.0,
+            2.0,
+            EstimateConfidence::Medium,
+            vec!["버전 조사·호환성 검증".to_owned()],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1577,7 +1819,13 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "운영 오류",
         ],
     ) {
-        (OvernightTaskKind::IncidentRepair, 1.0, 2.0)
+        return assessment(
+            OvernightTaskKind::IncidentRepair,
+            1.0,
+            2.0,
+            EstimateConfidence::Low,
+            vec!["장애 재현·제한된 수정·회귀 검증".to_owned()],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1589,7 +1837,13 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "가이드",
         ],
     ) {
-        (OvernightTaskKind::Documentation, 0.75, 1.25)
+        return assessment(
+            OvernightTaskKind::Documentation,
+            0.75,
+            1.25,
+            EstimateConfidence::Low,
+            vec!["단일 문서·링크 검증 기본값".to_owned()],
+        );
     } else if contains_any(
         &normalized,
         &[
@@ -1613,14 +1867,100 @@ fn assess_task(goal: &str) -> TaskAssessment {
             "수정",
         ],
     ) {
-        (OvernightTaskKind::CodeChange, 1.5, 2.0)
-    } else {
-        (OvernightTaskKind::Unknown, 0.0, 0.0)
-    };
+        let small_scope = contains_any(
+            &normalized,
+            &[
+                "one typo",
+                "single typo",
+                "one-line",
+                "one line",
+                "rename one",
+                "quick fix",
+                "copy change",
+                "오타",
+                "한 줄",
+                "문구 수정",
+            ],
+        );
+        if small_scope {
+            return assessment(
+                OvernightTaskKind::CodeChange,
+                0.25,
+                0.75,
+                EstimateConfidence::High,
+                vec!["명시된 단일 소규모 코드 변경".to_owned()],
+            );
+        }
+        if let Some(count) = requested_count.filter(|count| *count > 1) {
+            return assessment(
+                OvernightTaskKind::CodeChange,
+                (count as f64 * 0.2).max(1.0),
+                ceil_quarter(count as f64 * 0.4).max(1.5),
+                EstimateConfidence::Medium,
+                vec![
+                    format!("명시된 코드 대상 {count}개"),
+                    "집중 검증".to_owned(),
+                ],
+            );
+        }
+        let substantial_scope = contains_any(
+            &normalized,
+            &[
+                "implementation",
+                "refactor",
+                "module",
+                "feature",
+                "integration",
+                "regression test",
+                "focused test",
+                "test passes",
+                "tests pass",
+                "구현",
+                "리팩터",
+                "모듈",
+                "기능",
+                "회귀 테스트",
+            ],
+        );
+        if substantial_scope {
+            return assessment(
+                OvernightTaskKind::CodeChange,
+                1.25,
+                2.0,
+                EstimateConfidence::Medium,
+                vec!["경계가 명시된 코드 범위".to_owned(), "집중 검증".to_owned()],
+            );
+        }
+        return assessment(
+            OvernightTaskKind::CodeChange,
+            0.5,
+            1.25,
+            EstimateConfidence::Low,
+            vec!["파일·항목 수가 없는 코드 변경 fallback".to_owned()],
+        );
+    }
+    assessment(
+        OvernightTaskKind::Unknown,
+        0.0,
+        0.0,
+        EstimateConfidence::Low,
+        vec!["분류 가능한 산출물·검증 단서 없음".to_owned()],
+    )
+}
+
+fn assessment(
+    kind: OvernightTaskKind,
+    expected_hours: f64,
+    upper_bound_hours: f64,
+    estimate_confidence: EstimateConfidence,
+    estimate_basis: Vec<String>,
+) -> TaskAssessment {
     TaskAssessment {
         kind,
-        expected_hours: ceil_quarter(expected_hours),
+        expected_hours: round_one(expected_hours),
         upper_bound_hours: ceil_quarter(upper_bound_hours),
+        estimate_confidence,
+        estimate_basis,
     }
 }
 
@@ -1660,17 +2000,15 @@ fn contains_any(value: &str, markers: &[&str]) -> bool {
 
 fn overnight_fit_score(
     task: &TaskAssessment,
-    failed: bool,
-    has_context_goal: bool,
+    open_work: OpenWorkEvidence,
     goal: &str,
     latest_age_hours: f64,
 ) -> f64 {
-    let open_work = if failed {
-        20.0
-    } else if has_context_goal {
-        18.0
-    } else {
-        14.0
+    let open_work_score = match open_work {
+        OpenWorkEvidence::ExplicitDeferral | OpenWorkEvidence::RetryableFailure => 20.0,
+        OpenWorkEvidence::PendingUserRequest => 18.0,
+        OpenWorkEvidence::IncompleteHandoff => 17.0,
+        OpenWorkEvidence::Ambiguous => 0.0,
     };
     let unattended_safety = 20.0;
     let leverage = 20.0 + ((task.expected_hours - 1.0).max(0.0) / 3.0).min(1.0) * 15.0;
@@ -1695,7 +2033,7 @@ fn overnight_fit_score(
     let freshness_tiebreaker = (5.0 - latest_age_hours.min(24.0) * (5.0 / 24.0)).max(0.0);
     let implemented_verifier = 5.0;
     round_one(
-        open_work
+        open_work_score
             + unattended_safety
             + leverage
             + priority
@@ -2489,7 +2827,7 @@ mod tests {
                 Provider::Codex,
                 "alpha-new",
                 "alpha",
-                "Overnight recommendation",
+                "Continue overnight recommendation module implementation with focused tests",
                 SessionStatus::Idle,
                 "2026-07-24T21:30:00Z",
             ),
@@ -2735,7 +3073,7 @@ mod tests {
                 Provider::Grok,
                 "reset-session",
                 "alpha",
-                "Continue after quota reset",
+                "Continue substantial module implementation after quota reset",
                 SessionStatus::Idle,
                 "2026-07-24T21:30:00Z",
             )]),
@@ -2898,7 +3236,7 @@ mod tests {
                     Provider::Codex,
                     project,
                     project,
-                    "Continue work",
+                    "Continue module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 )
@@ -2935,7 +3273,7 @@ mod tests {
                     Provider::Codex,
                     project,
                     project,
-                    "Continue work",
+                    "Continue module implementation with focused tests",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 )
@@ -2970,6 +3308,86 @@ mod tests {
     }
 
     #[test]
+    fn an_oversized_top_candidate_does_not_displace_lower_ranked_work_that_fits() {
+        let sessions = vec![
+            session(
+                Provider::Codex,
+                "large-assets",
+                "large-assets",
+                "Generate 20 PNG images",
+                SessionStatus::Idle,
+                "2026-07-24T21:40:00Z",
+            ),
+            session(
+                Provider::Codex,
+                "fitting-code",
+                "fitting-code",
+                "Continue the parser module implementation with focused tests",
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            ),
+        ];
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![
+                ProjectContextBrief {
+                    project: "large-assets".to_owned(),
+                    workspace: Some("/work/large-assets".to_owned()),
+                    session_ids: vec!["codex:large-assets".to_owned()],
+                    providers: vec![Provider::Codex],
+                    excerpts: vec![ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:large-assets".to_owned(),
+                        role: ContextRole::User,
+                        text: "Generate 20 PNG images listed in the exact local manifest."
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:40:00Z".to_owned()),
+                    }],
+                    excerpt_count: 1,
+                    truncated: false,
+                },
+                ProjectContextBrief {
+                    project: "fitting-code".to_owned(),
+                    workspace: Some("/work/fitting-code".to_owned()),
+                    session_ids: vec!["codex:fitting-code".to_owned()],
+                    providers: vec![Provider::Codex],
+                    excerpts: vec![ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:fitting-code".to_owned(),
+                        role: ContextRole::User,
+                        text: "Continue the parser module implementation with focused tests."
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+                    }],
+                    excerpt_count: 1,
+                    truncated: false,
+                },
+            ],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot(sessions),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(2.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].project, "fitting-code");
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == "large-assets"));
+    }
+
+    #[test]
     fn independent_capacity_pools_start_in_parallel() {
         let plan = build_overnight_plan(
             &snapshot(vec![
@@ -2977,7 +3395,7 @@ mod tests {
                     Provider::Claude,
                     "alpha",
                     "alpha",
-                    "Implement the bounded Claude module change",
+                    "Continue the bounded Claude module implementation",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -2985,7 +3403,7 @@ mod tests {
                     Provider::Codex,
                     "beta",
                     "beta",
-                    "Implement the bounded Codex module change",
+                    "Continue the bounded Codex module implementation",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -2993,7 +3411,7 @@ mod tests {
                     Provider::Grok,
                     "gamma",
                     "gamma",
-                    "Implement the bounded Grok module change",
+                    "Continue the bounded Grok module implementation",
                     SessionStatus::Idle,
                     "2026-07-24T21:30:00Z",
                 ),
@@ -3027,7 +3445,7 @@ mod tests {
             Provider::Claude,
             "alpha",
             "alpha",
-            "Implement the bounded Claude module change",
+            "Continue the bounded Claude module implementation",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         );
@@ -3042,7 +3460,7 @@ mod tests {
             Provider::Codex,
             "beta",
             "beta",
-            "Implement the bounded Codex module change",
+            "Continue the bounded Codex module implementation",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         );
@@ -3553,12 +3971,162 @@ mod tests {
     }
 
     #[test]
+    fn a_small_code_edit_does_not_become_overnight_work_from_its_task_label() {
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "typo".to_owned(),
+                workspace: Some("/work/typo".to_owned()),
+                session_ids: vec!["codex:typo".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:typo".to_owned(),
+                    role: ContextRole::User,
+                    text: "Fix one typo in the parser error message and run its focused test."
+                        .to_owned(),
+                    timestamp: Some("2026-07-24T21:31:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "typo",
+                "typo",
+                "Fix one typo",
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            )]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("짧은 단일 작업")));
+    }
+
+    #[test]
+    fn png_input_validation_is_a_code_change_not_asset_generation() {
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "upload".to_owned(),
+                workspace: Some("/work/upload".to_owned()),
+                session_ids: vec!["codex:upload".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:upload".to_owned(),
+                    role: ContextRole::User,
+                    text: "Continue the .png file validation module refactor and run focused regression tests."
+                        .to_owned(),
+                    timestamp: Some("2026-07-24T21:31:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "upload",
+                "upload",
+                "Continue file validation",
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            )]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert!(plan.candidates[0]
+            .verification
+            .iter()
+            .any(|item| item.contains("집중 테스트")));
+        assert!(plan.candidates[0]
+            .verification
+            .iter()
+            .all(|item| !item.contains("MIME") && !item.contains("손상")));
+    }
+
+    #[test]
+    fn four_short_assets_still_require_a_proven_batch_pattern() {
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "four-assets".to_owned(),
+                workspace: Some("/work/four-assets".to_owned()),
+                session_ids: vec!["codex:four-assets".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:four-assets".to_owned(),
+                    role: ContextRole::User,
+                    text: "Generate 4 PNG images listed in the exact local manifest.".to_owned(),
+                    timestamp: Some("2026-07-24T21:31:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "four-assets",
+                "four-assets",
+                "Generate 4 PNG images",
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            )]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("짧은 단일 작업")));
+    }
+
+    #[test]
     fn spare_provider_capacity_does_not_inflate_task_value() {
         let snapshot = snapshot(vec![session(
             Provider::Codex,
             "same-work",
             "alpha",
-            "Implement the bounded parser refactor and focused regression tests",
+            "Continue the bounded parser refactor and focused regression tests",
             SessionStatus::Idle,
             "2026-07-24T21:30:00Z",
         )]);
@@ -3608,7 +4176,32 @@ mod tests {
         assert!(plan
             .exclusions
             .iter()
-            .any(|item| item.reason.contains("작업 유형") && item.reason.contains("검증")));
+            .any(|item| item.reason.contains("열린 작업") && item.reason.contains("근거")));
+    }
+
+    #[test]
+    fn a_known_task_shape_without_open_work_evidence_fails_closed() {
+        let plan = build_overnight_plan(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "ambiguous-code",
+                "alpha",
+                "Implement the parser refactor and focused tests",
+                SessionStatus::Idle,
+                "2026-07-24T21:59:00Z",
+            )]),
+            vec![budget(Provider::Codex, 0.0)],
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("열린 작업") && item.reason.contains("근거")));
     }
 
     #[test]
@@ -3621,7 +4214,7 @@ mod tests {
             let native_id = format!("asset-session-{index}");
             let directory = repository.path().join(format!("assets/{index}"));
             std::fs::create_dir_all(&directory).expect("asset directory");
-            let goal = format!("Generate one PNG image and save it as exact target-{index}.png");
+            let goal = format!("Generate card.png scene {index}");
             let mut item = session(
                 Provider::Codex,
                 &native_id,
@@ -3683,6 +4276,10 @@ mod tests {
         let batch = &plan.candidates[0];
         assert!(batch.project.contains("10개"));
         assert!(batch.goal.contains("고정된 10개 대상 manifest"));
+        assert!(batch.goal.contains("assets/1/card.png"));
+        assert!(batch.goal.contains("assets/10/card.png"));
+        assert!(batch.goal.contains("Generate card.png scene 1"));
+        assert!(batch.goal.contains("Generate card.png scene 10"));
         assert_eq!(batch.source_session_ids.len(), 10);
         assert_eq!(batch.estimated_hours, 2.5);
         assert_eq!(
@@ -3764,6 +4361,198 @@ mod tests {
             .exclusions
             .iter()
             .any(|item| item.project == project && item.reason.contains("이미 완료")));
+    }
+
+    #[test]
+    fn a_latest_completion_wins_over_an_older_failed_session() {
+        let project = "completed-after-failure";
+        let goal = "Continue the authentication refactor and focused regression tests";
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: project.to_owned(),
+                workspace: Some(format!("/work/{project}")),
+                session_ids: vec!["codex:latest".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:latest".to_owned(),
+                        role: ContextRole::User,
+                        text: goal.to_owned(),
+                        timestamp: Some("2026-07-24T21:20:00Z".to_owned()),
+                    },
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:latest".to_owned(),
+                        role: ContextRole::Assistant,
+                        text: "Completed the refactor. The focused regression tests pass."
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:40:00Z".to_owned()),
+                    },
+                ],
+                excerpt_count: 2,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![
+                session(
+                    Provider::Codex,
+                    "latest",
+                    project,
+                    goal,
+                    SessionStatus::Idle,
+                    "2026-07-24T21:40:00Z",
+                ),
+                session(
+                    Provider::Codex,
+                    "old-failure",
+                    project,
+                    goal,
+                    SessionStatus::Failed,
+                    "2026-07-24T18:00:00Z",
+                ),
+            ]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert!(plan.candidates.is_empty());
+        assert!(plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == project && item.reason.contains("이미 완료")));
+    }
+
+    #[test]
+    fn completion_from_another_session_cannot_close_the_latest_request() {
+        let project = "interleaved";
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: project.to_owned(),
+                workspace: Some(format!("/work/{project}")),
+                session_ids: vec!["codex:open".to_owned(), "claude:other".to_owned()],
+                providers: vec![Provider::Codex, Provider::Claude],
+                excerpts: vec![
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:open".to_owned(),
+                        role: ContextRole::User,
+                        text: "Continue the parser module refactor and focused regression tests"
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+                    },
+                    ContextExcerpt {
+                        provider: Provider::Claude,
+                        session_id: "claude:other".to_owned(),
+                        role: ContextRole::Assistant,
+                        text: "Completed the refactor. The focused regression tests pass."
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
+                    },
+                ],
+                excerpt_count: 2,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "open",
+                project,
+                "Continue parser implementation",
+                SessionStatus::Idle,
+                "2026-07-24T21:30:00Z",
+            )]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert!(!plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("이미 완료")));
+    }
+
+    #[test]
+    fn negated_completion_language_does_not_close_open_work() {
+        let project = "not-completed";
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: project.to_owned(),
+                workspace: Some(format!("/work/{project}")),
+                session_ids: vec!["codex:open".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:open".to_owned(),
+                        role: ContextRole::User,
+                        text: "Continue the parser module refactor and focused regression tests"
+                            .to_owned(),
+                        timestamp: Some("2026-07-24T21:30:00Z".to_owned()),
+                    },
+                    ContextExcerpt {
+                        provider: Provider::Codex,
+                        session_id: "codex:open".to_owned(),
+                        role: ContextRole::Assistant,
+                        text: "Not implemented yet; the focused tests have not passed.".to_owned(),
+                        timestamp: Some("2026-07-24T21:35:00Z".to_owned()),
+                    },
+                ],
+                excerpt_count: 2,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot(vec![session(
+                Provider::Codex,
+                "open",
+                project,
+                "Continue parser implementation",
+                SessionStatus::Idle,
+                "2026-07-24T21:35:00Z",
+            )]),
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert!(!plan
+            .exclusions
+            .iter()
+            .any(|item| item.reason.contains("이미 완료")));
     }
 
     fn temporary_repository() -> tempfile::TempDir {
