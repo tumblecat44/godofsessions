@@ -13,4 +13,11 @@ Participants must:
 
 Unacceptable behavior may be removed from project spaces. Report conduct
 concerns privately through the maintainer contact method in the repository
-profile rather than escalating them in a public issue.
+profile rather than escalating them in a public issue. If no private contact
+method is visible, open a content-free support issue asking a maintainer to
+establish private contact; do not include the conduct report itself.
+
+Maintainers will keep reports confidential to the extent practical, review
+conflicts of interest before handling a report, and may remove content, close
+threads, restrict participation, or ban participants when necessary to protect
+the community. Retaliation against a good-faith reporter is prohibited.

@@ -2,6 +2,7 @@
   "name": "god-of-sessions-promo-video",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "studio": "remotion studio src/index.ts",

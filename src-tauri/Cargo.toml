@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A local-first attention inbox for native AI coding sessions"
 authors = ["God of Sessions"]
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "god_of_sessions_lib"

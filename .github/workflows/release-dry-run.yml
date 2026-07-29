@@ -1,0 +1,48 @@
+name: Release dry run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-bundle:
+    name: Unsigned macOS bundle
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Test the boundary scanner
+        run: node --test scripts/verify-public-boundary.test.mjs
+      - name: Scan tracked public source
+        if: github.event.repository.private == false
+        run: node scripts/verify-public-boundary.mjs --tracked
+      - name: Scan tracked internal source
+        if: github.event.repository.private
+        run: node scripts/verify-public-boundary.mjs --tracked --internal-checkout
+      - name: Run project checks
+        run: npm run check
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Lint Rust targets
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Build unsigned local bundle
+        run: npm run tauri build
+
+      # This workflow deliberately does not sign, notarize, upload, tag, or
+      # publish. Release credentials are never available to pull requests.
