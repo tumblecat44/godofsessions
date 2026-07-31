@@ -12,6 +12,7 @@ mod control_board;
 mod dispatch;
 mod execution_routes;
 mod grok_dispatch;
+mod hermes_runtime;
 mod host_readiness;
 mod model;
 mod morrow_watch;

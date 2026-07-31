@@ -68,23 +68,25 @@ const planTierOptions: Record<
 const previewProviders: ChatProviderOption[] = [
   {
     provider: "codex_subscription",
-    label: "Codex subscription",
-    route_label: "ChatGPT Codex app-server",
+    label: "Codex via Hermes",
+    route_label: "Hermes Agent → openai-codex app-server runtime",
     available: true,
     authenticated: true,
     plan: "Plus",
-    tool_mode: "Dynamic tools",
-    message: "Official Codex subscription login verified.",
+    tool_mode: "Hermes loop · bounded God evidence",
+    message: "Hermes owns the loop; Codex owns its subscription login.",
   },
   {
     provider: "claude_subscription",
-    label: "Claude subscription",
-    route_label: "Claude Code CLI",
-    available: true,
+    label: "Claude via Hermes",
+    route_label:
+      "Hermes Agent → blocked until an official Claude Code execution adapter exists",
+    available: false,
     authenticated: true,
     plan: "Max",
-    tool_mode: "Context briefing",
-    message: "Official Claude subscription login verified.",
+    tool_mode: "Hermes loop · bounded God evidence",
+    message:
+      "Claude login is present, but this route stays blocked until Hermes can execute through an official Claude Code adapter.",
   },
 ];
 
@@ -418,7 +420,7 @@ export function SettingsView({
             ? `공식 실행기 상태 확인에 실패했습니다: ${providerError}`
             : `The official runner check failed: ${providerError}`,
         }
-      : !currentProvider.available || !currentProvider.authenticated
+      : !currentProvider.authenticated
         ? {
             kind: "error",
             title: ko
@@ -428,6 +430,14 @@ export function SettingsView({
               ? "위의 구독 연결을 완료한 뒤 다시 확인하세요. 연결 전에는 이 판단 모델을 사용할 수 없습니다."
               : "Finish the subscription connection above, then recheck. This advisor cannot run until it is authenticated.",
           }
+        : !currentProvider.available
+          ? {
+              kind: "error",
+              title: ko
+                ? "Hermes 모델 경로를 사용할 수 없습니다"
+                : "Hermes model route unavailable",
+              detail: currentProvider.message,
+            }
         : loadingModels
           ? {
               kind: "loading",
@@ -495,8 +505,8 @@ export function SettingsView({
               <h2>{ko ? "Morrow 판단 모델" : "Morrow advisor models"}</h2>
               <p>
                 {ko
-                  ? "Codex 또는 Claude 구독으로 대화하고 오늘 밤의 프로젝트 우선순위를 판단합니다."
-                  : "Use your Codex or Claude subscription for chat and overnight project judgment."}
+                  ? "Morrow 대화는 현재 Hermes를 통한 Codex 경로를 사용합니다. Claude 연결은 유지되지만 공식 실행 어댑터가 생길 때까지 Hermes 대화에서는 차단됩니다."
+                  : "Morrow chat currently uses Codex through Hermes. Claude can stay connected, but remains blocked for Hermes chat until an official execution adapter exists."}
               </p>
             </div>
           </div>

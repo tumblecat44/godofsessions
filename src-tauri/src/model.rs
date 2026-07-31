@@ -1051,15 +1051,6 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatRequest {
-    pub provider: ChatProvider,
-    pub messages: Vec<ChatMessage>,
-    pub sleep_hours: Option<f64>,
-    pub language: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatProviderOption {
     pub provider: ChatProvider,
@@ -1134,16 +1125,6 @@ pub struct ChatToolTrace {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff: Option<ChatOvernightHandoff>,
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone, Serialize)]
-pub struct ChatReply {
-    pub provider: ChatProvider,
-    pub route_label: String,
-    pub content: String,
-    pub tools: Vec<ChatToolTrace>,
-    pub suggested_view: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -158,23 +158,25 @@ const previewActionRoutes: ActionRouteOption[] = [
 const previewProviders: ChatProviderOption[] = [
   {
     provider: "codex_subscription",
-    label: "Codex subscription",
-    route_label: "ChatGPT Codex app-server",
+    label: "Codex via Hermes",
+    route_label: "Hermes Agent → openai-codex app-server runtime",
     available: true,
     authenticated: true,
     plan: "Plus",
-    tool_mode: "Dynamic tools",
-    message: "Uses the official Codex subscription login.",
+    tool_mode: "Hermes loop · bounded God evidence",
+    message: "Hermes owns the loop; Codex owns its subscription login.",
   },
   {
     provider: "claude_subscription",
-    label: "Claude subscription",
-    route_label: "Claude Code CLI",
-    available: true,
+    label: "Claude via Hermes",
+    route_label:
+      "Hermes Agent → blocked until an official Claude Code execution adapter exists",
+    available: false,
     authenticated: true,
     plan: "Max",
-    tool_mode: "Context briefing",
-    message: "Uses the official Claude Code subscription login.",
+    tool_mode: "Hermes loop · bounded God evidence",
+    message:
+      "Claude login is present, but this route stays blocked until Hermes can execute through an official Claude Code adapter.",
   },
 ];
 
@@ -303,8 +305,8 @@ function entriesFromConversation(
       content: conversation.session.last_error,
       routeLabel:
         conversation.session.provider === "codex_subscription"
-          ? "ChatGPT Codex app-server"
-          : "Claude Code CLI",
+          ? "Hermes Agent · Codex"
+          : "Hermes Agent · Anthropic",
       error: true,
     });
   }
@@ -1805,6 +1807,10 @@ export function ChatView({
                     ? ko
                       ? "구독 상태를 확인하고 있습니다"
                       : "Checking subscription status"
+                    : currentProvider.authenticated
+                      ? ko
+                        ? "Hermes 모델 경로를 사용할 수 없습니다"
+                        : "Hermes model route unavailable"
                     : ko
                       ? "구독 연결이 필요합니다"
                       : "Subscription connection needed"}
@@ -1827,8 +1833,12 @@ export function ChatView({
                     ? "확인 중"
                     : "Checking"
                   : ko
-                    ? "다시 확인"
-                    : "Check again"}
+                    ? currentProvider.authenticated
+                      ? "설정 확인"
+                      : "공급자 로그인"
+                    : currentProvider.authenticated
+                      ? "Check settings"
+                      : "Sign in to a provider"}
               </button>
             </div>
           )}

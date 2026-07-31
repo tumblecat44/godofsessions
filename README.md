@@ -44,12 +44,16 @@ Route, Capacity Pool, and Night Portfolio lives in [CONTEXT.md](CONTEXT.md).
 
 ## Current phase
 
-The Morrow operator chat slice is working. Codex subscription chat runs through
-the ChatGPT app's bundled Codex app-server with three read-only dynamic tools:
-workspace inspection, session search, and overnight recommendation. Claude
-subscription chat runs through Claude Code and receives the same bounded
-control-plane evidence. The chat cannot dispatch work; overnight requests
-handoff to the existing approval-gated planner. The character's segmented
+The Morrow operator chat slice is working. Morrow's production conversation
+loop now runs through an installed Hermes Agent using its official headless TUI
+Gateway protocol. Hermes owns the session, compaction, retries, agent memory,
+and session recall; God of Sessions supplies bounded workspace and overnight
+evidence and remains authoritative for routes, approval, dispatch, and
+receipts. Codex is the first enabled model/capacity route inside that runtime.
+Claude stays visibly blocked until Hermes can execute through an official
+Claude Code adapter. The chat cannot dispatch work;
+overnight requests hand off to the existing approval-gated planner. The
+character's segmented
 control ring, ink-and-bone palette, and amber/teal state language now form a
 shared visual system across startup, navigation, chat tool traces, and handoff.
 Ordinary conversation is no longer forced into a sleep window; the configured
