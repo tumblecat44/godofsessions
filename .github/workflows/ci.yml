@@ -68,6 +68,11 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Test deployment automation
+        run: |
+          node --test landing/deploy-worker.test.mjs
+          node --test scripts/create-cloudflare-config.test.mjs
+          node --test scripts/verify-release-version.test.mjs
       - name: Run project checks
         run: npm run check
       - name: Check Rust formatting

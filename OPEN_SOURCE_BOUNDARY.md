@@ -10,6 +10,8 @@ same decision consistently.
 The public repository may contain:
 
 - application source code, tests, type definitions, and build configuration;
+- generic CI and release workflow definitions that contain no account-specific
+  identifiers, credentials, or generated runtime configuration;
 - provider adapters that use documented or explicitly supported local runtimes;
 - generic, synthetic fixtures with no personal paths, transcripts, or secrets;
 - architecture decisions, public documentation, and reproducible examples;
@@ -37,7 +39,8 @@ before publication:
 - absolute local paths, usernames, private repository names, and account IDs;
 - live dogfood notes, private evaluation evidence, and internal operator logs;
 - release-account credentials, notarization data, update-server configuration,
-  and other deployment secrets;
+  deployment account identifiers, generated deployment configuration, and
+  other deployment secrets;
 - unreleased business plans, private launch drafts, and third-party material
   whose license does not permit redistribution.
 

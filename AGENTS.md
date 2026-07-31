@@ -15,9 +15,12 @@ cloud service.
 
 - Source code, tests, synthetic fixtures, architecture decisions, and
   redistributable product documentation are public.
+- Generic CI, build, and release workflow definitions are public when they
+  contain no account-specific values or credentials.
 - Credentials, personal provider data, transcripts, local paths, private
-  repositories, unredacted screenshots/logs, dogfood records, and release
-  infrastructure are private.
+  repositories, unredacted screenshots/logs, dogfood records, deployment
+  account identifiers, generated runtime configuration, signing material, and
+  provider-console settings are private.
 - Never commit secrets or copy provider OAuth values into app state, logs,
   fixtures, or docs.
 - Never assume `.gitignore` makes an already tracked file private.

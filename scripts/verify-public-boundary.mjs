@@ -71,6 +71,7 @@ const PRIVATE_PATH_PREFIXES = [
 const PRIVATE_EXACT_PATHS = new Set([
   "docs/launch/install-readiness.md",
   "docs/launch/x-launch-package.md",
+  "wrangler.generated.json",
   "wrangler.jsonc",
 ]);
 

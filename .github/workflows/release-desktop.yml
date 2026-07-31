@@ -1,0 +1,218 @@
+name: Release desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to release
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: Signed and notarized macOS release
+    if: github.event.repository.private == false && vars.DESKTOP_RELEASE_ENABLED == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    environment:
+      name: desktop-release
+      url: ${{ steps.build.outputs.releaseHtmlUrl }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a commit merged to main
+        run: |
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::The release tag must point to a commit merged into main."
+            exit 1
+          fi
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify tag and package versions
+        id: release
+        run: |
+          node scripts/verify-release-version.mjs
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Test release automation
+        run: |
+          node --test scripts/create-cloudflare-config.test.mjs
+          node --test scripts/verify-release-version.test.mjs
+      - name: Scan tracked public source
+        run: node scripts/verify-public-boundary.mjs --tracked
+      - name: Run project checks
+        run: npm run check
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Lint Rust targets
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Install universal macOS Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Check release credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_API_ISSUER \
+            APPLE_API_KEY \
+            APPLE_API_PRIVATE_KEY \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_TEAM_ID
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::$name is not configured in desktop-release."
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          certificate_path="$RUNNER_TEMP/apple-distribution.p12"
+          keychain_path="$RUNNER_TEMP/build.keychain-db"
+          api_key_path="$RUNNER_TEMP/app-store-connect.p8"
+          keychain_password="$(openssl rand -hex 32)"
+
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$api_key_path"
+          chmod 600 "$certificate_path" "$api_key_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          echo "APPLE_API_KEY_PATH=$api_key_path" >> "$GITHUB_ENV"
+      - name: Build signed release draft
+        id: build
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        with:
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: God of Sessions ${{ env.RELEASE_TAG }}
+          releaseDraft: true
+          prerelease: ${{ steps.release.outputs.prerelease }}
+          generateReleaseNotes: true
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          releaseAssetNamePattern: God-of-Sessions_universal[ext]
+          args: --target universal-apple-darwin --bundles dmg
+      - name: Upload SHA-256 checksum
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          artifacts=(
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          )
+          if [[ "${#artifacts[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one universal macOS DMG."
+            exit 1
+          fi
+
+          digest="$(shasum -a 256 "${artifacts[0]}" | awk '{print $1}')"
+          checksum="$RUNNER_TEMP/God-of-Sessions_universal.dmg.sha256"
+          printf '%s  %s\n' \
+            "$digest" \
+            "God-of-Sessions_universal.dmg" \
+            > "$checksum"
+          gh release upload "$RELEASE_TAG" "$checksum" --clobber
+      - name: Verify the complete release remains a draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          releases_json="$(
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100"
+          )"
+          if ! release="$(
+            jq -e --arg tag "$RELEASE_TAG" '
+                map(select(.tag_name == $tag))
+                | if length == 1 then .[0] else empty end
+              ' <<<"$releases_json"
+          )"; then
+            echo "::error::Expected exactly one release for $RELEASE_TAG."
+            exit 1
+          fi
+
+          if [[ "$(jq -r '.draft' <<<"$release")" != "true" ]]; then
+            echo "::error::The release was published before verification."
+            exit 1
+          fi
+
+          for asset in \
+            God-of-Sessions_universal.dmg \
+            God-of-Sessions_universal.dmg.sha256
+          do
+            if ! size="$(
+              jq -er --arg asset "$asset" '
+                .assets[]
+                | select(.name == $asset)
+                | .size
+              ' <<<"$release"
+            )"; then
+              echo "::error::Release asset $asset is missing."
+              exit 1
+            fi
+            if [[ "$size" -le 0 ]]; then
+              echo "::error::Release asset $asset is missing or empty."
+              exit 1
+            fi
+          done
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+          rm -f \
+            "$RUNNER_TEMP/apple-distribution.p12" \
+            "$RUNNER_TEMP/app-store-connect.p8"

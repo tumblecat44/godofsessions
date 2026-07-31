@@ -12,6 +12,9 @@ private/
 .secrets/
 .env
 .env.*
+.wrangler/
+wrangler.jsonc
+wrangler.generated.json
 .serena/
 docs/dogfood/private/
 docs/dogfood/raw/

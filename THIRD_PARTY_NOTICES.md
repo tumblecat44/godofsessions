@@ -46,6 +46,20 @@ application. Anyone running or redistributing that tooling must confirm that
 their use satisfies the current Remotion License. A release audit must not
 describe Remotion itself as MIT-licensed or OSI-approved.
 
+## GitHub Actions build tooling
+
+These Actions run only in GitHub-hosted build or deployment jobs and are not
+bundled into the desktop application:
+
+- [Cloudflare Wrangler Action](https://github.com/cloudflare/wrangler-action),
+  pinned to commit `ebbaa1584979971c8614a24965b4405ff95890e0`
+  (`v4`), Apache License 2.0.
+- [Cloudflare Wrangler CLI](https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler),
+  installed at version `4.116.0` by the deployment Action,
+  MIT OR Apache License 2.0.
+- [Tauri Action](https://github.com/tauri-apps/tauri-action), pinned to commit
+  `1deb371b0cd8bd54025b384f1cd735e725c4060f` (`v1`), MIT License.
+
 ## Adding a component or asset
 
 Before adding a dependency, font, icon, image, audio file, video, or model

@@ -1,0 +1,70 @@
+name: Deploy landing
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-landing.yml"
+      - "landing/**"
+      - "package-lock.json"
+      - "package.json"
+      - "scripts/create-cloudflare-config.mjs"
+      - "scripts/create-cloudflare-config.test.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Cloudflare production
+    if: vars.LANDING_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: landing-production
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Test deployment configuration and landing worker
+        run: |
+          node --test scripts/create-cloudflare-config.test.mjs
+          node --test landing/deploy-worker.test.mjs
+      - name: Scan tracked public source
+        if: github.event.repository.private == false
+        run: node scripts/verify-public-boundary.mjs --tracked
+      - name: Scan tracked internal source
+        if: github.event.repository.private
+        run: node scripts/verify-public-boundary.mjs --tracked --internal-checkout
+      - name: Build landing
+        run: npm run landing:build
+      - name: Create private runtime configuration
+        env:
+          CLOUDFLARE_CONFIG_PATH: ${{ github.workspace }}/wrangler.generated.json
+          CLOUDFLARE_WORKER_NAME: ${{ vars.CLOUDFLARE_WORKER_NAME }}
+          CLOUDFLARE_CUSTOM_DOMAIN: ${{ vars.CLOUDFLARE_CUSTOM_DOMAIN }}
+          MACOS_DOWNLOAD_URL: ${{ vars.MACOS_DOWNLOAD_URL }}
+        run: node scripts/create-cloudflare-config.mjs
+      - name: Deploy Worker and static assets
+        id: deploy
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.116.0"
+          command: deploy --config wrangler.generated.json

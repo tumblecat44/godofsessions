@@ -80,6 +80,9 @@ reporting before accepting users.
 ```sh
 npm ci
 node --test scripts/verify-public-boundary.test.mjs
+node --test landing/deploy-worker.test.mjs
+node --test scripts/create-cloudflare-config.test.mjs
+node --test scripts/verify-release-version.test.mjs
 node scripts/verify-public-boundary.mjs --tracked
 npm run check
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
@@ -135,6 +138,13 @@ review and code-owner approval after a second maintainer is established.
 
 The repository's release dry-run workflow deliberately performs no signing,
 notarization, tagging, or publication.
+
+The production workflows remain disabled until a maintainer configures the
+protected GitHub environments and repository enable variables described in
+[`docs/deployment.md`](deployment.md). A landing deployment may follow a
+relevant merge to `main`; a desktop release requires a protected version tag,
+environment approval, and a separate manual decision to publish the generated
+draft release.
 
 ## 8. Final decision
 

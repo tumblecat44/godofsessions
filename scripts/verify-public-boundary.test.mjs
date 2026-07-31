@@ -73,6 +73,26 @@ test("blocks private-only repository paths", async () => {
   );
 });
 
+test("blocks generated deployment configuration even without credentials", async () => {
+  await withFixture(
+    {
+      "wrangler.generated.json": JSON.stringify({
+        database_id: "synthetic-id",
+      }),
+    },
+    async (root) => {
+      const report = await scanPaths({
+        root,
+        paths: ["wrangler.generated.json"],
+      });
+
+      assert.equal(report.errors.length, 1);
+      assert.equal(report.errors[0].rule, "private-path");
+      assert.equal(report.errors[0].path, "wrangler.generated.json");
+    },
+  );
+});
+
 test("internal mode allows only declared audit exceptions", async () => {
   await withFixture(
     {
