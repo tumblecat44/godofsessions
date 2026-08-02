@@ -394,6 +394,13 @@ impl<'a> From<&'a str> for HermesTaskStatus<'a> {
 
 pub(crate) fn may_have_external_side_effect(title: &str) -> bool {
     let normalized = title.to_lowercase();
+    normalized
+        .split(['.', '!', '?', ';', '\n'])
+        .filter(|clause| contains_external_side_effect_term(clause))
+        .any(|clause| !is_explicit_external_side_effect_prohibition(clause))
+}
+
+fn contains_external_side_effect_term(value: &str) -> bool {
     [
         "보내",
         "전송",
@@ -410,6 +417,7 @@ pub(crate) fn may_have_external_side_effect(title: &str) -> bool {
         "취소",
         "send",
         "email",
+        "push",
         "publish",
         "deploy",
         "delete",
@@ -422,7 +430,94 @@ pub(crate) fn may_have_external_side_effect(title: &str) -> bool {
         "cancel",
     ]
     .iter()
-    .any(|term| normalized.contains(term))
+    .any(|term| value.contains(term))
+}
+
+fn is_explicit_external_side_effect_prohibition(clause: &str) -> bool {
+    let clause = clause.trim();
+    let body = [
+        "do not ",
+        "don't ",
+        "don’t ",
+        "must not ",
+        "mustn't ",
+        "mustn’t ",
+        "never ",
+        "no ",
+    ]
+    .iter()
+    .find_map(|prefix| clause.strip_prefix(prefix))
+    .or_else(|| {
+        [", with no ", " with no ", ", without ", " without "]
+            .iter()
+            .find_map(|marker| {
+                clause
+                    .find(marker)
+                    .map(|index| &clause[index + marker.len()..])
+            })
+    });
+    let Some(body) = body else {
+        return false;
+    };
+
+    let normalized = body
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || character == '\'' || character == '’' {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let allowed = [
+        "action",
+        "actions",
+        "and",
+        "anybody",
+        "anyone",
+        "anything",
+        "cancel",
+        "commit",
+        "commits",
+        "contact",
+        "delete",
+        "deploy",
+        "deployment",
+        "email",
+        "emails",
+        "external",
+        "install",
+        "installs",
+        "invite",
+        "make",
+        "merge",
+        "message",
+        "messages",
+        "network",
+        "nor",
+        "or",
+        "outside",
+        "package",
+        "packages",
+        "payment",
+        "payments",
+        "perform",
+        "publish",
+        "publishing",
+        "purchase",
+        "push",
+        "repo",
+        "repository",
+        "send",
+        "share",
+        "the",
+        "this",
+        "upload",
+        "use",
+    ];
+    let mut tokens = normalized.split_whitespace().peekable();
+    tokens.peek().is_some() && tokens.all(|token| allowed.contains(&token))
 }
 
 fn parse_time(value: &str) -> Option<DateTime<Utc>> {
@@ -838,5 +933,31 @@ mod tests {
             .evidence
             .iter()
             .all(|evidence| !evidence.contains("고객 포털")));
+    }
+
+    #[test]
+    fn an_explicit_external_action_prohibition_is_not_treated_as_an_action_request() {
+        assert!(!may_have_external_side_effect(
+            "Work only in this repository, with no network, commit, push, deploy, publish, installs, or external contact."
+        ));
+        assert!(!may_have_external_side_effect(
+            "Do not send email, deploy, publish, push, or contact anyone."
+        ));
+    }
+
+    #[test]
+    fn a_mixed_or_affirmative_external_action_request_still_fails_closed() {
+        assert!(may_have_external_side_effect(
+            "Do not deploy staging; deploy production."
+        ));
+        assert!(may_have_external_side_effect(
+            "Do not deploy staging, publish production."
+        ));
+        assert!(may_have_external_side_effect(
+            "Implement the fix, then push and deploy it."
+        ));
+        assert!(may_have_external_side_effect(
+            "완성된 안내 메일을 고객에게 보내고 프로덕션에 배포해줘"
+        ));
     }
 }

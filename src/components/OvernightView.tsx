@@ -32,7 +32,10 @@ import {
   relativeTime,
   timeUntil,
 } from "../lib/format";
-import { localizePreviewFixture } from "../lib/preview-localization";
+import {
+  localizeProductText,
+  localizePreviewFixture,
+} from "../lib/preview-localization";
 import {
   previewNightRunDetail,
   previewNightRunHistory,
@@ -101,6 +104,7 @@ function useNightCopy() {
     language,
     ko: language === "ko",
     copy: (ko: string, en: string) => (language === "ko" ? ko : en),
+    productText: (value: string) => localizeProductText(value, language),
   };
 }
 
@@ -118,13 +122,13 @@ function challengeExpired(
 }
 
 function BudgetCard({ budget }: { budget: ResourceBudget }) {
-  const { language, copy } = useNightCopy();
+  const { language, copy, productText } = useNightCopy();
   return (
     <article className={`budget-card budget-card--${budget.state}`}>
       <header>
         <ProviderMark provider={budget.provider} showName />
         <span className="budget-plan">
-          {budget.plan || copy("현재 구독", "Current plan")}
+          {budget.plan ? productText(budget.plan) : copy("현재 구독", "Current plan")}
         </span>
       </header>
 
@@ -133,7 +137,7 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
           {budget.windows.map((window) => (
             <div className="budget-window" key={`${window.label}-${window.resets_at}`}>
               <div>
-                <span>{window.label}</span>
+                <span>{productText(window.label)}</span>
                 <strong>
                   {copy(
                     `${Math.round(remainingPercent(window.used_percent))}% 남음`,
@@ -161,7 +165,7 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
         </div>
       ) : (
         <p className="budget-unavailable">
-          {budget.message ||
+          {(budget.message && productText(budget.message)) ||
             copy(
               "사용량 창을 확인하지 못했습니다.",
               "Usage window could not be verified.",
@@ -179,29 +183,29 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
           <strong>
             {copy(
               `약 ${budget.plan_capacity.equivalent_base_plans_remaining.toFixed(1)}개 ${budget.plan_capacity.base_plan}분`,
-              `≈ ${budget.plan_capacity.equivalent_base_plans_remaining.toFixed(1)}× ${budget.plan_capacity.base_plan} remaining`,
+              `≈ ${budget.plan_capacity.equivalent_base_plans_remaining.toFixed(1)}× ${productText(budget.plan_capacity.base_plan)} remaining`,
             )}
           </strong>
           <small>
             {budget.plan_capacity.scope === "verified_session"
               ? copy(
                   `${budget.plan_capacity.binding_window} 창 · ${budget.plan_capacity.multiplier}× 세션 배수`,
-                  `${budget.plan_capacity.binding_window} window · ${budget.plan_capacity.multiplier}× session multiplier`,
+                  `${productText(budget.plan_capacity.binding_window || "")} window · ${budget.plan_capacity.multiplier}× session multiplier`,
                 )
               : copy(
                   `${budget.plan_capacity.binding_window || "현재"} 창의 요금제 규모 추정 · 작업 수 보장 아님`,
-                  `Plan-size estimate for the ${budget.plan_capacity.binding_window || "current"} window · not a task guarantee`,
+                  `Plan-size estimate for the ${productText(budget.plan_capacity.binding_window || "current")} window · not a task guarantee`,
                 )}
           </small>
         </div>
       )}
 
       {budget.windows.length > 0 && budget.message && (
-        <p className="budget-warning">{budget.message}</p>
+        <p className="budget-warning">{productText(budget.message)}</p>
       )}
 
       <footer>
-        <span>{budget.credits || budget.source_label}</span>
+        <span>{productText(budget.credits || budget.source_label)}</span>
         <span>
           {copy(
             `${relativeTime(budget.observed_at, language)} 관측`,
@@ -214,7 +218,7 @@ function BudgetCard({ budget }: { budget: ResourceBudget }) {
 }
 
 function HostReadinessPanel({ readiness }: { readiness: HostReadiness }) {
-  const { copy } = useNightCopy();
+  const { copy, productText } = useNightCopy();
   const warnings = readiness.checks.filter(
     (check) => check.level === "warning",
   ).length;
@@ -256,7 +260,7 @@ function HostReadinessPanel({ readiness }: { readiness: HostReadiness }) {
             key={check.key}
           >
             <header>
-              <strong>{check.label}</strong>
+              <strong>{productText(check.label)}</strong>
               <span>
                 {check.level === "pass"
                   ? copy("확인", "Pass")
@@ -265,8 +269,8 @@ function HostReadinessPanel({ readiness }: { readiness: HostReadiness }) {
                     : copy("직접 확인", "Manual")}
               </span>
             </header>
-            <p>{check.message}</p>
-            {check.action && <small>{check.action}</small>}
+            <p>{productText(check.message)}</p>
+            {check.action && <small>{productText(check.action)}</small>}
           </article>
         ))}
       </div>
@@ -387,7 +391,7 @@ function readyPortfolioPreflightsForPlan(plan: OvernightPlan) {
 }
 
 function RouteCard({ route }: { route: ExecutionRoute }) {
-  const { language, ko, copy } = useNightCopy();
+  const { language, ko, copy, productText } = useNightCopy();
   const capabilityLabels =
     language === "ko"
       ? routeCapabilityLabels
@@ -424,8 +428,12 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
               : copy("사용 불가", "Unavailable")}
         </span>
       </header>
-      <strong>{route.runtime}</strong>
-      <p>{route.model || copy("현재 기본 모델", "Current default model")}</p>
+      <strong>{productText(route.runtime)}</strong>
+      <p>
+        {route.model
+          ? productText(route.model)
+          : copy("현재 기본 모델", "Current default model")}
+      </p>
       {route.executor_profile && (
         <div className="route-profile">
           <span>{copy("작업자", "Worker")}</span>
@@ -451,7 +459,10 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
         <span>{readinessLabels[route.adapter_readiness]}</span>
         <strong>{route.dispatch_interface}</strong>
         {route.receipt_source && (
-          <small>{copy("결과 근거", "Receipt source")} · {route.receipt_source}</small>
+          <small>
+            {copy("결과 근거", "Receipt source")} ·{" "}
+            {productText(route.receipt_source)}
+          </small>
         )}
       </div>
       {(route.message ||
@@ -465,12 +476,12 @@ function RouteCard({ route }: { route: ExecutionRoute }) {
               (route.message ? 1 : 0)}
             {ko ? "개" : ""}
           </summary>
-          {route.message && <p>{route.message}</p>}
+          {route.message && <p>{productText(route.message)}</p>}
           {route.limitations.map((limitation) => (
-            <p key={limitation}>{limitation}</p>
+            <p key={limitation}>{productText(limitation)}</p>
           ))}
           {route.dispatch_guardrails.map((guardrail) => (
-            <p key={guardrail}>{guardrail}</p>
+            <p key={guardrail}>{productText(guardrail)}</p>
           ))}
         </details>
       )}
@@ -542,7 +553,7 @@ function WorkspaceEvidence({
   evidence: WorkspaceChangeEvidence;
   expanded?: boolean;
 }) {
-  const { language, copy } = useNightCopy();
+  const { language, copy, productText } = useNightCopy();
   const stateLabels =
     language === "ko"
       ? workspaceStateLabels
@@ -571,7 +582,7 @@ function WorkspaceEvidence({
   return (
     <div
       className={`workspace-evidence workspace-evidence--${evidence.state} ${expanded ? "is-expanded" : ""}`}
-      title={evidence.attribution}
+      title={productText(evidence.attribution)}
     >
       <header>
         <span>WORKSPACE</span>
@@ -600,7 +611,7 @@ function WorkspaceEvidence({
       )}
       {expanded && (
         <footer>
-          <span>{evidence.attribution}</span>
+          <span>{productText(evidence.attribution)}</span>
           {evidence.preexisting_dirty_count > 0 && (
             <small>
               {copy(
@@ -609,7 +620,7 @@ function WorkspaceEvidence({
               )}
             </small>
           )}
-          {evidence.warning && <small>{evidence.warning}</small>}
+          {evidence.warning && <small>{productText(evidence.warning)}</small>}
         </footer>
       )}
     </div>
@@ -694,7 +705,7 @@ function MorningBriefSection({
   onMarkReviewed: (item: MorningBriefItem) => Promise<void>;
   onReopen: (item: MorningBriefItem) => Promise<void>;
 }) {
-  const { language, copy } = useNightCopy();
+  const { language, copy, productText } = useNightCopy();
   const verdictLabels =
     language === "ko"
       ? morningVerdictLabels
@@ -778,7 +789,7 @@ function MorningBriefSection({
         <div>
           <span className="eyebrow">MORNING INBOX</span>
           <h2>{copy("밤의 결과, 지금 볼 순서", "Your morning, in the right order")}</h2>
-          <p>{brief.headline}</p>
+          <p>{productText(brief.headline)}</p>
         </div>
         <div
           className="morning-brief-counts"
@@ -786,19 +797,19 @@ function MorningBriefSection({
         >
           <span className={brief.attention_count > 0 ? "is-attention" : ""}>
             <strong>{brief.attention_count}</strong>
-            {copy("먼저 판단", "NEEDS YOU")}
+            {copy("먼저 판단", "TO DECIDE")}
           </span>
           <span>
             <strong>{brief.review_count}</strong>
-            {copy("결과 검토", "REVIEW")}
+            {copy("결과 검토", "TO REVIEW")}
           </span>
           <span>
             <strong>{brief.in_progress_count}</strong>
-            {copy("진행 중", "RUNNING")}
+            {copy("진행 중", "STILL RUNNING")}
           </span>
           <span>
             <strong>{brief.reviewed_count}</strong>
-            {copy("검토 완료", "REVIEWED")}
+            {copy("검토 완료", "DONE")}
           </span>
         </div>
       </header>
@@ -830,12 +841,14 @@ function MorningBriefSection({
                       : copy("시각 없음", "Time unavailable")}
                   </small>
                 </header>
-                <strong>{item.project}</strong>
-                <h3>{item.title}</h3>
+                <strong>{productText(item.project)}</strong>
+                <h3>{productText(item.title)}</h3>
                 <p className={item.error ? "is-error" : ""}>
-                  {item.verdict === "needs_attention"
-                    ? item.error || item.verdict_reason || item.summary
-                    : item.summary || item.error || item.verdict_reason}
+                  {productText(
+                    (item.verdict === "needs_attention"
+                      ? item.error || item.verdict_reason || item.summary
+                      : item.summary || item.error || item.verdict_reason) || "",
+                  )}
                 </p>
                 {item.workspace_evidence && (
                   <WorkspaceEvidence evidence={item.workspace_evidence} />
@@ -848,7 +861,7 @@ function MorningBriefSection({
                           "검토한 공급자 근거에 묶여 있음",
                           "Bound to reviewed provider evidence",
                         )
-                      : item.next_action}
+                      : productText(item.next_action)}
                   </span>
                   <small>
                     {item.provenance_verified
@@ -957,7 +970,7 @@ function MorningBriefSection({
       {actionError && (
         <p className="night-history-warning" role="alert">
           <AlertTriangle size={12} />
-          {actionError}
+          {productText(actionError)}
         </p>
       )}
 
@@ -973,7 +986,7 @@ function MorningBriefSection({
       {brief.warnings.map((warning) => (
         <p className="night-history-warning" key={warning}>
           <AlertTriangle size={12} />
-          {warning}
+          {productText(warning)}
         </p>
       ))}
     </section>
@@ -981,7 +994,7 @@ function MorningBriefSection({
 }
 
 function NightRunHistorySection({ history }: { history: NightRunHistory }) {
-  const { language, copy } = useNightCopy();
+  const { language, copy, productText } = useNightCopy();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [detail, setDetail] = useState<NightRunDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1027,8 +1040,8 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
           <h2>{copy("공급자 원장에서 다시 읽은 야간 실행", "Night runs, read back from provider ledgers")}</h2>
           <p>
             {copy(
-              "앱을 껐다 켜도 Hermes 보드와 Codex rollout이 시작·완료 상태의 원본입니다.",
-              "Hermes boards and Codex rollouts remain the source of truth for start and completion after the app restarts.",
+              "앱을 껐다 켜도 Hermes 보드와 Codex rollout·durable Goal 저장소가 시작·완료 상태의 원본입니다.",
+              "Hermes boards plus Codex rollouts and the durable Goal store remain the source of truth after the app restarts.",
             )}
           </p>
         </div>
@@ -1075,9 +1088,9 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
                         : copy("시각 없음", "Time unavailable")}
                     </small>
                   </header>
-                  <strong>{run.title}</strong>
+                  <strong>{productText(run.title)}</strong>
                   <p title={run.workspace || undefined}>
-                    {run.project}
+                    {productText(run.project)}
                     {run.workspace
                       ? ` · ${compactPath(run.workspace, language)}`
                       : ""}
@@ -1090,7 +1103,7 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
                           : "night-run-result"
                       }
                     >
-                      {run.summary || run.error}
+                      {productText(run.summary || run.error || "")}
                     </span>
                   )}
                   <footer>
@@ -1125,7 +1138,7 @@ function NightRunHistorySection({ history }: { history: NightRunHistory }) {
       {history.warnings.map((warning) => (
         <p className="night-history-warning" key={warning}>
           <AlertTriangle size={12} />
-          {warning}
+          {productText(warning)}
         </p>
       ))}
     </section>
@@ -1205,7 +1218,7 @@ function NightRunEvidence({
   loading: boolean;
   error: string | null;
 }) {
-  const { language, ko, copy } = useNightCopy();
+  const { language, ko, copy, productText } = useNightCopy();
   const verdictLabels = ko ? verdictLabelsKo : verdictLabelsEn;
   const eventLabels = ko ? eventLabelsKo : eventLabelsEn;
   if (loading) {
@@ -1220,7 +1233,7 @@ function NightRunEvidence({
     return (
       <div className="night-evidence-error" role="alert">
         <AlertTriangle size={13} />
-        {error}
+        {productText(error)}
       </div>
     );
   }
@@ -1231,8 +1244,8 @@ function NightRunEvidence({
       <header>
         <div>
           <span className="eyebrow">MORNING REVIEW</span>
-          <h3>{detail.title}</h3>
-          <p>{detail.verdict_reason}</p>
+          <h3>{productText(detail.title)}</h3>
+          <p>{productText(detail.verdict_reason)}</p>
         </div>
         <span className={`night-verdict night-verdict--${detail.verdict}`}>
           {verdictLabels[detail.verdict]}
@@ -1282,11 +1295,12 @@ function NightRunEvidence({
             </small>
           </div>
           <pre>
-            {detail.body ||
-              copy(
-                "저장된 Night Contract가 없습니다.",
-                "No saved Night Contract.",
-              )}
+            {detail.body
+              ? productText(detail.body)
+              : copy(
+                  "저장된 Night Contract가 없습니다.",
+                  "No saved Night Contract.",
+                )}
           </pre>
         </section>
 
@@ -1310,7 +1324,7 @@ function NightRunEvidence({
               <article key={attempt.run_id}>
                 <header>
                   <strong>run {attempt.run_id}</strong>
-                  <span>{attempt.outcome || attempt.status}</span>
+                  <span>{productText(attempt.outcome || attempt.status)}</span>
                   <small>
                     {durationLabel(attempt.duration_seconds, language)}
                   </small>
@@ -1327,7 +1341,7 @@ function NightRunEvidence({
                 </p>
                 {(attempt.summary || attempt.error) && (
                   <blockquote className={attempt.error ? "is-error" : ""}>
-                    {attempt.summary || attempt.error}
+                    {productText(attempt.summary || attempt.error || "")}
                   </blockquote>
                 )}
               </article>
@@ -1352,7 +1366,7 @@ function NightRunEvidence({
               <i />
               <span>
                 <strong>{eventLabels[event.kind] || event.kind}</strong>
-                {event.note && <small>{event.note}</small>}
+                {event.note && <small>{productText(event.note)}</small>}
               </span>
               <time>
                 {event.created_at
@@ -1394,7 +1408,7 @@ function CandidateCard({
   primary?: boolean;
   modelJudged?: boolean;
 }) {
-  const { language, ko, copy } = useNightCopy();
+  const { language, ko, copy, productText } = useNightCopy();
   const confidenceLabels =
     language === "ko"
       ? recommendationConfidenceLabels
@@ -1434,8 +1448,10 @@ function CandidateCard({
 
       <div className="candidate-title">
         <div>
-          <span className="candidate-project">{candidate.project}</span>
-          <h2>{candidate.goal}</h2>
+          <span className="candidate-project">
+            {productText(candidate.project)}
+          </span>
+          <h2>{productText(candidate.goal)}</h2>
           <p title={candidate.cwd}>{compactPath(candidate.cwd, language)}</p>
         </div>
         <div className="candidate-provider">
@@ -1469,9 +1485,10 @@ function CandidateCard({
       <div className="candidate-reason">
         <Sparkles size={15} />
         <div>
-          <p>{candidate.provider_reason}</p>
+          <p>{productText(candidate.provider_reason)}</p>
           <small>
-            {candidate.route_reason} · {poolLabels[candidate.capacity_pool]}{" "}
+            {productText(candidate.route_reason)} ·{" "}
+            {poolLabels[candidate.capacity_pool]}{" "}
             {copy("차감", "used")}
           </small>
         </div>
@@ -1482,7 +1499,7 @@ function CandidateCard({
           <span className="detail-label">{copy("판단 근거", "WHY THIS RANKS")}</span>
           <ul>
             {candidate.evidence.map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{productText(item)}</li>
             ))}
           </ul>
           <div className="session-trace">
@@ -1496,7 +1513,7 @@ function CandidateCard({
           <span className="detail-label">
             {copy("아침에 남아야 할 것", "WHAT SHOULD EXIST BY MORNING")}
           </span>
-          <p>{candidate.expected_outcome}</p>
+          <p>{productText(candidate.expected_outcome)}</p>
           <span className="detail-label detail-label--spaced">
             {copy("완료 계약", "VERIFICATION CONTRACT")}
           </span>
@@ -1504,7 +1521,7 @@ function CandidateCard({
             {candidate.verification.map((item) => (
               <li key={item}>
                 <Check size={11} />
-                {item}
+                {productText(item)}
               </li>
             ))}
           </ul>
@@ -1520,7 +1537,7 @@ function CandidateCard({
         </summary>
         <ul>
           {candidate.risks.map((risk) => (
-            <li key={risk}>{risk}</li>
+            <li key={risk}>{productText(risk)}</li>
           ))}
         </ul>
       </details>
@@ -1547,23 +1564,23 @@ function CandidateCard({
           <div className="contract-grid">
             <section>
               <span>{copy("완료 결과", "Outcome")}</span>
-              <p>{draft.contract.outcome}</p>
+              <p>{productText(draft.contract.outcome)}</p>
             </section>
             <section>
               <span>{copy("검증", "Verification")}</span>
-              <p>{draft.contract.verification}</p>
+              <p>{productText(draft.contract.verification)}</p>
             </section>
             <section>
               <span>{copy("보존할 것", "Constraints")}</span>
-              <p>{draft.contract.constraints}</p>
+              <p>{productText(draft.contract.constraints)}</p>
             </section>
             <section>
               <span>{copy("작업 경계", "Boundaries")}</span>
-              <p>{draft.contract.boundaries}</p>
+              <p>{productText(draft.contract.boundaries)}</p>
             </section>
             <section>
               <span>{copy("멈추고 보고할 때", "Stop and report when")}</span>
-              <p>{draft.contract.stop_when}</p>
+              <p>{productText(draft.contract.stop_when)}</p>
             </section>
           </div>
           <div className="contract-prompt">
@@ -1580,7 +1597,7 @@ function CandidateCard({
                   : ""}
               </span>
             </header>
-            <pre>{draft.prompt}</pre>
+            <pre>{productText(draft.prompt)}</pre>
           </div>
           <footer>
             <span>
@@ -1628,7 +1645,7 @@ function CandidateCard({
             </span>
             <strong>{copy("자동 실행 꺼짐", "AUTO-RUN OFF")}</strong>
             <small>
-              {preflight.scope_label}{" "}
+              {productText(preflight.scope_label)}{" "}
               <code>{preflight.scope_value}</code>
             </small>
           </div>
@@ -1647,8 +1664,8 @@ function CandidateCard({
                   )}
                 </span>
                 <div>
-                  <strong>{check.label}</strong>
-                  <p>{check.message}</p>
+                  <strong>{productText(check.label)}</strong>
+                  <p>{productText(check.message)}</p>
                 </div>
               </section>
             ))}
@@ -1656,7 +1673,7 @@ function CandidateCard({
 
           <div className="preflight-identity">
             <span>
-              {preflight.executor_label}{" "}
+              {productText(preflight.executor_label)}{" "}
               <code>{preflight.executor_value}</code>
             </span>
             <span>
@@ -1674,7 +1691,7 @@ function CandidateCard({
               <details key={command.step}>
                 <summary>
                   <span>{index + 1}</span>
-                  <strong>{command.summary}</strong>
+                  <strong>{productText(command.summary)}</strong>
                   <small>
                     {command.mutates_local_state
                       ? copy("로컬 변경", "Local change")
@@ -1694,7 +1711,7 @@ function CandidateCard({
               <details key={request.step}>
                 <summary>
                   <span>{preflight.commands.length + index + 1}</span>
-                  <strong>{request.summary}</strong>
+                  <strong>{productText(request.summary)}</strong>
                   <small>JSON-RPC</small>
                 </summary>
                 <pre>
@@ -1725,9 +1742,9 @@ function CandidateCard({
                           : copy("상태 확인 필요", "Check state")}
                 </span>
                 <strong>{receipt.task_id}</strong>
-                <p>{receipt.message}</p>
+                <p>{productText(receipt.message)}</p>
                 <small>
-                  {receipt.receipt_source}
+                  {productText(receipt.receipt_source)}
                   {receipt.run_id ? ` · run ${receipt.run_id}` : ""}
                 </small>
               </div>
@@ -1735,7 +1752,7 @@ function CandidateCard({
               <>
                 <div className="expected-receipt">
                   <span>{copy("예상 실행 영수증", "EXPECTED RUN RECEIPT")}</span>
-                  <p>{preflight.expected_receipt}</p>
+                  <p>{productText(preflight.expected_receipt)}</p>
                 </div>
                 {startsAfterHours > 0 &&
                 preflight.state === "ready_for_approval" ? (
@@ -1854,7 +1871,7 @@ function NightPlanHistorySection({
   recoveryLoading: boolean;
   onRequestRecovery: (planId: string) => void;
 }) {
-  const { language, copy } = useNightCopy();
+  const { language, copy, productText } = useNightCopy();
   const poolLabels =
     language === "ko" ? capacityPoolLabels : capacityPoolLabelsEn;
   const planStateLabels =
@@ -1925,10 +1942,14 @@ function NightPlanHistorySection({
                 `Crash recovery ${plan.automatic_recovery_attempts}/${plan.automatic_recovery_limit}`,
               )}
             </span>
+            {/* a raw process id is debugging detail, not user-facing status */}
             {plan.worker_pid && (
-              <code>
-                {plan.recovery_state === "active" ? "coordinator" : "last"} pid{" "}
-                {plan.worker_pid}
+              <code
+                title={`${
+                  plan.recovery_state === "active" ? "coordinator" : "last"
+                } pid ${plan.worker_pid}`}
+              >
+                {copy("실행 기록 있음", "run recorded")}
               </code>
             )}
           </div>
@@ -2069,7 +2090,7 @@ function NightPlanHistorySection({
                       <span>{index + 1}</span>
                       <ProviderMark provider={item.surface} />
                       <div>
-                        <strong>{item.project}</strong>
+                        <strong>{productText(item.project)}</strong>
                         <small>
                           {item.waiting_kind === "workspace"
                             ? copy("작업공간 대기", "Workspace wait")
@@ -2086,7 +2107,7 @@ function NightPlanHistorySection({
                         </small>
                         {item.waiting_reason && (
                           <em className="is-waiting">
-                            {item.waiting_reason}
+                            {productText(item.waiting_reason)}
                             {item.waiting_retry_at && (
                               <span>
                                 {" "}
@@ -2099,7 +2120,7 @@ function NightPlanHistorySection({
                             )}
                           </em>
                         )}
-                        {item.error && <em>{item.error}</em>}
+                        {item.error && <em>{productText(item.error)}</em>}
                       </div>
                     </div>
                   ))}
@@ -2112,7 +2133,7 @@ function NightPlanHistorySection({
       {history.warnings.map((warning) => (
         <p className="night-history-warning" key={warning}>
           <AlertTriangle size={12} />
-          {warning}
+          {productText(warning)}
         </p>
       ))}
     </section>
@@ -2134,6 +2155,7 @@ export function OvernightView({
 }) {
   const ko = language === "ko";
   const copy = (koText: string, enText: string) => (ko ? koText : enText);
+  const productText = (value: string) => localizeProductText(value, language);
   const poolLabels = ko ? capacityPoolLabels : capacityPoolLabelsEn;
   const [sleepHours, setSleepHours] = useState(defaultSleepHours);
   const [state, setState] = useState<PlanState>({ kind: "idle" });
@@ -3003,7 +3025,7 @@ export function OvernightView({
       setApproval(null);
       setChallengeClock(Date.now());
       setPortfolioApproval(challenge);
-      setConfirmationPhrase("");
+      setConfirmationPhrase(challenge.confirmation_phrase);
     } catch (error) {
       setApprovalError(
         error instanceof Error ? error.message : String(error),
@@ -3309,26 +3331,44 @@ export function OvernightView({
     }
   };
 
+  const latestNightPlan = nightPlanHistory?.plans[0] || null;
+  const latestNightPlanItems =
+    latestNightPlan?.lanes.flatMap((lane) => lane.items) || [];
+  const scheduledPlanSlots = plan
+    ? plan.schedule.lanes
+        .flatMap((lane) => lane.slots)
+        .sort((left, right) => left.candidate_rank - right.candidate_rank)
+    : [];
+  const currentPlanReceipts = plan
+    ? plan.run_drafts
+        .map((draft) => receipts[draft.id])
+        .filter((receipt): receipt is DispatchReceipt => Boolean(receipt))
+    : [];
+  const compactStatusItems = morningBrief?.items || [];
+  const activeRunCount = compactStatusItems.filter(
+    (item) => item.verdict === "in_progress",
+  ).length;
+  const attentionRunCount = compactStatusItems.filter(
+    (item) => item.verdict === "needs_attention",
+  ).length;
+  const reviewRunCount = compactStatusItems.filter(
+    (item) =>
+      item.verdict === "ready_to_review" &&
+      item.review_state !== "reviewed",
+  ).length;
+
   return (
     <OvernightLanguageContext.Provider value={language}>
     <main className="workspace overnight-workspace">
       <header className="workspace-header overnight-header">
         <div className="header-copy">
-          <span className="kicker">OVERNIGHT BRIEF</span>
-          <h1>{copy("오늘 밤 어디에 맡길까요?", "What should move tonight?")}</h1>
+          <h1>{copy("세션 관제탑", "Session control tower")}</h1>
           <p>
             {copy(
-              "선택한 구독 모델이 실제 프로젝트 근거를 판단하고, Morrow가 현재 용량·경로·충돌을 검증해 아침에 증명 가능한 일만 고릅니다.",
-              "Your selected subscription model judges real project evidence; Morrow verifies capacity, routes, and conflicts before anything can run.",
+              "흩어진 세션을 하나의 계획으로 만들고, 승인한 계획만 실행합니다.",
+              "Turn scattered sessions into one plan, then run only what you approve.",
             )}
           </p>
-        </div>
-        <div className="read-only-seal">
-          <ShieldCheck size={15} />
-          <span>
-            <strong>{copy("승인 전 안전", "SAFE BEFORE APPROVAL")}</strong>
-            <small>{copy("명시적 승인 없이는 실행 없음", "Nothing runs without explicit approval")}</small>
-          </span>
         </div>
       </header>
 
@@ -3337,11 +3377,11 @@ export function OvernightView({
           <div>
             <Clock3 size={16} />
             <span>
-              <strong>{copy("오늘의 최대 시간 예산", "Maximum night budget")}</strong>
+              <strong>{copy("얼마나 맡길까요?", "How long can it run?")}</strong>
               <small>
                 {copy(
-                  "일찍 끝나도 억지로 시간을 채우지 않습니다.",
-                  "If the work ends early, Morrow does not invent more.",
+                  "끝나면 남은 시간은 사용하지 않습니다.",
+                  "Unused time is not filled with extra work.",
                 )}
               </small>
             </span>
@@ -3390,7 +3430,7 @@ export function OvernightView({
           </div>
         </div>
         <button
-          className="generate-plan-button"
+          className={`generate-plan-button ${plan ? "generate-plan-button--secondary" : ""}`}
           type="button"
           onClick={() => void generate()}
           disabled={
@@ -3412,31 +3452,21 @@ export function OvernightView({
             <>
               <MoonStar size={17} />
               {plan
-                ? copy("추천 다시 만들기", "Refresh recommendation")
-                : copy("오늘의 추천 만들기", "Build tonight's recommendation")}
+                ? copy("계획 다시 만들기", "Rebuild plan")
+                : copy("계획 만들기", "Build plan")}
             </>
           )}
         </button>
       </section>
 
       {advisorReadiness.kind === "loading" && state.kind !== "loading" && (
-        <section className="portfolio-inline-result" role="status">
+        <section className="control-tower-notice" role="status">
           <RefreshCw className="is-spinning" size={14} />
           <p>
             {copy(
-              "선택한 구독 모델과 effort를 확인하고 있습니다.",
-              "Verifying the selected subscription model and effort.",
+              "계획을 만들 준비를 하고 있습니다.",
+              "Getting ready to build your plan.",
             )}
-          </p>
-        </section>
-      )}
-
-      {advisorReadiness.kind === "ready" && state.kind !== "loading" && (
-        <section className="portfolio-inline-result" role="status">
-          <Check size={14} />
-          <p>
-            {copy("판단 모델 준비됨", "Advisor ready")} ·{" "}
-            {advisorReadiness.label}
           </p>
         </section>
       )}
@@ -3447,11 +3477,11 @@ export function OvernightView({
           <div>
             <strong>
               {copy(
-                "선택한 판단 모델을 사용할 수 없습니다",
-                "The selected advisor is unavailable",
+                "계획을 만들 준비가 되지 않았습니다",
+                "Planning is not ready yet",
               )}
             </strong>
-            <p>{advisorReadiness.message}</p>
+            <p>{productText(advisorReadiness.message)}</p>
           </div>
           <button type="button" onClick={onOpenSettings}>
             {copy("설정 열기", "Open Settings")}
@@ -3459,29 +3489,13 @@ export function OvernightView({
         </section>
       )}
 
-      {handoffReview &&
-        handoffReview.authority_state === "active" &&
-        !handoffRequiresRefresh &&
-        !durationChanged &&
-        !approvalInvalidated && (
-          <section className="portfolio-inline-result" role="status">
-            <Check size={14} />
-            <p>
-              {copy(
-                `Morrow가 대화에서 추천한 ${handoffReview.plan.sleep_hours}시간 계획과 동일합니다. 이 계획만 승인 대상으로 등록했습니다.`,
-                `This is the exact ${handoffReview.plan.sleep_hours}-hour plan Morrow recommended in chat. Only this plan is registered for approval.`,
-              )}
-            </p>
-          </section>
-        )}
-
       {handoffRevoked && (
         <section className="approval-inline-error" role="alert">
           <AlertTriangle size={14} />
           <p>
             {copy(
-              "대화에서 추천한 정확한 계획은 그대로 보존했습니다. 하지만 이 계획의 승인 권한은 폐기되었거나 더 최신 계획으로 대체되어 아래 내용은 읽기 전용입니다. 현재 근거로 추천을 다시 만들어 주세요.",
-              "The exact chat plan is preserved, but its approval authority was invalidated or superseded by a newer plan. It is read-only; refresh the recommendation from current evidence.",
+              "이 계획보다 새로운 상태가 발견됐습니다. 계획을 다시 만들어 주세요.",
+              "A newer state is available. Rebuild the plan before running it.",
             )}
           </p>
         </section>
@@ -3492,8 +3506,8 @@ export function OvernightView({
           <AlertTriangle size={14} />
           <p>
             {copy(
-              "대화에서 추천한 정확한 계획은 보존했지만 승인 유효시간이 지났습니다. 아래 내용은 읽기 전용입니다. 현재 근거로 추천을 다시 만들어 주세요.",
-              "The exact chat plan is preserved, but its approval window expired. It is read-only; refresh the recommendation from current evidence.",
+              "이 계획은 오래되어 실행할 수 없습니다. 다시 만들어 주세요.",
+              "This plan is too old to run. Rebuild it first.",
             )}
           </p>
         </section>
@@ -3505,11 +3519,11 @@ export function OvernightView({
           <p>
             {copy(
               durationChanged
-                ? `시간 예산을 ${sleepHours}시간으로 바꿨지만 아래 계획은 ${plan?.sleep_hours}시간 기준입니다. 승인하기 전에 추천을 다시 만들어 주세요.`
-                : "시간 변경으로 이전 승인 계약을 폐기했습니다. 같은 시간으로 되돌려도 추천을 다시 만들어야 합니다.",
+                ? `시간을 ${sleepHours}시간으로 바꿨습니다. 새 시간으로 계획을 다시 만들어 주세요.`
+                : "시간이 바뀌어 이전 계획을 실행할 수 없습니다. 다시 만들어 주세요.",
               durationChanged
-                ? `The budget is now ${sleepHours} hours, but the plan below was built for ${plan?.sleep_hours} hours. Refresh it before approval.`
-                : "Changing the duration invalidated the prior approval contract. Returning to the old duration still requires a fresh recommendation.",
+                ? `The budget is now ${sleepHours} hours. Rebuild the plan for the new duration.`
+                : "The duration changed, so the previous plan cannot run. Rebuild it first.",
             )}
           </p>
         </section>
@@ -3521,66 +3535,153 @@ export function OvernightView({
         !recoveryApproval && (
         <section className="portfolio-inline-result" role="status">
           <Check size={14} />
-          <p>{portfolioDispatchMessage}</p>
+          <p>{productText(portfolioDispatchMessage)}</p>
         </section>
       )}
 
       {approvalError &&
+        !plan &&
         !approval &&
         !portfolioApproval &&
         !recoveryApproval && (
         <section className="approval-inline-error" role="alert">
           <AlertTriangle size={14} />
-          <p>{approvalError}</p>
+          <p>{productText(approvalError)}</p>
         </section>
       )}
 
-      {morningBrief && (
-        <MorningBriefSection
-          brief={morningBrief}
-          onMarkReviewed={markMorningItemReviewed}
-          onReopen={reopenMorningItem}
-        />
-      )}
-      {nightPlanHistory && (
-        <NightPlanHistorySection
-          history={nightPlanHistory}
-          recoveryLoading={isPreparingRecovery}
-          onRequestRecovery={(planId) =>
-            void requestNightPlanRecovery(planId)
-          }
-        />
-      )}
-      {nightHistory && <NightRunHistorySection history={nightHistory} />}
+      {(compactStatusItems.length > 0 || latestNightPlanItems.length > 0) && (
+        <section className="control-tower-status">
+          <header>
+            <div>
+              <span>{copy("현재 상태", "Current status")}</span>
+              <h2>
+                {attentionRunCount > 0
+                  ? copy(
+                      `${attentionRunCount}개 작업에 확인이 필요합니다`,
+                      `${attentionRunCount} ${attentionRunCount === 1 ? "run needs" : "runs need"} your attention`,
+                    )
+                  : activeRunCount > 0
+                    ? copy(
+                        `${activeRunCount}개 작업이 실행 중입니다`,
+                        `${activeRunCount} ${activeRunCount === 1 ? "run is" : "runs are"} in progress`,
+                      )
+                    : reviewRunCount > 0
+                      ? copy(
+                          `${reviewRunCount}개 결과가 도착했습니다`,
+                          `${reviewRunCount} ${reviewRunCount === 1 ? "result is" : "results are"} ready`,
+                        )
+                      : copy("최근 계획을 마쳤습니다", "The latest plan is finished")}
+              </h2>
+            </div>
+            {latestNightPlan?.recovery_state === "recoverable" && (
+              <button
+                type="button"
+                disabled={isPreparingRecovery}
+                onClick={() =>
+                  void requestNightPlanRecovery(
+                    latestNightPlan.idempotency_key,
+                  )
+                }
+              >
+                {isPreparingRecovery ? (
+                  <>
+                    <RefreshCw className="is-spinning" size={13} />
+                    {copy("확인 중", "Checking")}
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={13} />
+                    {copy("계획 복구", "Recover plan")}
+                  </>
+                )}
+              </button>
+            )}
+          </header>
 
-      {state.kind === "idle" && (
+          <div className="control-tower-status-list">
+            {compactStatusItems.length > 0
+              ? compactStatusItems.slice(0, 5).map((item) => (
+                  <article key={item.draft_id}>
+                    <ProviderMark provider={item.surface} />
+                    <div>
+                      <strong>{productText(item.project)}</strong>
+                      <span>{productText(item.title)}</span>
+                    </div>
+                    <em
+                      className={`control-tower-state control-tower-state--${item.verdict}`}
+                    >
+                      {item.review_state === "reviewed"
+                        ? copy("확인 완료", "Reviewed")
+                        : item.verdict === "needs_attention"
+                          ? copy("확인 필요", "Needs you")
+                          : item.verdict === "ready_to_review"
+                            ? copy("결과 도착", "Result ready")
+                            : item.verdict === "in_progress"
+                              ? copy("실행 중", "Running")
+                              : copy("시작 전", "Not started")}
+                    </em>
+                  </article>
+                ))
+              : latestNightPlanItems.slice(0, 5).map((item) => (
+                  <article key={item.draft_id}>
+                    <ProviderMark provider={item.surface} />
+                    <div>
+                      <strong>{productText(item.project)}</strong>
+                      <span>{nightPlanTimingLabel(item, language)}</span>
+                    </div>
+                    <em
+                      className={`control-tower-state control-tower-state--${item.state}`}
+                    >
+                      {(ko
+                        ? nightPlanItemStateLabels
+                        : {
+                            pending: "Scheduled",
+                            starting: "Starting",
+                            running: "Running",
+                            completed: "Done",
+                            blocked: "Needs you",
+                            uncertain: "Check state",
+                            skipped_deadline: "Skipped",
+                            skipped_uncertain: "Skipped",
+                          })[item.state] || item.state}
+                    </em>
+                  </article>
+                ))}
+          </div>
+
+          {morningBrief && morningBrief.items.length > 0 && (
+            <details className="control-tower-results">
+              <summary>{copy("결과 자세히 보기", "Review results")}</summary>
+              <MorningBriefSection
+                brief={morningBrief}
+                onMarkReviewed={markMorningItemReviewed}
+                onReopen={reopenMorningItem}
+              />
+            </details>
+          )}
+        </section>
+      )}
+
+      {state.kind === "idle" &&
+        compactStatusItems.length === 0 &&
+        latestNightPlanItems.length === 0 && (
         <section className="overnight-empty">
           <span className="overnight-orbit">
             <MoonStar size={23} />
           </span>
           <h2>
             {copy(
-              "오늘의 흩어진 맥락을 한 번에 판단합니다",
-              "Turn scattered context into one night decision",
+              "지금 열려 있는 세션으로 실행 계획을 만듭니다",
+              "Build a run plan from your open sessions",
             )}
           </h2>
           <p>
             {copy(
-              "Codex, Claude, Grok, Cursor, Hermes, OpenClaw의 로컬 세션 메타데이터를 프로젝트별로 묶습니다. 최근 7일의 제한된 사용자·최종 응답 일부는 메모리에서만 읽고 관제판에 저장하지 않습니다.",
-              "Group local session metadata from Codex, Claude, Grok, Cursor, Hermes, and OpenClaw by project. Bounded conversation excerpts from the last 7 days are read in memory and never persisted by the watch room.",
+              "무엇을 이어갈지 고르고, 실행 가능한 순서까지 한 번에 정리합니다.",
+              "Choose what is worth continuing and put it in a runnable order.",
             )}
           </p>
-          <div>
-            <span>
-              <Database size={13} /> {copy("최근 7일", "Last 7 days")}
-            </span>
-            <span>
-              <ShieldCheck size={13} /> {copy("읽기 전용", "Read only")}
-            </span>
-            <span>
-              <Sparkles size={13} /> {copy("최대 3개 추천", "Up to 3 recommendations")}
-            </span>
-          </div>
         </section>
       )}
 
@@ -3594,23 +3695,23 @@ export function OvernightView({
             <strong>
               {state.previous
                 ? copy(
-                    "현재 추천을 유지한 채 새 근거를 확인합니다",
-                    "Keeping the current answer while evidence refreshes",
+                    "계획을 다시 확인하고 있습니다",
+                    "Checking the plan again",
                   )
                 : copy(
-                    `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"}가 프로젝트 우선순위를 판단하고 있습니다`,
-                    `${advisor.provider === "codex_subscription" ? "Codex" : "Claude"} is judging project priority`,
+                    "세션을 읽고 실행 계획을 만들고 있습니다",
+                    "Reading sessions and building the plan",
                   )}
             </strong>
             <p>
               {state.previous
                 ? copy(
-                    "확인이 끝날 때까지 아래 계획은 읽기 전용이며 승인할 수 없습니다.",
-                    "The plan below stays read-only until the refresh finishes.",
+                    "끝날 때까지 현재 계획은 실행할 수 없습니다.",
+                    "The current plan cannot run until this finishes.",
                   )
                 : copy(
-                    "실제 세션 근거와 현재 사용량을 읽은 뒤 구독 모델에 판단을 요청합니다. 몇 분 걸릴 수 있습니다.",
-                    "Morrow reads real session evidence and current capacity, then asks your subscription model to judge it. This may take a few minutes.",
+                    "세션이 많으면 몇 분 걸릴 수 있습니다.",
+                    "This may take a few minutes if you have many sessions.",
                   )}
             </p>
           </div>
@@ -3622,7 +3723,7 @@ export function OvernightView({
           <AlertTriangle size={18} />
           <div>
             <strong>{copy("추천을 완성하지 못했습니다", "Recommendation could not be completed")}</strong>
-            <p>{state.message}</p>
+            <p>{productText(state.message)}</p>
           </div>
           <button type="button" onClick={() => void generate()}>
             {copy("다시 시도", "Try again")}
@@ -3631,9 +3732,165 @@ export function OvernightView({
       )}
 
       {plan && (
+        <section
+          className={`control-tower-plan ${planIsReadOnly ? "is-read-only" : ""}`}
+          ref={planResultsRef}
+          aria-busy={state.kind === "loading"}
+        >
+          <header>
+            <div>
+              <span>{copy("실행 계획", "Run plan")}</span>
+              <h2>
+                {scheduledPlanSlots.length > 0
+                  ? copy(
+                      `${scheduledPlanSlots.length}개 작업을 순서대로 맡깁니다`,
+                      `Run ${scheduledPlanSlots.length} planned ${scheduledPlanSlots.length === 1 ? "task" : "tasks"}`,
+                    )
+                  : copy(
+                      "지금 실행할 작업이 없습니다",
+                      "There is nothing to run right now",
+                    )}
+              </h2>
+            </div>
+            <small>
+              {copy("최대", "Up to")}{" "}
+              {durationHoursLabel(plan.sleep_hours, language)}
+            </small>
+          </header>
+
+          {scheduledPlanSlots.length > 0 ? (
+            <ol className="control-tower-plan-list">
+              {scheduledPlanSlots.map((slot) => {
+                const candidate = plan.candidates.find(
+                  (item) => item.rank === slot.candidate_rank,
+                );
+                const draft = plan.run_drafts.find(
+                  (item) => item.candidate_rank === slot.candidate_rank,
+                );
+                const receipt = draft ? receipts[draft.id] : undefined;
+                return (
+                  <li key={`${slot.candidate_rank}-${slot.route_id}`}>
+                    <span className="control-tower-plan-order">
+                      {slot.candidate_rank}
+                    </span>
+                    {candidate && (
+                      <ProviderMark
+                        provider={candidate.execution_surface}
+                        showName
+                      />
+                    )}
+                    <div>
+                      <strong>{productText(slot.project)}</strong>
+                      <h3>
+                        {productText(candidate?.goal || slot.project)}
+                      </h3>
+                      <small>
+                        {slot.starts_after_hours > 0
+                          ? copy(
+                              `${durationHoursLabel(slot.starts_after_hours, language)} 뒤 시작`,
+                              `Starts in ${durationHoursLabel(slot.starts_after_hours, language)}`,
+                            )
+                          : copy("바로 시작", "Starts now")}{" "}
+                        · {copy("최대", "up to")}{" "}
+                        {durationHoursLabel(
+                          slot.time_budget_hours,
+                          language,
+                        )}
+                      </small>
+                    </div>
+                    {receipt && (
+                      <em
+                        className={`control-tower-state control-tower-state--${receipt.state}`}
+                      >
+                        {receipt.state === "started"
+                          ? copy("실행 중", "Running")
+                          : receipt.state === "completed"
+                            ? copy("완료", "Done")
+                            : receipt.state === "queued"
+                              ? copy("예약됨", "Scheduled")
+                              : receipt.state === "blocked"
+                                ? copy("확인 필요", "Needs you")
+                                : copy("상태 확인", "Check state")}
+                      </em>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <div className="control-tower-empty-plan">
+              <p>
+                {copy(
+                  "현재 세션과 실행 가능 상태를 확인했지만 안전하게 맡길 작업을 찾지 못했습니다.",
+                  "No current session is safe and ready to run.",
+                )}
+              </p>
+              {plan.exclusions.slice(0, 3).map((item) => (
+                <span key={`${item.project}-${item.reason}`}>
+                  <strong>{productText(item.project)}</strong>
+                  {productText(item.reason)}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {approvalError &&
+            !approval &&
+            !portfolioApproval &&
+            !recoveryApproval && (
+              <p className="control-tower-plan-error" role="alert">
+                <AlertTriangle size={13} />
+                {productText(approvalError)}
+              </p>
+            )}
+
+          {scheduledPlanSlots.length > 0 && (
+            <footer>
+              <p>
+                <ShieldCheck size={13} />
+                {copy(
+                  "표시된 프로젝트와 시간 안에서만 실행합니다.",
+                  "Only the projects and time shown here are approved.",
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => void requestPortfolioApproval()}
+                disabled={
+                  planIsReadOnly ||
+                  approvalPreparationActive ||
+                  isDispatching ||
+                  readyPortfolioPreflights.length === 0 ||
+                  currentPlanReceipts.length > 0
+                }
+              >
+                {isPreparingPortfolio || isDispatching ? (
+                  <>
+                    <RefreshCw className="is-spinning" size={14} />
+                    {copy("실행 준비 중", "Preparing run")}
+                  </>
+                ) : currentPlanReceipts.length > 0 ? (
+                  <>
+                    <Check size={14} />
+                    {copy("계획 시작됨", "Plan started")}
+                  </>
+                ) : readyPortfolioPreflights.length === 0 ? (
+                  copy("지금 실행할 수 없음", "Cannot run now")
+                ) : (
+                  <>
+                    <MoonStar size={14} />
+                    {copy("이 계획 실행", "Run this plan")}
+                  </>
+                )}
+              </button>
+            </footer>
+          )}
+        </section>
+      )}
+
+      {plan && ((plan: OvernightPlan) => false && (
         <div
           className={`plan-results ${planIsReadOnly ? "plan-results--refreshing" : ""}`}
-          ref={planResultsRef}
           aria-busy={state.kind === "loading"}
         >
           <div className="plan-index-line">
@@ -3657,8 +3914,8 @@ export function OvernightView({
               <Sparkles size={14} />
               <p>
                 {copy(
-                  `${plan.advisor.provider === "codex_subscription" ? "Codex" : "Claude"} · ${plan.advisor.model || "공급자 기본 모델"}${plan.advisor.effort ? ` · ${plan.advisor.effort}` : ""}가 프로젝트 순서를 판단했습니다. 실행 경로와 승인 범위는 Morrow가 검증했습니다.`,
-                  `Judged by ${plan.advisor.provider === "codex_subscription" ? "Codex" : "Claude"} · ${plan.advisor.model || "provider default"}${plan.advisor.effort ? ` · ${plan.advisor.effort}` : ""}. Morrow verified the execution routes and approval scope.`,
+                  `${plan.advisor!.provider === "codex_subscription" ? "Codex" : "Claude"} · ${plan.advisor!.model || "공급자 기본 모델"}${plan.advisor!.effort ? ` · ${plan.advisor!.effort}` : ""}가 프로젝트 순서를 판단했습니다. 실행 경로와 승인 범위는 Morrow가 검증했습니다.`,
+                  `Judged by ${plan.advisor!.provider === "codex_subscription" ? "Codex" : "Claude"} · ${plan.advisor!.model || "provider default"}${plan.advisor!.effort ? ` · ${plan.advisor!.effort}` : ""}. Morrow verified the execution routes and approval scope.`,
                 )}
               </p>
             </section>
@@ -3802,8 +4059,8 @@ export function OvernightView({
                 >
                   {plan.exclusions.slice(0, 3).map((item) => (
                     <li key={`${item.project}-${item.reason}`}>
-                      <strong>{item.project}</strong>
-                      <span>{item.reason}</span>
+                      <strong>{productText(item.project)}</strong>
+                      <span>{productText(item.reason)}</span>
                     </li>
                   ))}
                 </ul>
@@ -3866,7 +4123,7 @@ export function OvernightView({
                                 provider={candidate.execution_surface}
                               />
                             )}
-                            <strong>{slot.project}</strong>
+                            <strong>{productText(slot.project)}</strong>
                             <small>
                               {slot.starts_after_hours === 0
                                 ? copy("바로 시작", "Start now")
@@ -3928,7 +4185,9 @@ export function OvernightView({
                   </button>
                 </div>
               )}
-              <p className="schedule-method">{plan.schedule.methodology}</p>
+              <p className="schedule-method">
+                {productText(plan.schedule.methodology)}
+              </p>
             </section>
           )}
 
@@ -3981,8 +4240,8 @@ export function OvernightView({
               <div>
                 {plan.exclusions.map((item) => (
                   <p key={`${item.project}-${item.reason}`}>
-                    <strong>{item.project}</strong>
-                    <span>{item.reason}</span>
+                    <strong>{productText(item.project)}</strong>
+                    <span>{productText(item.reason)}</span>
                   </p>
                 ))}
                 {plan.exclusions.length === 0 && (
@@ -3994,11 +4253,11 @@ export function OvernightView({
             </details>
             <div className="method-note">
               <Database size={14} />
-              <p>{plan.methodology}</p>
+              <p>{productText(plan.methodology)}</p>
             </div>
           </section>
         </div>
-      )}
+      ))(plan)}
 
       {recoveryApproval && (
         <div className="approval-backdrop" role="presentation">
@@ -4015,7 +4274,10 @@ export function OvernightView({
               <div>
                 <span className="eyebrow">EVIDENCE-FIRST RECOVERY</span>
                 <h2 id="recovery-approval-title">
-                  멈춘 밤 계획을 안전하게 복구할까요?
+                  {copy(
+                    "멈춘 밤 계획을 안전하게 복구할까요?",
+                    "Safely recover the interrupted night plan?",
+                  )}
                 </h2>
               </div>
             </header>
@@ -4026,9 +4288,20 @@ export function OvernightView({
                   <span>{index + 1}</span>
                   <ProviderMark provider={item.surface} />
                   <div>
-                    <strong>{item.project}</strong>
+                    <strong>{productText(item.project)}</strong>
                     <small>
-                      {nightPlanItemStateLabels[item.state] || item.state}
+                      {language === "ko"
+                        ? nightPlanItemStateLabels[item.state] || item.state
+                        : {
+                            pending: "Scheduled",
+                            starting: "Starting",
+                            running: "Running",
+                            completed: "Completed",
+                            blocked: "Blocked",
+                            uncertain: "Uncertain",
+                            skipped_deadline: "Skipped at deadline",
+                            skipped_uncertain: "Prior run uncertain",
+                          }[item.state] || item.state}
                     </small>
                   </div>
                 </article>
@@ -4038,22 +4311,31 @@ export function OvernightView({
             <div className="approval-effects">
               <p>
                 <Check size={12} />
-                처음 승인한 프로젝트·순서·시간·권한 그대로
+                {copy(
+                  "처음 승인한 프로젝트·순서·시간·권한 그대로",
+                  "Keep the originally approved projects, order, time, and authority",
+                )}
               </p>
               <p>
                 <Database size={12} />
-                Hermes·Codex·Claude의 정확한 계약 지문부터 대조
+                {copy(
+                  "Hermes·Codex·Claude의 정확한 계약 지문부터 대조",
+                  "Reconcile exact Hermes, Codex, and Claude contract fingerprints first",
+                )}
               </p>
               <p>
                 <AlertTriangle size={12} />
-                시작 여부가 불확실하면 재시도 없이 해당 lane 중단
+                {copy(
+                  "시작 여부가 불확실하면 재시도 없이 해당 lane 중단",
+                  "Stop the lane without retrying when launch status is ambiguous",
+                )}
               </p>
             </div>
 
             <label className="approval-phrase">
               <span>
-                복구하려면{" "}
-                <code>{recoveryApproval.confirmation_phrase}</code> 입력
+                {copy("복구하려면", "To recover, type")}{" "}
+                <code>{recoveryApproval.confirmation_phrase}</code>
               </span>
               <input
                 autoFocus
@@ -4068,7 +4350,9 @@ export function OvernightView({
               />
             </label>
 
-            <p className="approval-warning">{recoveryApproval.warning}</p>
+            <p className="approval-warning">
+              {productText(recoveryApproval.warning)}
+            </p>
             {recoveryApprovalExpired && (
               <p className="approval-error" role="alert">
                 {copy(
@@ -4079,7 +4363,7 @@ export function OvernightView({
             )}
             {approvalError && (
               <p className="approval-error" role="alert">
-                {approvalError}
+                {productText(approvalError)}
               </p>
             )}
 
@@ -4090,7 +4374,7 @@ export function OvernightView({
                 onClick={() => void cancelRecovery()}
                 disabled={isRecovering}
               >
-                취소
+                {copy("취소", "Cancel")}
               </button>
               <button
                 className="approval-confirm"
@@ -4105,7 +4389,10 @@ export function OvernightView({
                 {isRecovering ? (
                   <>
                     <RefreshCw className="is-spinning" size={13} />
-                    공급자 증거 대조 중
+                    {copy(
+                      "공급자 증거 대조 중",
+                      "Reconciling provider evidence",
+                    )}
                   </>
                 ) : recoveryApprovalExpired ? (
                   <>
@@ -4115,7 +4402,7 @@ export function OvernightView({
                 ) : (
                   <>
                     <ShieldCheck size={13} />
-                    원래 일정만 복구
+                    {copy("원래 일정만 복구", "Recover only the original plan")}
                   </>
                 )}
               </button>
@@ -4137,11 +4424,10 @@ export function OvernightView({
                 <MoonStar size={17} />
               </span>
               <div>
-                <span className="eyebrow">ONE NIGHT · ONE APPROVAL</span>
                 <h2 id="portfolio-approval-title">
                   {copy(
-                    "이 밤 포트폴리오를 시작할까요?",
-                    "Start this exact night plan?",
+                    "이 계획을 실행할까요?",
+                    "Run this plan?",
                   )}
                 </h2>
               </div>
@@ -4153,10 +4439,9 @@ export function OvernightView({
                   <span className="portfolio-item-order">{index + 1}</span>
                   <ProviderMark provider={item.surface} />
                   <div>
-                    <strong>{item.project}</strong>
-                    <small>{item.goal}</small>
-                    <em title={item.workspace}>
-                      {poolLabels[item.capacity_pool]} ·{" "}
+                    <strong>{productText(item.project)}</strong>
+                    <small>{productText(item.goal)}</small>
+                    <em>
                       {copy(
                         `최대 ${item.time_budget_hours}시간`,
                         `${item.time_budget_hours}h max`,
@@ -4168,7 +4453,6 @@ export function OvernightView({
                             `In about ${durationHoursLabel(item.starts_after_hours, language)} · ${scheduleWaitLabel(item.wait_reasons, language)}`,
                           )
                         : copy("바로 시작", "Start now")}{" "}
-                      · {compactPath(item.workspace, language)}
                     </em>
                   </div>
                 </article>
@@ -4179,72 +4463,34 @@ export function OvernightView({
               <p>
                 <Check size={12} />
                 {copy(
-                  "표시된 프로젝트·제공자·순서·작업공간만 예약",
-                  "Schedule only the projects, providers, order, and workspaces shown",
-                )}
-              </p>
-              <p>
-                <Check size={12} />
-                {copy(
-                  "같은 구독·작업공간별 한 작업씩 · 종료 근거 뒤 다음 작업 점검",
-                  "One run per shared pool or workspace · verify completion before the next",
+                  "화면에 표시된 작업만 실행합니다.",
+                  "Only the work shown here will run.",
                 )}
               </p>
               <p>
                 <AlertTriangle size={12} />
                 {copy(
-                  "프로젝트 파일이 바뀌고 연결된 구독이 사용될 수 있음",
-                  "Project files may change and connected subscriptions may be used",
+                  "프로젝트 파일이 바뀌고 연결된 구독이 사용될 수 있습니다.",
+                  "Project files may change and connected subscriptions may be used.",
                 )}
               </p>
-              {portfolioResetWaitCount > 0 && (
-                <p>
-                  <Clock3 size={12} />
-                  {copy(
-                    `구독 초기화 후보 ${portfolioResetWaitCount}개는 해당 시각에 용량을 다시 확인한 뒤 시작`,
-                    `${portfolioResetWaitCount} reset-gated ${portfolioResetWaitCount === 1 ? "run" : "runs"} will recheck capacity at start time`,
-                  )}
-                </p>
-              )}
-              {portfolioDependencyWaitCount > 0 && (
-                <p>
-                  <Clock3 size={12} />
-                  {copy(
-                    `선행 작업·공간 대기 ${portfolioDependencyWaitCount}개는 종료 근거와 작업공간 상태를 확인한 뒤 시작`,
-                    `${portfolioDependencyWaitCount} dependency-gated ${portfolioDependencyWaitCount === 1 ? "run" : "runs"} will verify completion and workspace state before starting`,
-                  )}
-                </p>
-              )}
               {plan?.host_readiness.checks
                 .filter((check) => check.level === "warning")
                 .map((check) => (
                   <p key={check.key}>
                     <AlertTriangle size={12} />
-                    {check.label}: {check.action || check.message}
+                    {productText(check.label)}:{" "}
+                    {productText(check.action || check.message)}
                   </p>
                 ))}
             </div>
 
-            <label className="approval-phrase">
-              <span>
-                {copy("실행하려면", "Type")}{" "}
-                <code>{portfolioApproval.confirmation_phrase}</code>{" "}
-                {copy("입력", "to authorize")}
-              </span>
-              <input
-                autoFocus
-                value={confirmationPhrase}
-                onChange={(event) => {
-                  setConfirmationPhrase(event.target.value);
-                  setApprovalError(null);
-                }}
-                disabled={isDispatching || activeApprovalExpired}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-
-            <p className="approval-warning">{portfolioApproval.warning}</p>
+            <p className="approval-warning">
+              {copy(
+                "실행 전 현재 상태를 다시 확인합니다. 시작 여부가 불확실한 작업은 자동으로 재시도하지 않습니다.",
+                "Current state is checked once more before launch. Ambiguous starts are never retried automatically.",
+              )}
+            </p>
             {activeApprovalExpired && (
               <p className="approval-error" role="alert">
                 {copy(
@@ -4255,7 +4501,7 @@ export function OvernightView({
             )}
             {approvalError && (
               <p className="approval-error" role="alert">
-                {approvalError}
+                {productText(approvalError)}
               </p>
             )}
 
@@ -4271,18 +4517,14 @@ export function OvernightView({
               <button
                 className="approval-confirm"
                 type="button"
+                autoFocus
                 onClick={() => void confirmAndDispatch()}
-                disabled={
-                  isDispatching ||
-                  activeApprovalExpired ||
-                  confirmationPhrase !==
-                    portfolioApproval.confirmation_phrase
-                }
+                disabled={isDispatching || activeApprovalExpired}
               >
                 {isDispatching ? (
                   <>
                     <RefreshCw className="is-spinning" size={13} />
-                    {copy("각 계약 재확인 중", "Rechecking every contract")}
+                    {copy("시작 중", "Starting")}
                   </>
                 ) : activeApprovalExpired ? (
                   <>
@@ -4292,10 +4534,7 @@ export function OvernightView({
                 ) : (
                   <>
                     <MoonStar size={13} />
-                    {copy(
-                      `승인하고 ${portfolioApproval.items.length}개 예약`,
-                      `Approve and schedule ${portfolioApproval.items.length}`,
-                    )}
+                    {copy("이 계획 실행", "Run this plan")}
                   </>
                 )}
               </button>
@@ -4325,8 +4564,8 @@ export function OvernightView({
             </header>
 
             <div className="approval-summary">
-              <span>{approval.project}</span>
-              <strong>{approval.goal}</strong>
+              <span>{productText(approval.project)}</span>
+              <strong>{productText(approval.goal)}</strong>
               <small title={approval.workspace}>
                 {compactPath(approval.workspace, language)}
               </small>
@@ -4370,7 +4609,9 @@ export function OvernightView({
               />
             </label>
 
-            <p className="approval-warning">{approval.warning}</p>
+            <p className="approval-warning">
+              {productText(approval.warning)}
+            </p>
             {activeApprovalExpired && (
               <p className="approval-error" role="alert">
                 {copy(
@@ -4381,7 +4622,7 @@ export function OvernightView({
             )}
             {approvalError && (
               <p className="approval-error" role="alert">
-                {approvalError}
+                {productText(approvalError)}
               </p>
             )}
 

@@ -19,7 +19,7 @@ interface OnboardingProps {
   overview: WorkspaceOverview;
   preferences: AppPreferences;
   onChange: (preferences: AppPreferences) => void;
-  onComplete: () => void;
+  onComplete: (preferences: AppPreferences) => void;
 }
 
 const steps = ["meet", "connect", "ask", "trust"] as const;
@@ -75,7 +75,14 @@ export function Onboarding({
         <button
           className="onboarding-skip"
           type="button"
-          onClick={onComplete}
+          onClick={() => {
+            const skipped = {
+              ...preferences,
+              share_anonymous_usage_data: false,
+            };
+            onChange(skipped);
+            onComplete(skipped);
+          }}
         >
           {ko ? "나중에 설정" : "Set up later"}
         </button>
@@ -95,26 +102,25 @@ export function Onboarding({
               </div>
             </div>
             <div className="onboarding-copy">
-              <span className="kicker">01 · MEET YOUR OPERATOR</span>
               <h1>
                 {ko ? (
                   <>
-                    모든 세션 위에
+                    AI 코딩 세션이
                     <br />
-                    한 명의 Morrow.
+                    한 목록에.
                   </>
                 ) : (
                   <>
-                    One Morrow.
+                    Every AI coding session,
                     <br />
-                    Every session.
+                    in one list.
                   </>
                 )}
               </h1>
               <p>
                 {ko
-                  ? "Codex, Claude, Cursor, Grok과 다른 로컬 에이전트의 흔적을 한 문맥으로 읽고, 일반 질문부터 밤새 맡길 일까지 함께 판단합니다."
-                  : "Morrow reads the traces left by Codex, Claude, Cursor, Grok, and other local agents as one context—from ordinary questions to overnight work."}
+                  ? "AI 코딩 세션이 도구마다 흩어져 있습니다. 이 앱은 그 기록을 읽어 한 목록으로 모으고, 지금 당신을 기다리는 것이 무엇인지 알려줍니다. 원본은 절대 바꾸지 않습니다. Morrow는 그 목록을 함께 살펴보는 도우미입니다."
+                  : "Your AI coding sessions are scattered across every tool you use. This app reads them into one list and tells you which ones are waiting on you. It never changes the originals. Morrow is the assistant that reads that list with you."}
               </p>
               <div className="onboarding-language">
                 <span>{ko ? "사용 언어" : "Choose your language"}</span>
@@ -329,16 +335,48 @@ export function Onboarding({
                   </i>
                 </span>
               </div>
+              <button
+                type="button"
+                className="onboarding-telemetry"
+                role="switch"
+                aria-checked={preferences.share_anonymous_usage_data}
+                onClick={() =>
+                  onChange({
+                    ...preferences,
+                    share_anonymous_usage_data:
+                      !preferences.share_anonymous_usage_data,
+                  })
+                }
+              >
+                <span>
+                  <strong>
+                    {ko
+                      ? "개인정보 최소 사용 통계 공유"
+                      : "Share privacy-minimized usage data"}
+                  </strong>
+                  <small>
+                    {ko
+                      ? "실행·온보딩·로컬 세션 인덱스 성공 여부만 전송합니다. 프롬프트, 경로, 세션 내용은 보내지 않습니다."
+                      : "Sends lifecycle, onboarding, and successful local-index events—never prompts, paths, or session content."}
+                  </small>
+                </span>
+                <i
+                  className={
+                    preferences.share_anonymous_usage_data ? "is-on" : ""
+                  }
+                  aria-hidden="true"
+                />
+              </button>
             </div>
             <div className="onboarding-visual onboarding-visual--ready">
               <div className="ready-ring">
                 <OperatorMark size={78} />
               </div>
-              <strong>{ko ? "첫 관제 준비 완료" : "Ready for first watch"}</strong>
+              <strong>{ko ? "준비 완료" : "You're ready"}</strong>
               <p>
                 {ko
-                  ? `${overview.snapshot.sessions.length}개 세션 · ${overview.context_index.projects.length}개 오늘의 문맥을 발견했습니다.`
-                  : `Found ${overview.snapshot.sessions.length} sessions and ${overview.context_index.projects.length} contexts from today.`}
+                  ? `${overview.snapshot.sessions.length}개 세션을 찾았습니다. 목록에서 바로 확인하세요.`
+                  : `Found ${overview.snapshot.sessions.length} sessions across your tools. They're waiting in the list.`}
               </p>
             </div>
           </section>
@@ -373,7 +411,7 @@ export function Onboarding({
           <button
             className="onboarding-next"
             type="button"
-            onClick={onComplete}
+            onClick={() => onComplete(preferences)}
           >
             {ko ? "Morrow에게 물어보기" : "Ask Morrow"}
             <ArrowRight size={14} />

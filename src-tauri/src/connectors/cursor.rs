@@ -289,17 +289,18 @@ mod tests {
 
     #[test]
     fn unread_and_pending_headers_become_attention_signals() {
-        let headers: CursorHeaders = serde_json::from_str(
-            r#"{"allComposers":[{
+        let fresh_timestamp = Utc::now().timestamp_millis();
+        let headers: CursorHeaders = serde_json::from_str(&format!(
+            r#"{{"allComposers":[{{
               "composerId":"composer-1",
               "name":"Review plan",
-              "createdAt":1784860000000,
+              "createdAt":{fresh_timestamp},
               "hasUnreadMessages":true,
               "hasPendingPlan":true,
               "numSubComposers":2,
-              "trackedGitRepos":[{"repoPath":"/tmp/session-app"}]
-            }]}"#,
-        )
+              "trackedGitRepos":[{{"repoPath":"/tmp/session-app"}}]
+            }}]}}"#
+        ))
         .expect("headers");
         let header =
             serde_json::from_value(headers.all_composers.into_iter().next().unwrap()).unwrap();

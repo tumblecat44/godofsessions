@@ -10,9 +10,11 @@
     "landing:dev": "vite --config landing/vite.config.ts",
     "landing:build": "vite build --config landing/vite.config.ts",
     "landing:preview": "vite preview --config landing/vite.config.ts",
+    "landing:test": "node --test landing/worker.test.mjs",
+    "landing:deploy": "npm run landing:build && npx wrangler d1 migrations apply god-of-sessions-metrics --remote && npx wrangler deploy",
     "preview": "vite preview",
     "tauri": "tauri",
-    "check": "npm run build && cargo test --manifest-path src-tauri/Cargo.toml"
+    "check": "npm run build && npm run landing:test && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",

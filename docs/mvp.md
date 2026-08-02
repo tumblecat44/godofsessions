@@ -11,7 +11,8 @@ session needs attention.
 - local-only
 - no account
 - no cloud service
-- no telemetry
+- no content telemetry; the packaged public release may send the four
+  content-blind anonymous lifecycle events defined by ADR 0048
 - no transcript upload
 - existing native sessions remain the source of truth
 

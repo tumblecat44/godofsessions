@@ -60,6 +60,37 @@ bundled into the desktop application:
 - [Tauri Action](https://github.com/tauri-apps/tauri-action), pinned to commit
   `1deb371b0cd8bd54025b384f1cd735e725c4060f` (`v1`), MIT License.
 
+## Hermes Agent external runtime
+
+- Source: <https://github.com/NousResearch/hermes-agent>
+- License for the core runtime: MIT
+- Integration: user-installed external runtime, invoked out of process
+
+God of Sessions does not bundle or copy Hermes Agent source, its Python
+environment, its credentials, or its auxiliary skill catalog. The Morrow
+adapter imports the user's installed runtime and stores Morrow-specific state
+in a separate local application-data directory.
+
+The upstream repository also contains auxiliary material with terms other than
+MIT. Those trees are not redistributed by this project. Any future release
+that bundles Hermes must use an allowlisted source manifest, review every
+nested license, and include the applicable Hermes copyright and license text.
+The review must also inspect skill-level service terms and dynamically
+installed tools; not every restriction is stored in a file named `LICENSE`.
+
+## tempfile Rust crate
+
+- Source: <https://github.com/Stebalien/tempfile>
+- Distribution: `tempfile` (version resolved by `src-tauri/Cargo.lock`)
+- License: MIT OR Apache License 2.0
+- Integration: bundled Rust runtime dependency used to create and remove each
+  turn's isolated Codex home
+- Distributed license choice: MIT
+- License text: `licenses/tempfile-MIT.txt`
+
+The upstream crate package includes `LICENSE-MIT` and `LICENSE-APACHE`. This
+project distributes the MIT text and the release SBOM must retain this entry.
+
 ## Adding a component or asset
 
 Before adding a dependency, font, icon, image, audio file, video, or model

@@ -47,6 +47,14 @@ const previewConnections: ProviderConnection[] = [
   },
 ];
 
+const uncheckedConnections = previewConnections.map((connection) => ({
+  ...connection,
+  authenticated: false,
+  auth_method: null,
+  plan: null,
+  message: "Provider login status has not been verified yet.",
+}));
+
 interface ProviderConnectionsProps {
   language: AppLanguage;
   compact?: boolean;
@@ -73,7 +81,9 @@ export function ProviderConnections({
 }: ProviderConnectionsProps) {
   const ko = language === "ko";
   const [connections, setConnections] =
-    useState<ProviderConnection[]>(previewConnections);
+    useState<ProviderConnection[]>(
+      isTauri() ? uncheckedConnections : previewConnections,
+    );
   const [loading, setLoading] = useState(true);
   const [login, setLogin] = useState<
     Partial<Record<ConnectionProvider, ProviderLoginResult>>
@@ -89,6 +99,10 @@ export function ProviderConnections({
       if (!mounted.current) return;
       setConnections(next);
       onChange?.(next);
+    } catch {
+      if (!mounted.current) return;
+      setConnections(uncheckedConnections);
+      onChange?.(uncheckedConnections);
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -281,18 +295,26 @@ export function ProviderConnections({
               )}
             </div>
             <div className="provider-connection__action">
-              {connection.authenticated ? (
+              {loading ? (
+                <button
+                  type="button"
+                  className="connection-recheck"
+                  disabled
+                  aria-label={
+                    ko ? "로그인 상태 확인 중" : "Checking login status"
+                  }
+                >
+                  <LoaderCircle className="is-spinning" size={14} />
+                  {!compact && (ko ? "확인 중" : "Checking")}
+                </button>
+              ) : connection.authenticated ? (
                 <button
                   type="button"
                   className="connection-recheck"
                   onClick={() => void load()}
-                  disabled={loading}
                   aria-label={ko ? "연결 다시 확인" : "Recheck connection"}
                 >
-                  <RefreshCw
-                    size={14}
-                    className={loading ? "is-spinning" : ""}
-                  />
+                  <RefreshCw size={14} />
                   {!compact && (ko ? "다시 확인" : "Recheck")}
                 </button>
               ) : (
@@ -316,8 +338,8 @@ export function ProviderConnections({
                         ? "로그인 안내"
                         : "Login steps"
                     : ko
-                      ? "구독 연결"
-                      : "Connect subscription"}
+                      ? "로그인"
+                      : "Sign in"}
                 </button>
               )}
             </div>

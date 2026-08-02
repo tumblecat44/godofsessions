@@ -59,7 +59,7 @@ struct StartedGrok {
 }
 
 pub(super) fn command_preview() -> DispatchCommandPreview {
-    let executable = std::env::current_exe().unwrap_or_else(|_| "God of Sessions".into());
+    let executable = worker_executable().unwrap_or_else(|_| "God of Sessions".into());
     if Path::new("/usr/bin/caffeinate").is_file() {
         DispatchCommandPreview {
             step: "start_grok_night_worker".to_owned(),
@@ -135,16 +135,20 @@ pub(super) fn grok_arguments(
     prompt_path: &Path,
     max_turns: u32,
 ) -> Vec<String> {
+    // `/goal` always launches its own planner and verifier even when the legacy
+    // update_goal driver is selected. Keep its task runtime available for the
+    // provider-owned planner and reviewers, but deny model-initiated Task calls
+    // so the working model cannot create arbitrary subagents of its own.
     let mut arguments = vec![
         "--no-auto-update".to_owned(),
         "--cwd".to_owned(),
         workspace.display().to_string(),
         "--sandbox".to_owned(),
         "strict".to_owned(),
-        "--permission-mode".to_owned(),
-        "dontAsk".to_owned(),
+        "--always-approve".to_owned(),
         "--tools".to_owned(),
-        "Bash,Edit,Read,Write,Glob,Grep".to_owned(),
+        "run_terminal_cmd,get_task_output,kill_task,search_replace,write,read_file,list_dir,grep,todo_write,update_goal,task"
+            .to_owned(),
         "--allow".to_owned(),
         "Edit".to_owned(),
         "--allow".to_owned(),
@@ -165,6 +169,8 @@ pub(super) fn grok_arguments(
         "Bash(git log *)".to_owned(),
         "--allow".to_owned(),
         "Bash(git show *)".to_owned(),
+        "--allow".to_owned(),
+        "Bash(mkdir -p *)".to_owned(),
         "--allow".to_owned(),
         "Bash(git rev-parse *)".to_owned(),
         "--allow".to_owned(),
@@ -220,6 +226,8 @@ pub(super) fn grok_arguments(
         "--deny".to_owned(),
         "MCPTool".to_owned(),
         "--deny".to_owned(),
+        "Task".to_owned(),
+        "--deny".to_owned(),
         "Bash(rm *)".to_owned(),
         "--deny".to_owned(),
         "Bash(git reset *)".to_owned(),
@@ -250,9 +258,7 @@ pub(super) fn grok_arguments(
         "--deny".to_owned(),
         "Bash(security *)".to_owned(),
         "--disable-web-search".to_owned(),
-        "--no-subagents".to_owned(),
         "--no-memory".to_owned(),
-        "--no-plan".to_owned(),
         "--max-turns".to_owned(),
         max_turns.to_string(),
         "--output-format".to_owned(),
@@ -477,8 +483,7 @@ fn validate_approved_preflight(
 }
 
 fn spawn_detached_worker(request: &GrokWorkerRequest) -> Result<Child, String> {
-    let executable = std::env::current_exe()
-        .map_err(|_| "현재 God of Sessions 실행기를 찾지 못했습니다.".to_owned())?;
+    let executable = worker_executable()?;
     let encoded = serde_json::to_vec(request)
         .map_err(|_| "Grok 야간 계약을 직렬화하지 못했습니다.".to_owned())?;
     let mut command = if Path::new("/usr/bin/caffeinate").is_file() {
@@ -512,6 +517,18 @@ fn spawn_detached_worker(request: &GrokWorkerRequest) -> Result<Child, String> {
     }
     drop(stdin);
     Ok(child)
+}
+
+fn worker_executable() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os("MORROW_GROK_LIVE_WORKER_EXECUTABLE") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err("지정한 Grok 라이브 테스트 실행기를 찾지 못했습니다.".to_owned());
+    }
+    std::env::current_exe().map_err(|_| "현재 God of Sessions 실행기를 찾지 못했습니다.".to_owned())
 }
 
 fn read_worker_request() -> Result<GrokWorkerRequest, String> {
@@ -625,6 +642,9 @@ fn start_grok(request: GrokWorkerRequest) -> Result<StartedGrok, String> {
         .current_dir(&workspace)
         .env_clear()
         .envs(filtered_environment(std::env::vars()))
+        .env("GROK_WORKFLOWS", "0")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -836,6 +856,27 @@ mod tests {
         assert!(!new_args.contains(&"--resume".to_owned()));
         assert!(!new_args.contains(&"--fork-session".to_owned()));
         assert!(new_args.contains(&"--session-id".to_owned()));
+        assert!(!new_args.contains(&"--no-plan".to_owned()));
+        assert!(new_args
+            .iter()
+            .any(|argument| argument.contains("todo_write")));
+        assert!(new_args
+            .iter()
+            .any(|argument| argument.contains("update_goal")));
+        assert!(new_args
+            .iter()
+            .any(|argument| argument == "Bash(mkdir -p *)"));
+        assert!(!new_args.contains(&"--no-subagents".to_owned()));
+        assert!(new_args
+            .iter()
+            .any(|argument| argument.contains("get_task_output")));
+        assert!(new_args
+            .iter()
+            .any(|argument| argument.contains("kill_task")));
+        assert!(new_args.iter().any(|argument| argument.ends_with(",task")));
+        assert!(new_args.iter().any(|argument| argument == "Task"));
+        assert!(new_args.contains(&"--always-approve".to_owned()));
+        assert!(!new_args.contains(&"--permission-mode".to_owned()));
 
         let resume_args = grok_arguments(
             RunMode::ResumeExisting,

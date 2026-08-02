@@ -30,6 +30,8 @@ impl SleepHours {
 pub const PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS: u32 = 24 * 7;
 pub const MAX_PORTFOLIO_ADVISOR_SELECTIONS: usize = 3;
 const UNKNOWN_PLAN_CAPACITY_SCORE: f64 = 50.0;
+const LATEST_PROVIDER_CONTEXT_BONUS: f64 = 10.0;
+const RESUMABLE_SESSION_CONTEXT_BONUS: f64 = 25.0;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PortfolioCandidateOption {
@@ -794,6 +796,15 @@ pub fn finalize_portfolio_advisor_plan(
     decision: &PortfolioAdvisorDecision,
     now: DateTime<Utc>,
 ) -> Result<OvernightPlan, String> {
+    finalize_portfolio_advisor_plan_for_language(envelope, decision, "ko", now)
+}
+
+pub fn finalize_portfolio_advisor_plan_for_language(
+    envelope: &PortfolioCandidateEnvelope,
+    decision: &PortfolioAdvisorDecision,
+    language: &str,
+    now: DateTime<Utc>,
+) -> Result<OvernightPlan, String> {
     validate_portfolio_advisor_decision(envelope, decision)?;
     Ok(assemble_plan(
         envelope,
@@ -801,6 +812,7 @@ pub fn finalize_portfolio_advisor_plan(
         &decision.unselected,
         decision.no_run_reason.as_deref(),
         true,
+        language,
         now,
     ))
 }
@@ -861,7 +873,7 @@ fn finalize_deterministic_plan(
         });
     }
 
-    assemble_plan(&envelope, &selected, &unselected, None, false, now)
+    assemble_plan(&envelope, &selected, &unselected, None, false, "ko", now)
 }
 
 fn validate_portfolio_advisor_decision(
@@ -924,8 +936,10 @@ fn assemble_plan(
     unselected_decisions: &[PortfolioAdvisorOptionDecision],
     no_run_reason: Option<&str>,
     include_model_reasons: bool,
+    language: &str,
     now: DateTime<Utc>,
 ) -> OvernightPlan {
+    let english = language == "en";
     let options = envelope
         .options
         .iter()
@@ -939,7 +953,11 @@ fn assemble_plan(
         exclusions.push(ExcludedProject {
             project: option.candidate.project.clone(),
             reason: if include_model_reasons {
-                format!("AI 포트폴리오 판단: {}", item.reason.trim())
+                if english {
+                    format!("AI portfolio judgment: {}", item.reason.trim())
+                } else {
+                    format!("AI 포트폴리오 판단: {}", item.reason.trim())
+                }
             } else {
                 item.reason.clone()
             },
@@ -954,9 +972,11 @@ fn assemble_plan(
                 .expect("validated or internally generated option ID");
             let mut candidate = option.candidate.clone();
             if include_model_reasons {
-                candidate
-                    .evidence
-                    .push(format!("AI 포트폴리오 판단: {}", item.reason.trim()));
+                candidate.evidence.push(if english {
+                    format!("AI portfolio judgment: {}", item.reason.trim())
+                } else {
+                    format!("AI 포트폴리오 판단: {}", item.reason.trim())
+                });
             }
             candidate
         })
@@ -972,8 +992,17 @@ fn assemble_plan(
 
     if let Some(reason) = no_run_reason {
         exclusions.push(ExcludedProject {
-            project: "오늘 밤 실행 안 함".to_owned(),
-            reason: format!("AI 포트폴리오 판단: {}", reason.trim()),
+            project: if english {
+                "Run nothing tonight"
+            } else {
+                "오늘 밤 실행 안 함"
+            }
+            .to_owned(),
+            reason: if english {
+                format!("AI portfolio judgment: {}", reason.trim())
+            } else {
+                format!("AI 포트폴리오 판단: {}", reason.trim())
+            },
         });
     }
     exclusions.sort_by(|left, right| {
@@ -981,13 +1010,16 @@ fn assemble_plan(
             .cmp(&right.project)
             .then_with(|| left.reason.cmp(&right.reason))
     });
-    let schedule = build_schedule(&ordered_candidates);
+    let schedule = build_schedule(&ordered_candidates, language);
     let run_drafts = ordered_candidates
         .iter()
-        .map(crate::night_contract::build)
+        .map(|candidate| crate::night_contract::build_for_language(candidate, language))
         .collect::<Vec<_>>();
     let host_readiness = crate::host_readiness::inspect(&run_drafts, now);
-    let methodology = if include_model_reasons {
+    let methodology = if include_model_reasons && english {
+        "Morrow first proves the work is still open and safe without mid-run judgment, then applies a task-specific estimate, unattended-leverage gate, and verification contract. Recency is only a small freshness confidence adjustment; remaining capacity affects route and start feasibility, not task value. Short work is promoted only as a fixed-manifest batch when one worktree has a verified repeatable pattern and at least one hour of aggregate expected benefit. Your selected subscription model judges the final order and exclusions among eligible candidates; the host validates IDs, duplicates, the complete partition, and selection limits before rebuilding the schedule and execution drafts."
+            .to_owned()
+    } else if include_model_reasons {
         format!(
             "{} 안전 필터를 통과한 후보의 최종 순서와 제외 이유는 사용자가 선택한 구독 모델이 판단했고, 호스트가 후보 ID·중복·전체 분할·최대 선택 수를 검증한 뒤 일정과 실행 초안을 다시 만들었습니다.",
             envelope.methodology
@@ -1083,7 +1115,7 @@ fn allocation_exclusion_reason(
     }
 }
 
-fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
+fn build_schedule(candidates: &[OvernightCandidate], language: &str) -> NightSchedule {
     let mut lanes = BTreeMap::<CapacityPool, NightScheduleLane>::new();
     let mut workspace_hours = BTreeMap::<String, f64>::new();
     for candidate in candidates {
@@ -1148,9 +1180,12 @@ fn build_schedule(candidates: &[OvernightCandidate]) -> NightSchedule {
     NightSchedule {
         parallel,
         lanes,
-        methodology:
+        methodology: if language == "en" {
+            "Runs sharing a subscription pool or physical Git worktree execute one at a time. If a reported usage window resets during sleep, that reset becomes the earliest start opportunity and capacity is checked again immediately before launch. Runs on separate subscriptions still wait when they share one checkout; separate worktrees may run in parallel. Morrow never exceeds the sleep window or invents work to fill unused time."
+        } else {
             "같은 구독 풀과 같은 실제 Git worktree의 작업은 각각 한 번에 하나씩 순차 실행합니다. 보고된 사용량 창이 수면 중 초기화되면 그 뒤를 가장 이른 시작 기회로 삼되 시작 직전에 다시 확인합니다. 서로 다른 구독이더라도 한 checkout을 공유하면 앞 작업의 종료 근거 뒤로 미루며, 별도 worktree는 병렬 실행할 수 있습니다. 수면시간을 넘기거나 남는 시간을 채우기 위한 작업은 만들지 않습니다."
-                .to_owned(),
+        }
+        .to_owned(),
     }
 }
 
@@ -2681,8 +2716,16 @@ fn choose_provider<'a>(
                 0.0
             };
             let context_score = provider_sessions.len().min(3) as f64
-                + if latest.provider == provider { 2.0 } else { 0.0 }
-                + if resumable.is_some() { 3.0 } else { 0.0 };
+                + if latest.provider == provider {
+                    LATEST_PROVIDER_CONTEXT_BONUS
+                } else {
+                    0.0
+                }
+                + if resumable.is_some() {
+                    RESUMABLE_SESSION_CONTEXT_BONUS
+                } else {
+                    0.0
+                };
             let score = capacity.clamp(0.0, 250.0) + context_score
                 - budget_penalty
                 - scarcity_penalty
@@ -3169,6 +3212,57 @@ mod tests {
     }
 
     #[test]
+    fn healthy_resumable_grok_context_beats_a_nonresumable_base_codex_pool() {
+        let snapshot = snapshot(vec![session(
+            Provider::Grok,
+            "grok-session",
+            "alpha",
+            "Continue the current approved parser module implementation with focused tests",
+            SessionStatus::Idle,
+            "2026-07-24T21:50:00Z",
+        )]);
+        let now = DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let inventory = ExecutionRouteInventory {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            routes: vec![
+                route(
+                    "grok:native",
+                    Provider::Grok,
+                    Provider::Grok,
+                    ResourceState::Ready,
+                ),
+                route(
+                    "codex:native",
+                    Provider::Codex,
+                    Provider::Codex,
+                    ResourceState::Ready,
+                ),
+            ],
+            warnings: Vec::new(),
+            methodology: "test".to_owned(),
+        };
+        let mut grok_budget = budget(Provider::Grok, 28.0);
+        grok_budget.plan_capacity = None;
+
+        let plan = build_overnight_plan_with_context_and_routes(
+            &snapshot,
+            vec![grok_budget, budget(Provider::Codex, 28.0)],
+            &synthetic_request_context(&snapshot, now),
+            &inventory,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            now,
+        );
+        let candidate = &plan.candidates[0];
+
+        assert_eq!(candidate.provider, Provider::Grok);
+        assert_eq!(candidate.execution_route_id, "grok:native");
+        assert!(candidate.resume_existing);
+        assert_eq!(candidate.native_session_id.as_deref(), Some("grok-session"));
+    }
+
+    #[test]
     fn provider_choice_uses_the_fresher_writable_grok_route_when_quota_is_available() {
         let snapshot = snapshot(vec![
             session(
@@ -3436,6 +3530,57 @@ mod tests {
                 && item.reason.contains("외부 전송")
                 && item.reason.contains("사람의 승인")
         }));
+    }
+
+    #[test]
+    fn explicit_external_action_constraints_keep_a_local_canary_eligible() {
+        let snapshot = snapshot(vec![session(
+            Provider::Codex,
+            "canary",
+            "canary",
+            "MORROW release canary",
+            SessionStatus::Idle,
+            "2026-07-24T21:30:00Z",
+        )]);
+        let context = ContextIndex {
+            generated_at: "2026-07-24T22:00:00Z".to_owned(),
+            window_hours: 24,
+            projects: vec![ProjectContextBrief {
+                project: "canary".to_owned(),
+                workspace: Some("/work/canary".to_owned()),
+                session_ids: vec!["codex:canary".to_owned()],
+                providers: vec![Provider::Codex],
+                excerpts: vec![ContextExcerpt {
+                    provider: Provider::Codex,
+                    session_id: "codex:canary".to_owned(),
+                    role: ContextRole::User,
+                    text: "Implement buildMorningProof so npm test passes. Work only in this repository, with no network, commit, push, deploy, publish, installs, or external contact.".to_owned(),
+                    timestamp: Some("2026-07-24T21:31:00Z".to_owned()),
+                }],
+                excerpt_count: 1,
+                truncated: false,
+            }],
+            warnings: Vec::new(),
+            ephemeral: true,
+            methodology: "test".to_owned(),
+        };
+
+        let plan = build_overnight_plan_with_context(
+            &snapshot,
+            vec![budget(Provider::Codex, 10.0)],
+            &context,
+            SleepHours::new(7.0).expect("valid sleep duration"),
+            DateTime::parse_from_rfc3339("2026-07-24T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert!(plan.candidates[0].goal.contains("buildMorningProof"));
+        assert!(!plan
+            .exclusions
+            .iter()
+            .any(|item| item.project == "canary" && item.reason.contains("외부 전송")));
     }
 
     #[test]

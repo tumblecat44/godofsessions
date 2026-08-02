@@ -53,6 +53,14 @@ struct CachedMarkers {
     markers: Vec<RunMarker>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct DurableGoalState {
+    pub(super) objective: String,
+    pub(super) status: String,
+    pub(super) created_at_ms: i64,
+    pub(super) updated_at_ms: i64,
+}
+
 #[derive(Debug)]
 pub(super) struct ThreadRunSource {
     pub(super) thread_id: String,
@@ -463,11 +471,21 @@ pub(crate) fn load_history() -> (Vec<NightRunRecord>, Vec<String>) {
     for source in sources {
         match scan_cached(&source.rollout_path) {
             Ok(markers) => {
-                runs.extend(
-                    markers
-                        .into_iter()
-                        .map(|marker| history_record(&source, marker)),
-                );
+                for marker in markers {
+                    let marker = match reconcile_durable_goal(&source.thread_id, marker.clone()) {
+                        Ok(marker) => marker,
+                        Err(error) => {
+                            if warnings.len() < 5 {
+                                warnings.push(format!(
+                                    "Codex thread {}의 durable Goal 상태를 읽지 못했습니다: {error}",
+                                    source.thread_id
+                                ));
+                            }
+                            marker
+                        }
+                    };
+                    runs.push(history_record(&source, marker));
+                }
             }
             Err(error) if warnings.len() < 5 => warnings.push(format!(
                 "Codex thread {}의 야간 기록을 읽지 못했습니다: {error}",
@@ -501,7 +519,11 @@ pub(crate) fn load_record(
         return Ok(None);
     };
     let marker = find_marker(&source.rollout_path, idempotency_key)?;
-    Ok(marker.map(|marker| history_record(&source, marker)))
+    marker
+        .map(|marker| {
+            reconcile_durable_goal(thread_id, marker).map(|marker| history_record(&source, marker))
+        })
+        .transpose()
 }
 
 pub(crate) fn load_detail(task_id: &str, thread_id: &str) -> Result<NightRunDetail, String> {
@@ -514,7 +536,83 @@ pub(crate) fn load_detail(task_id: &str, thread_id: &str) -> Result<NightRunDeta
         .ok_or_else(|| {
             "Codex provider rollout에서 이 God of Sessions 야간 turn을 찾지 못했습니다.".to_owned()
         })?;
+    let marker = reconcile_durable_goal(thread_id, marker)?;
     Ok(history_detail(&source, marker))
+}
+
+fn reconcile_durable_goal(thread_id: &str, marker: RunMarker) -> Result<RunMarker, String> {
+    let Some(goal) = load_durable_goal(thread_id)? else {
+        return Ok(marker);
+    };
+    Ok(apply_durable_goal(marker, &goal))
+}
+
+fn load_durable_goal(thread_id: &str) -> Result<Option<DurableGoalState>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "홈 폴더를 찾지 못했습니다.".to_owned())?;
+    let goals_path = home.join(".codex/goals_1.sqlite");
+    if !goals_path.is_file() {
+        return Ok(None);
+    }
+    let connection = open_read_only_sqlite(&goals_path).map_err(|error| error.to_string())?;
+    connection
+        .query_row(
+            "
+            SELECT objective, status, created_at_ms, updated_at_ms
+            FROM thread_goals
+            WHERE thread_id = ?
+            LIMIT 1
+            ",
+            [thread_id],
+            |row| {
+                Ok(DurableGoalState {
+                    objective: row.get(0)?,
+                    status: row.get(1)?,
+                    created_at_ms: row.get(2)?,
+                    updated_at_ms: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+pub(super) fn apply_durable_goal(mut marker: RunMarker, goal: &DurableGoalState) -> RunMarker {
+    if extract_idempotency_key(&goal.objective).as_deref() != Some(marker.idempotency_key.as_str())
+    {
+        return marker;
+    }
+    let status = match goal.status.as_str() {
+        "active" => "active",
+        "complete" => "complete",
+        "blocked" => "blocked",
+        "paused" => "paused",
+        "usage_limited" => "usageLimited",
+        "budget_limited" => "budgetLimited",
+        _ => return marker,
+    };
+    marker.status = status.to_owned();
+    marker.started_at = marker
+        .started_at
+        .or_else(|| timestamp_millis(goal.created_at_ms));
+    if matches!(
+        status,
+        "complete" | "blocked" | "paused" | "usageLimited" | "budgetLimited"
+    ) {
+        marker.completed_at = timestamp_millis(goal.updated_at_ms);
+    }
+    let event_kind = format!("goal_{status}_durable");
+    if !marker.events.iter().any(|event| event.kind == event_kind) {
+        marker.events.push(MarkerEvent {
+            kind: event_kind,
+            created_at: timestamp_millis(goal.updated_at_ms),
+            note: Some("Codex durable Goal 저장소와 교차 확인됨".to_owned()),
+        });
+    }
+    marker
+}
+
+fn timestamp_millis(value: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(value).map(|value| value.to_rfc3339())
 }
 
 fn load_thread_run_source(thread_id: &str) -> Result<Option<ThreadRunSource>, String> {
@@ -555,10 +653,15 @@ fn load_thread_run_sources(
     let mut statement = connection
         .prepare(
             "
-            SELECT id, rollout_path, cwd, title
+            SELECT threads.id, threads.rollout_path, threads.cwd, threads.title
             FROM threads
-            WHERE updated_at >= ?
-            ORDER BY updated_at DESC, id DESC
+            WHERE threads.updated_at >= ?
+              AND NOT EXISTS (
+                SELECT 1
+                FROM thread_spawn_edges
+                WHERE thread_spawn_edges.child_thread_id = threads.id
+              )
+            ORDER BY threads.updated_at DESC, threads.id DESC
             LIMIT ?
             ",
         )
@@ -710,7 +813,7 @@ pub(super) fn history_detail(source: &ThreadRunSource, marker: RunMarker) -> Nig
         events,
         warnings,
         read_only: true,
-        methodology: "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. provider-native Goal objective의 marker와 terminal status가 God of Sessions 계약과 실행 수명주기를 증명하며, 결과의 정확성은 별도 검토합니다."
+        methodology: "Codex thread index, provider rollout, durable Goal 저장소를 읽기 전용으로 결합했습니다. 정확히 일치하는 Goal objective marker와 terminal status가 God of Sessions 계약과 실행 수명주기를 증명하며, 결과의 정확성은 별도 검토합니다."
             .to_owned(),
     }
 }

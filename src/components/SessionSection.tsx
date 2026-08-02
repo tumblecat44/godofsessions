@@ -1,8 +1,8 @@
+import { dayBucket } from "../lib/format";
 import type { AppLanguage, Session } from "../types";
 import { SessionRow } from "./SessionRow";
 
 interface SessionSectionProps {
-  eyebrow: string;
   title: string;
   description: string;
   sessions: Session[];
@@ -10,10 +10,12 @@ interface SessionSectionProps {
   tone: "attention" | "live" | "recent";
   limit?: number;
   language: AppLanguage;
+  onOpen?: (session: Session) => void;
+  /** Group rows under Today / Yesterday / date headings. */
+  groupByDay?: boolean;
 }
 
 export function SessionSection({
-  eyebrow,
   title,
   description,
   sessions,
@@ -21,6 +23,8 @@ export function SessionSection({
   tone,
   limit = 8,
   language,
+  onOpen,
+  groupByDay = false,
 }: SessionSectionProps) {
   const ko = language === "ko";
   const emptyCopy = {
@@ -36,11 +40,19 @@ export function SessionSection({
   };
   const visible = sessions.slice(0, limit);
 
+  // preserve incoming order; one heading per calendar day
+  const groups: Array<[string, Session[]]> = [];
+  for (const session of visible) {
+    const day = dayBucket(session.updated_at, language);
+    const last = groups[groups.length - 1];
+    if (groupByDay && last && last[0] === day) last[1].push(session);
+    else groups.push([day, [session]]);
+  }
+
   return (
     <section className={`session-section session-section--${tone}`}>
       <header className="section-header">
         <div>
-          <span className="eyebrow">{eyebrow}</span>
           <div className="section-title-line">
             <h2>{title}</h2>
             <span className="section-count">{total}</span>
@@ -54,13 +66,20 @@ export function SessionSection({
 
       <div className="session-list">
         {visible.length > 0 ? (
-          visible.map((session) => (
-            <SessionRow
-              key={session.id}
-              session={session}
-              emphasis={tone === "recent" ? "standard" : tone}
-              language={language}
-            />
+          groups.map(([day, rows]) => (
+            <div className="session-day-group" key={day}>
+              {groupByDay && <h3 className="session-day-heading">{day}</h3>}
+              {rows.map((session) => (
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  emphasis={tone === "recent" ? "standard" : tone}
+                  language={language}
+                  onOpen={onOpen}
+                  showDay={!groupByDay}
+                />
+              ))}
+            </div>
           ))
         ) : (
           <div className="empty-state">

@@ -38,6 +38,7 @@ export interface AppPreferences {
   >;
   default_overnight_hours: number;
   onboarding_complete: boolean;
+  share_anonymous_usage_data: boolean;
 }
 
 export type NativeKind =

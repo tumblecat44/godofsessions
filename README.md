@@ -46,10 +46,14 @@ Route, Capacity Pool, and Night Portfolio lives in [CONTEXT.md](CONTEXT.md).
 
 The Morrow operator chat slice is working. Morrow's production conversation
 loop now runs through an installed Hermes Agent using its official headless TUI
-Gateway protocol. Hermes owns the session, compaction, retries, agent memory,
-and session recall; God of Sessions supplies bounded workspace and overnight
-evidence and remains authoritative for routes, approval, dispatch, and
-receipts. Codex is the first enabled model/capacity route inside that runtime.
+Gateway protocol. Hermes owns the durable transcript, session identity, agent
+memory, session recall, and gateway lifecycle; the official Codex app-server
+owns authentication and the per-turn model/tool loop. God of Sessions supplies
+bounded workspace and overnight evidence and remains authoritative for routes,
+approval, dispatch, and receipts. Codex is the first enabled model/capacity
+route inside that runtime. Durable memory changes must quote the current
+user's raw message exactly, and durable tool rows retain only minimized
+success/status receipts.
 Claude stays visibly blocked until Hermes can execute through an official
 Claude Code adapter. The chat cannot dispatch work;
 overnight requests hand off to the existing approval-gated planner. The
@@ -431,8 +435,11 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 
 ## Privacy boundary
 
-God of Sessions is local-only. It does not use an account, cloud service,
-telemetry, or transcript upload.
+God of Sessions remains local-first. It does not use an application account or
+upload transcripts. Packaged builds can send four content-blind anonymous
+lifecycle events to a private Cloudflare D1 database; this is disclosed
+during onboarding, can be disabled in Settings, and honors `DO_NOT_TRACK=1`.
+See [Anonymous usage metrics](docs/telemetry.md) for the exact schema.
 
 - Vendor databases are opened read-only and query-only.
 - The Cursor adapter queries only `composer.composerHeaders`; Cursor
@@ -449,3 +456,6 @@ telemetry, or transcript upload.
 - Route detection reads only safe Hermes model keys and checks provider-key
   presence in auth metadata. Credential values are never displayed or
   persisted.
+- Anonymous metrics never include prompts, responses, paths, repositories,
+  branches, session identifiers or titles, provider credentials, error text,
+  or stack traces.

@@ -18,24 +18,65 @@ pub(crate) fn supports_dispatch(surface: Provider, _resume_existing: bool) -> bo
 }
 
 pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
-    let outcome = clean_to(&candidate.expected_outcome, MAX_OUTCOME_CHARS);
-    let verification = clean_to(&candidate.verification.join(" / "), MAX_VERIFICATION_CHARS);
-    let constraints = concat!(
-        "기존 동작과 사용자의 관련 없는 변경을 보존할 것. ",
-        "외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것. ",
-        "검증 근거 없이 완료라고 보고하지 말 것."
-    )
-    .to_owned();
-    let boundaries = format!(
-        "{} 작업공간 안의 이 목표와 직접 관련된 파일·테스트·로컬 도구만 사용",
-        clean_to(&candidate.cwd, MAX_WORKSPACE_CHARS)
+    build_for_language(candidate, "ko")
+}
+
+pub fn build_for_language(candidate: &OvernightCandidate, language: &str) -> NightRunDraft {
+    let english = language == "en";
+    let outcome = clean_to(
+        &localized_standard_text(&candidate.expected_outcome, english),
+        MAX_OUTCOME_CHARS,
     );
-    let stop_when = concat!(
-        "자격 증명·사람의 결정·외부 시스템 변경·파괴적 작업이 필요하거나, ",
-        "관련 없는 기존 실패 때문에 검증할 수 없으면 추측으로 진행하지 말고 막힌 이유를 남길 것. ",
-        "목표가 일찍 끝나면 시간을 채우기 위한 새 일을 만들지 말 것."
-    )
-    .to_owned();
+    let verification = clean_to(
+        &candidate
+            .verification
+            .iter()
+            .map(|item| localized_standard_text(item, english))
+            .collect::<Vec<_>>()
+            .join(" / "),
+        MAX_VERIFICATION_CHARS,
+    );
+    let constraints = if english {
+        concat!(
+            "Preserve existing behavior and unrelated user changes. ",
+            "Do not send external messages, post, deploy, push, merge, delete, purchase, or pay. ",
+            "Do not report completion without verification evidence."
+        )
+        .to_owned()
+    } else {
+        concat!(
+            "기존 동작과 사용자의 관련 없는 변경을 보존할 것. ",
+            "외부 메시지 전송, 게시, 배포, push, merge, 삭제, 구매, 결제를 하지 말 것. ",
+            "검증 근거 없이 완료라고 보고하지 말 것."
+        )
+        .to_owned()
+    };
+    let boundaries = if english {
+        format!(
+            "Use only files, tests, and local tools directly related to this goal inside the {} workspace",
+            clean_to(&candidate.cwd, MAX_WORKSPACE_CHARS)
+        )
+    } else {
+        format!(
+            "{} 작업공간 안의 이 목표와 직접 관련된 파일·테스트·로컬 도구만 사용",
+            clean_to(&candidate.cwd, MAX_WORKSPACE_CHARS)
+        )
+    };
+    let stop_when = if english {
+        concat!(
+            "If credentials, a human decision, an external-system change, or a destructive action is required, ",
+            "or unrelated existing failures prevent verification, stop and record the blocker instead of guessing. ",
+            "If the goal finishes early, do not invent busywork to fill the time."
+        )
+        .to_owned()
+    } else {
+        concat!(
+            "자격 증명·사람의 결정·외부 시스템 변경·파괴적 작업이 필요하거나, ",
+            "관련 없는 기존 실패 때문에 검증할 수 없으면 추측으로 진행하지 말고 막힌 이유를 남길 것. ",
+            "목표가 일찍 끝나면 시간을 채우기 위한 새 일을 만들지 말 것."
+        )
+        .to_owned()
+    };
     let contract = GoalContract {
         outcome,
         verification,
@@ -50,14 +91,17 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
         Provider::Grok => RunDraftFormat::GrokGoal,
         _ => RunDraftFormat::StructuredPrompt,
     };
-    let goal = clean_to(&candidate.goal, MAX_GOAL_CHARS);
+    let goal = clean_to(
+        &localized_standard_text(&candidate.goal, english),
+        MAX_GOAL_CHARS,
+    );
     let prompt = match format {
         RunDraftFormat::HermesGoal => render_hermes_goal(&goal, &contract),
-        RunDraftFormat::CodexGoal => render_codex_goal(&goal, &contract),
+        RunDraftFormat::CodexGoal => render_codex_goal(&goal, &contract, english),
         RunDraftFormat::ClaudeGoal | RunDraftFormat::GrokGoal => {
-            render_slash_goal(&goal, &contract)
+            render_slash_goal(&goal, &contract, english)
         }
-        RunDraftFormat::StructuredPrompt => render_structured_prompt(&goal, &contract),
+        RunDraftFormat::StructuredPrompt => render_structured_prompt(&goal, &contract, english),
     };
     debug_assert!(prompt.chars().count() <= MAX_NATIVE_GOAL_CHARS);
 
@@ -97,6 +141,33 @@ pub fn build(candidate: &OvernightCandidate) -> NightRunDraft {
     }
 }
 
+fn localized_standard_text(value: &str, english: bool) -> String {
+    if !english {
+        return value.to_owned();
+    }
+    value
+        .replace(
+            " — 검증 가능한 결과까지 진행",
+            " — continue to a verifiable result",
+        )
+        .replace(
+            "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고",
+            "A bounded change set, test and verification evidence, and a morning report of any remaining blockers",
+        )
+        .replace(
+            "프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것",
+            "Pass the project's relevant tests, type checks, and build checks",
+        )
+        .replace(
+            "변경 범위와 생성된 산출물을 아침 보고에 명시할 것",
+            "List the changed scope and generated artifacts in the morning report",
+        )
+        .replace(
+            "검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인을 남길 것",
+            "If verification is blocked, record the cause instead of guessing that the work is done",
+        )
+}
+
 fn render_hermes_goal(goal: &str, contract: &GoalContract) -> String {
     format!(
         "/goal {goal}\n\
@@ -113,22 +184,27 @@ fn render_hermes_goal(goal: &str, contract: &GoalContract) -> String {
     )
 }
 
-fn render_slash_goal(goal: &str, contract: &GoalContract) -> String {
-    format!("/goal {}", render_goal_objective(goal, contract))
+fn render_slash_goal(goal: &str, contract: &GoalContract, english: bool) -> String {
+    format!("/goal {}", render_goal_objective(goal, contract, english))
 }
 
-fn render_codex_goal(goal: &str, contract: &GoalContract) -> String {
-    render_goal_objective(goal, contract)
+fn render_codex_goal(goal: &str, contract: &GoalContract, english: bool) -> String {
+    render_goal_objective(goal, contract, english)
 }
 
-fn render_goal_objective(goal: &str, contract: &GoalContract) -> String {
+fn render_goal_objective(goal: &str, contract: &GoalContract, english: bool) -> String {
+    let completion_report = if english {
+        "Truthfully summarize the changed scope, verification results, remaining risks, and blockers."
+    } else {
+        "변경 범위, 검증 결과, 남은 위험과 막힌 점을 사실대로 요약할 것."
+    };
     format!(
         "{goal}\n\n\
          Authority boundaries (non-negotiable)\n{}\n{}\n\n\
          Stop conditions\n{}\n\n\
          Required outcome\n{}\n\n\
          Verification\n{}\n\n\
-         Completion report\n변경 범위, 검증 결과, 남은 위험과 막힌 점을 사실대로 요약할 것.",
+         Completion report\n{completion_report}",
         contract.constraints,
         contract.boundaries,
         contract.stop_when,
@@ -137,7 +213,12 @@ fn render_goal_objective(goal: &str, contract: &GoalContract) -> String {
     )
 }
 
-fn render_structured_prompt(goal: &str, contract: &GoalContract) -> String {
+fn render_structured_prompt(goal: &str, contract: &GoalContract, english: bool) -> String {
+    let completion_report = if english {
+        "Truthfully summarize the changed scope, verification results, remaining risks, and blockers."
+    } else {
+        "변경 범위, 검증 결과, 남은 위험과 막힌 점을 사실대로 요약할 것."
+    };
     format!(
         "Overnight goal\n{goal}\n\n\
          Outcome\n{}\n\n\
@@ -145,7 +226,7 @@ fn render_structured_prompt(goal: &str, contract: &GoalContract) -> String {
          Constraints\n{}\n\n\
          Boundaries\n{}\n\n\
          Stop and report when\n{}\n\n\
-         Morning report\n변경 범위, 검증 결과, 남은 위험과 막힌 점을 사실대로 요약할 것.",
+         Morning report\n{completion_report}",
         contract.outcome,
         contract.verification,
         contract.constraints,
@@ -264,6 +345,59 @@ mod tests {
         assert!(draft.contract.constraints.contains("배포"));
         assert!(draft.contract.stop_when.contains("사람의 결정"));
         assert!(draft.contract.stop_when.contains("새 일을 만들지 말 것"));
+    }
+
+    #[test]
+    fn english_draft_localizes_the_operational_safety_contract() {
+        let mut english_candidate = candidate(Provider::Codex, false);
+        english_candidate.goal = "Implement and verify the overnight canary".to_owned();
+        english_candidate.expected_outcome = "A tested local change".to_owned();
+        english_candidate.verification = vec!["The focused test passes".to_owned()];
+
+        let draft = build_for_language(&english_candidate, "en");
+
+        assert!(draft
+            .contract
+            .constraints
+            .contains("Do not send external messages"));
+        assert!(draft
+            .contract
+            .boundaries
+            .contains("inside the /work/godofsessions workspace"));
+        assert!(draft.contract.stop_when.contains("do not invent busywork"));
+        assert!(draft
+            .prompt
+            .contains("Truthfully summarize the changed scope"));
+        assert!(!draft
+            .prompt
+            .chars()
+            .any(|character| ('\u{ac00}'..='\u{d7a3}').contains(&character)));
+    }
+
+    #[test]
+    fn english_draft_localizes_host_generated_goal_outcome_and_verification() {
+        let mut generated = candidate(Provider::Codex, false);
+        generated.goal = "Implement buildMorningProof — 검증 가능한 결과까지 진행".to_owned();
+        generated.expected_outcome =
+            "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고".to_owned();
+        generated.verification = vec![
+            "프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것".to_owned(),
+            "변경 범위와 생성된 산출물을 아침 보고에 명시할 것".to_owned(),
+            "검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인을 남길 것".to_owned(),
+        ];
+
+        let draft = build_for_language(&generated, "en");
+
+        assert!(draft.goal.ends_with("continue to a verifiable result"));
+        assert!(draft.contract.outcome.starts_with("A bounded change set"));
+        assert!(draft
+            .contract
+            .verification
+            .contains("Pass the project's relevant tests"));
+        assert!(!draft
+            .prompt
+            .chars()
+            .any(|character| ('\u{ac00}'..='\u{d7a3}').contains(&character)));
     }
 
     #[test]

@@ -24,11 +24,6 @@ import type {
 } from "../types";
 import { ProviderConnections } from "./ProviderConnections";
 
-const advisorProviders: ChatProvider[] = [
-  "codex_subscription",
-  "claude_subscription",
-];
-
 const planTierOptions: Record<
   ChatProvider,
   { value: SubscriptionPlanTier; ko: string; en: string }[]
@@ -147,7 +142,7 @@ export function SettingsView({
   const ko = preferences.language === "ko";
   const provider = preferences.default_chat_provider;
   const [providers, setProviders] = useState<ChatProviderOption[]>(() =>
-    isTauri() ? unavailableProviders : previewProviders,
+    isTauri() ? [] : previewProviders,
   );
   const [loadingProviders, setLoadingProviders] = useState(isTauri());
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -220,6 +215,31 @@ export function SettingsView({
   const currentProvider =
     providers.find((option) => option.provider === provider) ??
     unavailableProviders.find((option) => option.provider === provider)!;
+  const selectableProviders = providers.filter(
+    (option) => option.available && option.authenticated,
+  );
+
+  useEffect(() => {
+    if (
+      loadingProviders ||
+      providerError ||
+      selectableProviders.length === 0 ||
+      selectableProviders.some((option) => option.provider === provider)
+    ) {
+      return;
+    }
+    onChange({
+      ...preferences,
+      default_chat_provider: selectableProviders[0].provider,
+    });
+  }, [
+    loadingProviders,
+    onChange,
+    preferences,
+    provider,
+    providerError,
+    selectableProviders,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -551,46 +571,36 @@ export function SettingsView({
               role="group"
               aria-label={ko ? "판단 공급자" : "Advisor provider"}
             >
-              {advisorProviders.map((optionProvider) => {
-                const option =
-                  providers.find(
-                    (item) => item.provider === optionProvider,
-                  ) ??
-                  unavailableProviders.find(
-                    (item) => item.provider === optionProvider,
-                  )!;
-                const selected = provider === optionProvider;
+              {selectableProviders.map((option) => {
+                const selected = provider === option.provider;
                 return (
                   <button
                     type="button"
                     className={selected ? "is-selected" : ""}
-                    key={optionProvider}
+                    key={option.provider}
                     aria-pressed={selected}
-                    onClick={() => chooseProvider(optionProvider)}
+                    onClick={() => chooseProvider(option.provider)}
                   >
-                    <i
-                      className={
-                        option.authenticated && option.available
-                          ? "is-ready"
-                          : "is-unavailable"
-                      }
-                    />
+                    <i className="is-ready" />
                     <span>
-                      <strong>{providerName(optionProvider)}</strong>
+                      <strong>{providerName(option.provider)}</strong>
                       <small>
-                        {option.authenticated && option.available
-                          ? [option.plan, ko ? "사용 가능" : "Available"]
-                              .filter(Boolean)
-                              .join(" · ")
-                          : ko
-                            ? "연결 필요"
-                            : "Needs connection"}
+                        {[option.plan, ko ? "사용 가능" : "Available"]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </small>
                     </span>
                     {selected && <Check size={13} />}
                   </button>
                 );
               })}
+              {!loadingProviders && selectableProviders.length === 0 && (
+                <p className="advisor-provider-empty">
+                  {ko
+                    ? "사용 가능한 Morrow 경로가 없습니다. 위의 연결 상태와 Hermes 제한을 확인하세요."
+                    : "No Morrow route is available. Check the connection status and Hermes limitations above."}
+                </p>
+              )}
             </div>
 
             <div className="advisor-model-fields">
@@ -704,10 +714,9 @@ export function SettingsView({
               </div>
             </div>
             <div className="plan-tier-grid">
-              {advisorProviders.map((planProvider) => {
-                const detected = providers.find(
-                  (item) => item.provider === planProvider,
-                )?.plan;
+              {selectableProviders.map((option) => {
+                const planProvider = option.provider;
+                const detected = option.plan;
                 return (
                   <label key={planProvider}>
                     <span>{providerName(planProvider)}</span>
@@ -739,6 +748,59 @@ export function SettingsView({
                 );
               })}
             </div>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <div className="settings-section__heading">
+            <span className="settings-section__icon">
+              <ShieldCheck size={16} />
+            </span>
+            <div>
+              <h2>{ko ? "개인정보" : "Privacy"}</h2>
+              <p>
+                {ko
+                  ? "제품 개선을 위한 개인정보 최소 사용 통계를 관리합니다."
+                  : "Control privacy-minimized usage data used to improve the product."}
+              </p>
+            </div>
+          </div>
+          <div className="privacy-setting">
+            <span>
+              <strong>
+                {ko
+                  ? "개인정보 최소 사용 통계 공유"
+                  : "Share privacy-minimized usage data"}
+              </strong>
+              <small>
+                {ko
+                  ? "앱 실행, 온보딩 완료, 로컬 세션 인덱스 성공 여부만 보냅니다. 프롬프트, 파일 경로, 저장소, 세션 내용은 전송하지 않습니다."
+                  : "Sends app lifecycle, onboarding, and successful local-index events only. Prompts, paths, repositories, and session content never leave this Mac."}
+              </small>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={preferences.share_anonymous_usage_data}
+              className={
+                preferences.share_anonymous_usage_data ? "is-enabled" : ""
+              }
+              onClick={() =>
+                update({
+                  share_anonymous_usage_data:
+                    !preferences.share_anonymous_usage_data,
+                })
+              }
+            >
+              <i />
+              {preferences.share_anonymous_usage_data
+                ? ko
+                  ? "켜짐"
+                  : "On"
+                : ko
+                  ? "꺼짐"
+                  : "Off"}
+            </button>
           </div>
         </section>
 

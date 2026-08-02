@@ -1,9 +1,17 @@
 import { ArrowRight } from "lucide-react";
-import type { AppLanguage, MorrowWatch, WorkItemState } from "../types";
+import { sessionBucket } from "../lib/format";
+import type {
+  AppLanguage,
+  MorrowWatch,
+  Session,
+  WorkItemState,
+} from "../types";
 import { OperatorMark } from "./OperatorMark";
 
 interface MorrowWatchRailProps {
   watch: MorrowWatch;
+  /** Counted here so this strip can never disagree with the session list. */
+  sessions: Session[];
   language: AppLanguage;
   onOpenBoard: () => void;
 }
@@ -18,10 +26,17 @@ const focusLabels: Record<WorkItemState, { ko: string; en: string }> = {
 
 export function MorrowWatchRail({
   watch,
+  sessions,
   language,
   onOpenBoard,
 }: MorrowWatchRailProps) {
   const ko = language === "ko";
+  const live = sessions.filter((s) => !s.archived);
+  const counts = {
+    running: live.filter((s) => sessionBucket(s.status) === "running").length,
+    needsYou: live.filter((s) => sessionBucket(s.status) === "needs_me").length,
+    idle: live.filter((s) => sessionBucket(s.status) === "recent").length,
+  };
   const focus = watch.focus;
   const degraded = watch.state === "degraded";
   const gapSummary = [
@@ -75,16 +90,17 @@ export function MorrowWatchRail({
         aria-label={ko ? "관제 수치" : "Watch telemetry"}
       >
         <span>
-          <strong>{watch.running_sessions}</strong>
-          <small>{ko ? "작업 중 세션" : "RUNNING SESSIONS"}</small>
+          <strong>{counts.running}</strong>
+          <small>{ko ? "작업 중" : "RUNNING"}</small>
         </span>
-        <span className={watch.needs_you_items > 0 ? "needs-you" : ""}>
-          <strong>{watch.needs_you_items}</strong>
-          <small>{ko ? "사람 확인 작업" : "NEEDS-YOU WORK"}</small>
+        <span className={counts.needsYou > 0 ? "needs-you" : ""}>
+          <strong>{counts.needsYou}</strong>
+          <small>{ko ? "당신을 기다림" : "NEEDS YOU"}</small>
         </span>
         <span>
-          <strong>{watch.quiet_sessions}</strong>
-          <small>{ko ? "조용한 세션" : "QUIET SESSIONS"}</small>
+          {/* this bucket also holds completed and failed — "idle" would lie */}
+          <strong>{counts.idle}</strong>
+          <small>{ko ? "최근 종료됨" : "RECENTLY FINISHED"}</small>
         </span>
       </div>
 
@@ -121,7 +137,7 @@ export function MorrowWatchRail({
       </div>
 
       <button type="button" onClick={onOpenBoard}>
-        {ko ? "관제판" : "Control board"}
+        {ko ? "실행 대기열" : "Run queue"}
         <ArrowRight size={13} />
       </button>
     </section>

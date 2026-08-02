@@ -32,7 +32,7 @@ const session = (
   repository: repo,
   branch: "main",
   worktree: null,
-  created_at: new Date(now - 86_400_000).toISOString(),
+  created_at: new Date(now - (minutesAgo + 90) * 60_000).toISOString(),
   updated_at: new Date(now - minutesAgo * 60_000).toISOString(),
   status,
   status_confidence: status === "running" ? "observed" : "inferred",
@@ -87,6 +87,16 @@ const sessions: Session[] = [
     "idle",
     240,
   ),
+  // older than today, so date grouping and "find yesterday's session" are real
+  session("claude", "cl4", "야간 실행 회고 정리", "orca", "completed", 1_500, {
+    tokens_used: 42_180,
+    model: "claude-opus-5",
+    branch: "chore/night-retro",
+  }),
+  session("codex", "co3", "마이그레이션 스크립트 검토", "malgun-app", "idle", 1_680),
+  session("claude", "cl5", "인덱서 회귀 추적", "godofsessions", "failed", 3_120, {
+    branch: "fix/indexer-regression",
+  }),
 ];
 
 const providers: ProviderSummary[] = (
@@ -257,11 +267,25 @@ export const previewWorkspaceOverview: WorkspaceOverview = {
       {
         project: "godofsessions",
         workspace: "/Users/you/projects/godofsessions",
-        session_ids: ["codex:co2", "hermes:h1"],
-        providers: ["codex", "hermes"],
-        excerpt_count: 8,
+        session_ids: ["codex:co2", "hermes:h1", "cursor:c1"],
+        providers: ["codex", "hermes", "cursor"],
+        excerpt_count: 10,
         truncated: true,
         excerpts: [
+          {
+            provider: "cursor",
+            session_id: "cursor:c1",
+            role: "user",
+            text: "세션 목록 화면의 탐색 구조를 정리하고, 각 줄을 눌러 상세를 볼 수 있게 해줘.",
+            timestamp: new Date(now - 88 * 60_000).toISOString(),
+          },
+          {
+            provider: "cursor",
+            session_id: "cursor:c1",
+            role: "assistant",
+            text: "세션 줄을 버튼으로 바꾸고 상세 패널을 추가하는 계획을 세웠습니다. 승인해 주시면 적용하겠습니다.",
+            timestamp: new Date(now - 84 * 60_000).toISOString(),
+          },
           {
             provider: "codex",
             session_id: "codex:co2",

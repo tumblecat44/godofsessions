@@ -12,16 +12,18 @@ import { ControlBoardView } from "./components/ControlBoardView";
 import { ChatView } from "./components/ChatView";
 import { Onboarding } from "./components/Onboarding";
 import { OperatorMark } from "./components/OperatorMark";
+import { SessionDetail } from "./components/SessionDetail";
 import { SessionSection } from "./components/SessionSection";
 import { Sidebar } from "./components/Sidebar";
 import { SettingsView } from "./components/SettingsView";
 import { OvernightView } from "./components/OvernightView";
-import { fallbackTitle, relativeTime } from "./lib/format";
+import { fallbackTitle, relativeTime, sessionBucket } from "./lib/format";
 import {
   loadPreferences,
   planOverrides,
   savePreferences,
 } from "./lib/preferences";
+import { trackAppOpened, trackOnce } from "./lib/telemetry";
 import { localizePreviewFixture } from "./lib/preview-localization";
 import { previewWorkspaceOverview } from "./preview-data";
 import type {
@@ -54,21 +56,6 @@ function matchesQuery(session: Session, query: string) {
     .some((value) => value!.toLocaleLowerCase().includes(normalized));
 }
 
-type SectionKey = "needs_me" | "running" | "recent";
-
-function sectionForStatus(status: SessionStatus): SectionKey {
-  switch (status) {
-    case "needs_input":
-    case "blocked":
-      return "needs_me";
-    case "running":
-    case "waiting":
-      return "running";
-    default:
-      return "recent";
-  }
-}
-
 function App() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [preferences, setPreferences] =
@@ -78,11 +65,13 @@ function App() {
     "all",
   );
   const [query, setQuery] = useState("");
-  const [activeView, setActiveView] = useState<WorkspaceView>("chat");
+  // Land on the list the product promises, not an empty chat box.
+  const [activeView, setActiveView] = useState<WorkspaceView>("inbox");
   const [overnightHandoffId, setOvernightHandoffId] = useState<string | null>(
     null,
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [openSession, setOpenSession] = useState<Session | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const ko = preferences.language === "ko";
 
@@ -129,6 +118,15 @@ function App() {
   }, [load]);
 
   useEffect(() => {
+    if (preferences.onboarding_complete) {
+      void trackAppOpened(preferences);
+    }
+    // One lifecycle event per packaged app launch. Preference changes must not
+    // manufacture additional opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferences.onboarding_complete]);
+
+  useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
       if (activeView !== "inbox") return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -141,25 +139,47 @@ function App() {
   }, [activeView]);
 
   const snapshot = state.kind === "ready" ? state.overview.snapshot : null;
-  const filteredSessions = useMemo(() => {
-    if (!snapshot) return [];
-    return snapshot.sessions.filter(
-      (session) =>
-        !session.archived &&
-        (selectedProvider === "all" ||
-          session.provider === selectedProvider) &&
-        matchesQuery(session, query),
-    );
-  }, [query, selectedProvider, snapshot]);
+  const activeSessions = useMemo(
+    () => (snapshot?.sessions ?? []).filter((session) => !session.archived),
+    [snapshot],
+  );
+  useEffect(() => {
+    if (preferences.onboarding_complete && snapshot) {
+      void trackOnce("sessions_indexed", preferences);
+    }
+  }, [preferences, snapshot]);
+  const filteredSessions = useMemo(
+    () =>
+      activeSessions.filter(
+        (session) =>
+          (selectedProvider === "all" ||
+            session.provider === selectedProvider) &&
+          matchesQuery(session, query),
+      ),
+    [query, selectedProvider, activeSessions],
+  );
+
+  // Filter counts must describe what the filter yields, so they sum to the total.
+  const filterProviders = useMemo(() => {
+    const counts = new Map<Provider, number>();
+    for (const session of activeSessions) {
+      counts.set(session.provider, (counts.get(session.provider) ?? 0) + 1);
+    }
+    return (snapshot?.providers ?? []).map((provider) => ({
+      ...provider,
+      indexed_count: provider.session_count,
+      session_count: counts.get(provider.provider) ?? 0,
+    }));
+  }, [activeSessions, snapshot]);
 
   const needsMe = filteredSessions.filter(
-    (session) => sectionForStatus(session.status) === "needs_me",
+    (session) => sessionBucket(session.status) === "needs_me",
   );
   const running = filteredSessions.filter(
-    (session) => sectionForStatus(session.status) === "running",
+    (session) => sessionBucket(session.status) === "running",
   );
   const recent = filteredSessions.filter(
-    (session) => sectionForStatus(session.status) === "recent",
+    (session) => sessionBucket(session.status) === "recent",
   );
 
   if (state.kind === "loading") {
@@ -201,10 +221,14 @@ function App() {
         overview={state.overview}
         preferences={preferences}
         onChange={updatePreferences}
-        onComplete={() => {
-          updatePreferences({ ...preferences, onboarding_complete: true });
+        onComplete={(completedPreferences) => {
+          void trackOnce("onboarding_completed", completedPreferences);
+          updatePreferences({
+            ...completedPreferences,
+            onboarding_complete: true,
+          });
           setReplayingOnboarding(false);
-          setActiveView("chat");
+          setActiveView("inbox");
         }}
       />
     );
@@ -214,10 +238,10 @@ function App() {
     <div className="app-shell">
       <div className="titlebar-drag" data-tauri-drag-region />
       <Sidebar
-        providers={state.overview.snapshot.providers}
+        providers={filterProviders}
         selectedProvider={selectedProvider}
         onSelectProvider={setSelectedProvider}
-        total={state.overview.snapshot.sessions.length}
+        total={activeSessions.length}
         privacyNote={state.overview.snapshot.privacy_note}
         activeView={activeView}
         onSelectView={navigate}
@@ -232,34 +256,60 @@ function App() {
           preferences={preferences}
           onPreferencesChange={updatePreferences}
         />
-      ) : activeView === "board" ? (
-        <ControlBoardView
-          board={state.overview.control_board}
-          contextIndex={state.overview.context_index}
-          isRefreshing={isRefreshing}
-          onRefresh={() => void load()}
-          language={preferences.language}
-        />
-      ) : activeView === "overnight" ? (
-        <OvernightView
-          language={preferences.language}
-          handoffId={overnightHandoffId}
-          defaultSleepHours={preferences.default_overnight_hours}
-          advisor={{
-            provider: preferences.default_chat_provider,
-            model:
-              preferences.default_chat_models[
-                preferences.default_chat_provider
-              ] ?? null,
-            effort:
-              preferences.default_chat_efforts[
-                preferences.default_chat_provider
-              ] ?? null,
-            language: preferences.language,
-            plan_overrides: planOverrides(preferences),
-          }}
-          onOpenSettings={() => navigate("settings")}
-        />
+      ) : activeView === "overnight" || activeView === "board" ? (
+        // one destination for the night workflow: the plan and the queue that
+        // feeds it, so neither competes with Sessions for "what needs me"
+        <div className="night-workspace">
+          <div className="night-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "overnight"}
+              className={activeView === "overnight" ? "is-selected" : ""}
+              onClick={() => navigate("overnight")}
+            >
+              {ko ? "오늘 밤 계획" : "Tonight's plan"}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "board"}
+              className={activeView === "board" ? "is-selected" : ""}
+              onClick={() => navigate("board")}
+            >
+              {ko ? "실행 대기열" : "Run queue"}
+            </button>
+          </div>
+          {activeView === "overnight" ? (
+            <OvernightView
+              language={preferences.language}
+              handoffId={overnightHandoffId}
+              defaultSleepHours={preferences.default_overnight_hours}
+              advisor={{
+                provider: preferences.default_chat_provider,
+                model:
+                  preferences.default_chat_models[
+                    preferences.default_chat_provider
+                  ] ?? null,
+                effort:
+                  preferences.default_chat_efforts[
+                    preferences.default_chat_provider
+                  ] ?? null,
+                language: preferences.language,
+                plan_overrides: planOverrides(preferences),
+              }}
+              onOpenSettings={() => navigate("settings")}
+            />
+          ) : (
+            <ControlBoardView
+              board={state.overview.control_board}
+              contextIndex={state.overview.context_index}
+              isRefreshing={isRefreshing}
+              onRefresh={() => void load()}
+              language={preferences.language}
+            />
+          )}
+        </div>
       ) : activeView === "settings" ? (
         <SettingsView
           preferences={preferences}
@@ -270,14 +320,11 @@ function App() {
         <main className="workspace">
           <header className="workspace-header">
             <div className="header-copy">
-              <span className="kicker">ATTENTION INBOX</span>
-              <h1>
-                {ko ? "지금 어디를 보면 되나요?" : "Where do you need to look?"}
-              </h1>
+              <h1>{ko ? "세션" : "Sessions"}</h1>
               <p>
                 {ko
-                  ? "흩어진 로컬 에이전트 세션에서 사람의 판단이 필요한 순간만 끌어올립니다."
-                  : "Bring forward only the moments that need human judgment across fragmented local agent sessions."}
+                  ? "모든 AI 코딩 세션을 한 목록에서 봅니다. 아무 줄이나 눌러 상태와 이어서 할 위치를 확인하세요."
+                  : "Every AI coding session in one list. Click any row for its status, timing, and where to pick it up."}
               </p>
             </div>
 
@@ -357,8 +404,7 @@ function App() {
 
           <div className="attention-grid">
             <SessionSection
-              eyebrow="HUMAN TURN"
-              title="Needs me"
+              title={ko ? "당신을 기다림" : "Needs you"}
               description={
                 ko
                   ? "결정, 승인, 읽지 않은 결과가 기다리고 있습니다."
@@ -369,10 +415,10 @@ function App() {
               tone="attention"
               limit={6}
               language={preferences.language}
+              onOpen={setOpenSession}
             />
             <SessionSection
-              eyebrow="LIVE ACTIVITY"
-              title="Running"
+              title={ko ? "작업 중" : "Running"}
               description={
                 ko
                   ? "최근 활동이 관측되거나 도구가 작업 중이라고 보고했습니다."
@@ -383,12 +429,12 @@ function App() {
               tone="live"
               limit={6}
               language={preferences.language}
+              onOpen={setOpenSession}
             />
           </div>
 
           <SessionSection
-            eyebrow="LOCAL MEMORY"
-            title="Recently finished"
+            title={ko ? "최근 종료됨" : "Recently finished"}
             description={
               ko
                 ? "막 끝났거나 잠시 멈춘 세션입니다. 원래 도구의 기록이 진실의 원본입니다."
@@ -399,7 +445,23 @@ function App() {
             tone="recent"
             limit={12}
             language={preferences.language}
+            onOpen={setOpenSession}
+            groupByDay
           />
+
+          {openSession && (
+            <SessionDetail
+              session={openSession}
+              excerpts={state.overview.context_index.projects.flatMap(
+                (project) =>
+                  project.excerpts.filter(
+                    (excerpt) => excerpt.session_id === openSession.id,
+                  ),
+              )}
+              language={preferences.language}
+              onClose={() => setOpenSession(null)}
+            />
+          )}
         </main>
       )}
     </div>

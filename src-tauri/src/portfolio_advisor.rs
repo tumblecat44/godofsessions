@@ -12,8 +12,9 @@ use crate::{
     },
     operator_chat::ChatStore,
     recommendation::{
-        finalize_portfolio_advisor_plan, PortfolioAdvisorDecision, PortfolioAdvisorOptionDecision,
-        PortfolioCandidateEnvelope, MAX_PORTFOLIO_ADVISOR_SELECTIONS,
+        finalize_portfolio_advisor_plan_for_language, PortfolioAdvisorDecision,
+        PortfolioAdvisorOptionDecision, PortfolioCandidateEnvelope,
+        MAX_PORTFOLIO_ADVISOR_SELECTIONS,
     },
 };
 
@@ -30,7 +31,6 @@ struct RawPortfolioJudgment {
     schema_version: u8,
     selected: Vec<RawPortfolioOptionDecision>,
     unselected: Vec<RawPortfolioOptionDecision>,
-    no_run_reason: RequiredNullableString,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,18 +40,6 @@ struct RawPortfolioOptionDecision {
     reason: String,
 }
 
-#[derive(Debug)]
-struct RequiredNullableString(Option<String>);
-
-impl<'de> Deserialize<'de> for RequiredNullableString {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Option::<String>::deserialize(deserializer).map(Self)
-    }
-}
-
 pub(crate) fn judge(
     envelope: &PortfolioCandidateEnvelope,
     selection: &PortfolioAdvisorSelection,
@@ -59,7 +47,7 @@ pub(crate) fn judge(
 ) -> Result<OvernightPlan, String> {
     validate_selection(selection)?;
     if envelope.options.is_empty() {
-        return finalize_portfolio_advisor_plan(
+        return finalize_portfolio_advisor_plan_for_language(
             envelope,
             &PortfolioAdvisorDecision {
                 selected: Vec::new(),
@@ -68,6 +56,7 @@ pub(crate) fn judge(
                     "결정론적 안전·경로 점검을 통과한 실행 후보가 없습니다.".to_owned(),
                 ),
             },
+            &selection.language,
             parse_generated_at(&envelope.generated_at),
         )
         .map_err(|error| localize_contract_error(selection, error));
@@ -83,6 +72,7 @@ pub(crate) fn judge(
         .map_err(|error| localize_provider_error(selection, error))?;
     let judgment = parse_judgment(&completion.content)
         .map_err(|error| localize_judgment_error(selection, error))?;
+    let no_run_reason = derived_no_run_reason(&judgment, selection.language.as_str());
     let decision = PortfolioAdvisorDecision {
         selected: judgment
             .selected
@@ -100,11 +90,12 @@ pub(crate) fn judge(
                 reason: item.reason,
             })
             .collect(),
-        no_run_reason: judgment.no_run_reason.0,
+        no_run_reason,
     };
-    let mut plan = finalize_portfolio_advisor_plan(
+    let mut plan = finalize_portfolio_advisor_plan_for_language(
         envelope,
         &decision,
+        &selection.language,
         parse_generated_at(&envelope.generated_at),
     )
     .map_err(|error| localize_contract_error(selection, error))?;
@@ -349,8 +340,9 @@ fn advisor_prompt(
             "사용자가 명시한 중요도·완료·보류·강등 결정을 단순 최근 활동보다 우선하라. 현재 가치가 불명확하거나 ",
             "검증 가능한 밤 작업이 없으면 아무것도 선택하지 마라. 시간을 채우기 위해 일을 만들지 마라. ",
             "safe_options의 option_id만 사용할 수 있으며 모든 option_id를 selected 또는 unselected에 정확히 한 번 넣어라. ",
-            "selected 배열 순서가 우선순위다. 최대 3개지만 더 적게 선택해도 된다. 선택이 있으면 no_run_reason은 null, ",
-            "없으면 구체적인 no_run_reason을 써라. 이유는 근거와 비교 대상을 명시하되 1200자 이내로 작성하라. ",
+            "selected 배열 순서가 우선순위다. 최대 3개지만 더 적게 선택해도 된다. 아무것도 선택하지 않으면 ",
+            "모든 후보를 unselected에 넣고 각각 선택하지 않은 구체적인 이유를 써라. 이유는 근거와 비교 대상을 ",
+            "명시하되 1200자 이내로 작성하라. ",
             "요청된 JSON schema와 일치하는 객체만 반환하라."
         )
     } else {
@@ -360,9 +352,10 @@ fn advisor_prompt(
             "or demotion over mere recency. Select nothing when value or a verifiable night outcome is ",
             "unclear; never invent work to fill time. Use only safe_options option_id values and place ",
             "every option exactly once in selected or unselected. selected order is priority order. Select ",
-            "at most 3 and fewer when appropriate. no_run_reason must be null when selected is non-empty ",
-            "and specific when selected is empty. Tie each reason to evidence and a comparison, within ",
-            "1200 characters. Return only an object matching the requested JSON schema."
+            "at most 3 and fewer when appropriate. When selecting nothing, place every candidate in ",
+            "unselected with a specific reason. Tie each reason to evidence and a comparison, within 1200 ",
+            "characters. Write every reason in English even when the evidence contains Korean. Return ",
+            "only an object matching the requested JSON schema."
         )
     };
     Ok(format!("{instructions}\n\nEvidence JSON:\n{evidence}"))
@@ -390,12 +383,9 @@ fn judgment_schema(envelope: &PortfolioCandidateEnvelope) -> Value {
             "unselected": {
                 "type": "array",
                 "items": item
-            },
-            "no_run_reason": {
-                "type": ["string", "null"]
             }
         },
-        "required": ["schema_version", "selected", "unselected", "no_run_reason"],
+        "required": ["schema_version", "selected", "unselected"],
         "additionalProperties": false
     })
 }
@@ -403,12 +393,6 @@ fn judgment_schema(envelope: &PortfolioCandidateEnvelope) -> Value {
 fn parse_judgment(content: &str) -> Result<RawPortfolioJudgment, String> {
     let value = serde_json::from_str::<Value>(content.trim())
         .map_err(|error| format!("구독 모델의 추천 판단이 엄격한 JSON 형식과 다릅니다: {error}"))?;
-    if !value
-        .as_object()
-        .is_some_and(|object| object.contains_key("no_run_reason"))
-    {
-        return Err("구독 모델의 추천 판단에 no_run_reason 키가 없습니다.".to_owned());
-    }
     let judgment = serde_json::from_value::<RawPortfolioJudgment>(value)
         .map_err(|error| format!("구독 모델의 추천 판단이 엄격한 JSON 형식과 다릅니다: {error}"))?;
     if judgment.schema_version != JUDGMENT_SCHEMA_VERSION {
@@ -426,15 +410,30 @@ fn parse_judgment(content: &str) -> Result<RawPortfolioJudgment, String> {
             ));
         }
     }
-    if judgment
-        .no_run_reason
-        .0
-        .as_deref()
-        .is_some_and(|reason| reason.trim().is_empty() || reason.chars().count() > MAX_REASON_CHARS)
-    {
-        return Err("no_run_reason 길이가 올바르지 않습니다.".to_owned());
-    }
     Ok(judgment)
+}
+
+fn derived_no_run_reason(judgment: &RawPortfolioJudgment, language: &str) -> Option<String> {
+    if !judgment.selected.is_empty() {
+        return None;
+    }
+    let summary = if language == "ko" {
+        "구독 모델이 안전하게 실행할 후보를 선택하지 않았습니다."
+    } else {
+        "The subscription model selected no safe option."
+    };
+    let reason = judgment
+        .unselected
+        .first()
+        .map(|item| item.reason.trim())
+        .filter(|reason| !reason.is_empty());
+    Some(truncate_chars(
+        &reason.map_or_else(
+            || summary.to_owned(),
+            |reason| format!("{summary} {reason}"),
+        ),
+        MAX_REASON_CHARS,
+    ))
 }
 
 fn parse_generated_at(value: &str) -> DateTime<Utc> {
@@ -464,11 +463,11 @@ mod tests {
     #[test]
     fn strict_parser_rejects_unknown_fields_and_non_json_wrappers() {
         assert!(parse_judgment(
-            r#"{"schema_version":1,"selected":[],"unselected":[],"no_run_reason":"none","extra":true}"#
+            r#"{"schema_version":1,"selected":[],"unselected":[],"extra":true}"#
         )
         .is_err());
         assert!(parse_judgment(
-            "```json\n{\"schema_version\":1,\"selected\":[],\"unselected\":[],\"no_run_reason\":\"none\"}\n```"
+            "```json\n{\"schema_version\":1,\"selected\":[],\"unselected\":[]}\n```"
         )
         .is_err());
     }
@@ -476,16 +475,39 @@ mod tests {
     #[test]
     fn strict_parser_accepts_a_bounded_partition_shape() {
         let parsed = parse_judgment(
-            r#"{"schema_version":1,"selected":[{"option_id":"a","reason":"explicit priority"}],"unselected":[{"option_id":"b","reason":"recent but completed"}],"no_run_reason":null}"#,
+            r#"{"schema_version":1,"selected":[{"option_id":"a","reason":"explicit priority"}],"unselected":[{"option_id":"b","reason":"recent but completed"}]}"#,
         )
         .expect("judgment");
         assert_eq!(parsed.selected[0].option_id, "a");
-        assert!(parsed.no_run_reason.0.is_none());
+        assert!(derived_no_run_reason(&parsed, "en").is_none());
     }
 
     #[test]
-    fn strict_parser_requires_the_nullable_no_run_key() {
-        assert!(parse_judgment(r#"{"schema_version":1,"selected":[],"unselected":[]}"#).is_err());
+    fn strict_parser_rejects_the_redundant_no_run_key() {
+        assert!(parse_judgment(
+            r#"{"schema_version":1,"selected":[],"unselected":[],"no_run_reason":"none"}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn host_derives_a_bounded_no_run_reason_only_for_an_empty_selection() {
+        let no_run = parse_judgment(
+            r#"{"schema_version":1,"selected":[],"unselected":[{"option_id":"a","reason":"The only candidate is already complete."}]}"#,
+        )
+        .expect("no-run judgment");
+        assert_eq!(
+            derived_no_run_reason(&no_run, "en").as_deref(),
+            Some(
+                "The subscription model selected no safe option. The only candidate is already complete."
+            )
+        );
+
+        let selected = parse_judgment(
+            r#"{"schema_version":1,"selected":[{"option_id":"a","reason":"explicit priority"}],"unselected":[]}"#,
+        )
+        .expect("selected judgment");
+        assert!(derived_no_run_reason(&selected, "ko").is_none());
     }
 
     #[test]

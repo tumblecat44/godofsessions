@@ -13,6 +13,17 @@ const englishPreviewCopy = new Map<string, string>([
   ["테스트 실패 원인 분석", "Diagnose the test failure"],
   ["밤샘 목표 계약 다듬기", "Tighten the overnight goal contract"],
   ["에이전트 게이트웨이 확인", "Inspect the agent gateway"],
+  ["야간 실행 회고 정리", "Write up the overnight run retro"],
+  [
+    "세션 목록 화면의 탐색 구조를 정리하고, 각 줄을 눌러 상세를 볼 수 있게 해줘.",
+    "Clean up the navigation on the session list screen, and make each row clickable so I can see its detail.",
+  ],
+  [
+    "세션 줄을 버튼으로 바꾸고 상세 패널을 추가하는 계획을 세웠습니다. 승인해 주시면 적용하겠습니다.",
+    "I drafted a plan to turn each session row into a button and add a detail panel. Approve it and I'll apply the change.",
+  ],
+  ["마이그레이션 스크립트 검토", "Review the migration script"],
+  ["인덱서 회귀 추적", "Track down the indexer regression"],
   [
     "Cursor 내부 Composer 헤더 형식은 실험적으로 지원됩니다.",
     "Cursor Composer header parsing is experimental.",
@@ -86,6 +97,14 @@ const englishPreviewCopy = new Map<string, string>([
     "Outcome: Document each connector's read boundary and add regression tests.\nVerification: Check the full automated suite and documentation links.\nConstraints: Do not modify source sessions.\nBoundaries: Do not commit, deploy, or send external messages.\nStop when: Passing tests and a change summary are both recorded.",
   ],
   ["Night Contract가 provider turn에 기록됨", "Night Contract recorded in the provider turn"],
+  [
+    "Night Contract가 Codex provider-native goal로 기록됨",
+    "Night Contract recorded as a provider-native Codex goal",
+  ],
+  [
+    "Codex durable Goal 저장소와 교차 확인됨",
+    "Cross-checked against the durable Codex Goal store",
+  ],
   ["통합 아침 화면과 검증을 완료했습니다.", "Completed the unified morning view and verification."],
   [
     "Codex thread index와 provider rollout을 읽기 전용으로 결합했습니다. native Goal objective의 marker와 terminal status가 계약과 실행 수명주기를 증명합니다.",
@@ -301,8 +320,215 @@ const englishPreviewCopy = new Map<string, string>([
   ],
 ]);
 
+const englishProductFragments: ReadonlyArray<readonly [string, string]> = [
+  ["AI 판단 전 실행 사전점검에서 제외: ", "Excluded before AI judgment by execution preflight: "],
+  ["AI 포트폴리오 판단: ", "AI portfolio judgment: "],
+  ["오늘 밤 실행 안 함", "Run nothing tonight"],
+  ["작업공간이 없거나 Git 저장소 루트가 아니어서 실행을 막았습니다.", "The workspace is missing or is not a Git repository root."],
+  ["작업공간이 없거나 Git 저장소 루트가 아닙니다.", "The workspace is missing or is not a Git repository root."],
+  ["기존 Claude 세션이 없거나 실행 중이거나 작업공간이 다릅니다.", "No eligible idle Claude session matches this workspace."],
+  ["Claude /goal은 신뢰한 작업공간에서만 실행됩니다.", "Claude /goal runs only in a trusted workspace."],
+  ["Claude Code로 이 폴더를 한 번 열고 신뢰를 승인하세요.", "Open this folder once in Claude Code and approve workspace trust."],
+  ["최근 목표에 외부 전송·배포·삭제·결제 가능성이 있어 사람의 승인이 먼저 필요합니다.", "The recent goal may send, deploy, delete, or purchase externally, so it needs human approval first."],
+  ["이미 실행 중인 세션이 있어 중복 작업과 충돌 위험이 큽니다.", "A session is already running, creating duplicate-work and collision risk."],
+  ["같은 Git worktree의 다른 경로에서 실행 중인 세션이 있어 파일 충돌을 피합니다.", "Another session is running in the same Git worktree, so this project is excluded to avoid file conflicts."],
+  ["사람의 판단이나 승인이 먼저 필요한 상태입니다.", "This project needs human judgment or approval first."],
+  ["미완료 작업이라는 근거가 부족합니다.", "There is not enough evidence that this work is unfinished."],
+  ["잠들기 전에 전원 어댑터 연결", "Connect the power adapter before sleep."],
+  ["macOS 전원 소스를 확인하지 못했습니다.", "The macOS power source could not be verified."],
+  ["장시간 실행 전 전원 상태 직접 확인", "Check power manually before a long run."],
+  ["coordinator가 caffeinate -i 아래에서 실행됩니다.", "The coordinator runs under caffeinate -i."],
+  ["idle sleep을 막을 시스템 도구를 찾지 못했습니다.", "The system tool that prevents idle sleep is unavailable."],
+  ["시스템 sleep 설정을 직접 확인", "Check the system sleep settings manually."],
+  ["caffeinate는 덮개를 닫아 생기는 sleep까지 보장하지 않습니다.", "caffeinate cannot prevent every sleep state caused by closing the lid."],
+  ["덮개를 열어두거나 전원 연결된 정상 clamshell 환경 사용", "Leave the lid open or use a supported powered clamshell setup."],
+  ["내장 배터리가 있는 MacBook으로 감지되지 않았습니다.", "This Mac was not detected as a MacBook with an internal battery."],
+  ["선택된 작업공간의 디스크 여유를 확인하지 못했습니다.", "Free disk space for the selected workspaces could not be verified."],
+  ["장시간 빌드 전 디스크 여유 직접 확인", "Check free disk space manually before a long build."],
+  ["빌드·로그 공간을 확보한 뒤 승인", "Free build and log space before approval."],
+  ["먼저 정확한 실행 형태를 승인·시작할 수 있는 경로가 있는지 확인한 뒤 최근성·반복 활동·오늘의 사용자 목표·재개 가능한 컨텍스트·남은 사용량을 함께 평가했습니다. 대화 발췌가 없을 때만 세션 제목으로 보수적으로 추론하며, 실행 가능한 후보 안에서는 작은 할당량 차이보다 기존 프로젝트 맥락을 우선합니다. 안전 필터를 통과한 후보의 최종 순서와 제외 이유는 사용자가 선택한 구독 모델이 판단했고, 호스트가 후보 ID·중복·전체 분할·최대 선택 수를 검증한 뒤 일정과 실행 초안을 다시 만들었습니다.", "Morrow first verifies an exact route that can be approved and started, then weighs recency, repeated activity, explicit user goals, resumable context, and remaining capacity. Session titles are used conservatively only when no bounded conversation evidence exists. Your selected subscription model judges the final order and exclusions among safe candidates; the host validates IDs, duplicates, the complete partition, and selection limits before rebuilding the schedule and execution drafts."],
+  ["같은 구독 풀의 작업은 한 번에 하나씩 순차 실행하고, 서로 다른 구독 풀은 동시에 시작합니다. 각 레인의 합은 수면시간을 넘지 않습니다.", "Runs sharing one capacity pool execute sequentially; separate pools may start together. No lane exceeds the sleep window."],
+  ["프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것", "Pass the project's relevant tests, type checks, and build checks."],
+  ["변경 범위와 생성된 산출물을 아침 보고에 명시할 것", "List the changed scope and generated artifacts in the morning report."],
+  ["검증할 수 없거나 막히면 추측으로 완료 처리하지 말고 원인을 남길 것", "If verification is blocked, record the cause instead of guessing that the work is done."],
+  ["범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고", "A bounded change set, test and verification evidence, and a morning report of remaining blockers."],
+  ["— 검증 가능한 결과까지 진행", "— continue to a verifiable result"],
+  ["7일", "7-day"],
+  ["5시간", "5-hour"],
+  ["주간", "weekly"],
+  ["밤 coordinator가 승인된 1개 작업을 맡았습니다. 지금 가능한 각 lane부터 공급자 사전점검을 시작하고, 후속 작업은 승인된 순서와 시간에만 엽니다.", "The night coordinator accepted 1 approved run. It is preflighting every eligible lane now and will open later work only in the approved order and time window."],
+  ["GUI와 분리된 유휴 절전 방지 야간 작업자 시작", "Start the GUI-independent night worker with idle-sleep prevention"],
+  ["Codex가 승인한 기존 thread에 provider-native 야간 goal을 시작했습니다.", "Codex started a provider-native night goal in the approved existing thread."],
+  ["실행 화면과 실제 모델 제공자, 선택된 실행 profile, 차감되는 구독 풀을 분리했습니다. 여러 실행 경로가 같은 구독을 쓰면 하나의 용량으로 취급하며, 자격 증명 값은 읽거나 표시하지 않고 설정 여부만 확인합니다.", "Execution surface, model provider, selected profile, and charged subscription pool are tracked separately. Routes sharing one subscription count as one capacity pool. Credential values are never read or displayed."],
+  ["Codex app-server 턴에서는 delegate_task, memory, session_search, todo를 사용할 수 없음", "Codex app-server turns cannot use delegate_task, memory, session_search, or todo."],
+  ["별도 auxiliary override가 없으면 제목·압축·goal judge·백그라운드 리뷰도 같은 Codex 구독을 사용함", "Without an auxiliary override, titles, compaction, goal judging, and background review use the same Codex subscription."],
+  ["workspace-write sandbox 고정", "Workspace-write sandbox is fixed."],
+  ["approval policy never는 승인 생략이 아니라 권한 밖 실행 실패로 사용", "The never approval policy fails out-of-scope actions; it does not skip this product approval."],
+  ["danger-full-access 금지", "Danger-full-access is forbidden."],
+  ["Codex 실행 경로", "Codex execution route"],
+  ["Codex 구독, 로컬 로그인, app-server 경로가 준비되어 있습니다.", "The Codex subscription, local login, and app-server route are ready."],
+  ["Codex 실행 경로·구독·로그인 중 하나가 준비되지 않았습니다.", "The Codex route, subscription, or login is not ready."],
+  ["앱 번들 실행기", "Bundled executable"],
+  ["ChatGPT 앱 안의 실제 Codex 실행기를 사용합니다.", "Uses the actual Codex executable bundled with the ChatGPT app."],
+  ["실행 가능한 Codex 앱 번들을 찾지 못했습니다.", "No executable Codex app bundle was found."],
+  ["Codex 로그인", "Codex login"],
+  ["로컬 Codex 로그인 상태를 찾았습니다. 자격 증명 값은 읽지 않습니다.", "A local Codex login was found. Credential values are not read."],
+  ["로컬 Codex 로그인 상태를 찾지 못했습니다.", "No local Codex login was found."],
+  ["app-server 호환성", "App-server compatibility"],
+  ["initialize와 model/list 응답을 확인하지 못했습니다.", "Could not verify initialize and model/list responses."],
+  ["작업공간 경계", "Workspace boundary"],
+  ["정규화된 Git 작업공간 한 곳만 writable root로 사용합니다.", "Uses one normalized Git workspace as the only writable root."],
+  ["workspace-write, 외부 부작용 금지, 제한된 시간 예산이 고정되어 있습니다.", "Workspace-write, no external side effects, and a bounded time budget are fixed."],
+  ["계약 형식, 권한, 시간 범위 또는 외부행동 게이트가 안전 조건을 만족하지 않습니다.", "The contract format, permissions, time bounds, or external-action gate does not satisfy the safety contract."],
+  ["기존 thread", "Existing thread"],
+  ["새 thread", "New thread"],
+  ["승인 후 생성", "Created after approval"],
+  ["로컬 Codex app-server 전용 프로세스 시작", "Start a dedicated local Codex app-server process"],
+  ["중복 실행 방지", "Duplicate-run prevention"],
+  ["provider rollout에 같은 Night Contract Goal marker가 없습니다.", "No matching Night Contract Goal marker exists in the provider rollout."],
+  ["승인 뒤 새 durable thread를 만들도록 계약되어 있습니다.", "The contract will create a new durable thread after approval."],
+  ["기존 thread가 같은 작업공간에 있고 현재 실행 중이 아니며 보관되지 않았습니다.", "The existing thread matches this workspace, is idle, and is not archived."],
+  ["안정 API로 클라이언트 초기화", "Initialize the client with stable APIs"],
+  ["초기화 완료 알림", "Send the initialized notification"],
+  ["승인한 기존 thread를 같은 cwd로 재개", "Resume the approved existing thread in the same workspace"],
+  ["승인한 cwd에 durable thread 생성", "Create a durable thread in the approved workspace"],
+  ["고정된 Night Contract를 provider-native durable goal로 설정", "Set the frozen Night Contract as a provider-native durable goal"],
+  ["쓰기 가능한 Git 작업공간", "Writable Git workspace"],
+  ["thread/start 또는 thread/resume의 threadId + thread/goal/set 응답 + thread/goal/updated의 terminal status", "threadId from thread/start or thread/resume + thread/goal/set response + terminal thread/goal/updated status"],
+  ["Claude 실행 경로", "Claude execution route"],
+  ["Claude 구독과 네이티브 실행 경로가 준비되어 있습니다.", "The Claude subscription and native execution route are ready."],
+  ["Claude 경로·구독·어댑터 계약 중 하나가 준비되지 않았습니다.", "The Claude route, subscription, or adapter contract is not ready."],
+  ["Claude Code 실행기", "Claude Code executable"],
+  ["로컬 Claude Code 실행기를 찾았습니다.", "The local Claude Code executable was found."],
+  ["로컬 Claude Code 실행기를 찾지 못했습니다.", "The local Claude Code executable was not found."],
+  ["엄격한 sandbox 버전", "Strict-sandbox version"],
+  ["Claude 구독 로그인", "Claude subscription login"],
+  ["Claude /goal 정책", "Claude /goal policy"],
+  ["Claude 세션", "Claude session"],
+  ["같은 작업공간의 유휴 세션 컨텍스트를 새 세션으로 fork합니다.", "Forks idle session context from the same workspace into a new session."],
+  ["승인 뒤 새 durable Claude 세션을 만들도록 계약되어 있습니다.", "The contract will create a new durable Claude session after approval."],
+  ["영수증·공급자 원장 중복 방지", "Receipt and provider-ledger deduplication"],
+  ["같은 로컬 실행 영수증이나 Claude transcript marker가 없습니다.", "No matching local run receipt or Claude transcript marker exists."],
+  ["resume/new, workspace-write, 외부 부작용 금지, 시간 상한이 고정되어 있습니다.", "Resume/new mode, workspace-write, no external side effects, and a time cap are fixed."],
+  ["새 durable 세션", "New durable session"],
+  ["출처 세션 → 격리 fork", "Source session → isolated fork"],
+  ["Grok 실행 경로", "Grok execution route"],
+  ["Grok 구독 사용량과 네이티브 실행 경로가 준비되어 있습니다.", "Grok subscription capacity and the native execution route are ready."],
+  ["Grok 경로·구독·어댑터 계약 중 하나가 준비되지 않았습니다.", "The Grok route, subscription, or adapter contract is not ready."],
+  ["Grok Build 실행기", "Grok Build executable"],
+  ["로컬 Grok Build 실행기를 찾았습니다.", "The local Grok Build executable was found."],
+  ["로컬 Grok Build 실행기를 찾지 못했습니다.", "The local Grok Build executable was not found."],
+  ["headless session 계약", "Headless session contract"],
+  ["Grok 로그인", "Grok login"],
+  ["공식 Grok Build 자격 증명 저장소의 로그인을 확인했습니다.", "A login was found in the official Grok Build credential store."],
+  ["Grok Build 로그인이 없거나 만료됐습니다. 설정에서 다시 연결해야 합니다.", "The Grok Build login is missing or expired. Reconnect it in Settings."],
+  ["Grok 세션", "Grok session"],
+  ["같은 작업공간의 유휴 Grok 세션을 새 target session으로 fork합니다.", "Forks an idle Grok session from the same workspace into a new target session."],
+  ["승인 뒤 새 durable Grok session을 만들도록 계약되어 있습니다.", "The contract will create a new durable Grok session after approval."],
+  ["정규화된 Git 작업공간 한 곳만 strict sandbox 쓰기 경계로 사용합니다.", "Uses one normalized Git workspace as the strict sandbox write boundary."],
+  ["resume/new, strict workspace sandbox, 외부 부작용 금지, 시간 상한이 고정되어 있습니다.", "Resume/new mode, strict workspace sandbox, no external side effects, and a time cap are fixed."],
+  ["새 durable 세션을 시작", "Start a new durable session"],
+  ["기존 세션을 fork", "Fork the existing session"],
+  ["원래 승인한 프로젝트·순서·시간·권한만 복구합니다.", "Recover only the originally approved projects, order, time, and authority."],
+  ["각 공급자 원장에서 정확한 계약 지문을 먼저 대조하며,", "First reconcile the exact contract fingerprint in every provider ledger,"],
+  ["시작 여부가 불확실한 작업은 재시도하지 않고 그 lane을 멈춥니다.", "and stop the lane without retrying any run whose launch status is ambiguous."],
+] as const;
+
 function translatePreviewString(value: string): string {
-  return englishPreviewCopy.get(value) ?? value;
+  const exact = englishPreviewCopy.get(value);
+  if (exact) return exact;
+
+  let translated = value;
+  for (const [source, replacement] of englishProductFragments) {
+    translated = translated.replaceAll(source, replacement);
+  }
+  translated = translated
+    .replace(
+      /배터리 (\d+)%로 밤 계획을 시작하려고 합니다\./g,
+      "Starting the night plan on battery at $1%.",
+    )
+    .replace(
+      /AC 전원 연결 · 배터리 (\d+)%/g,
+      "AC power connected · battery $1%",
+    )
+    .replace(
+      /선택된 작업공간의 최소 여유가 ([\d.]+) GiB입니다\./g,
+      "The least free space across selected workspaces is $1 GiB.",
+    )
+    .replace(
+      /선택된 작업공간에 최소 ([\d.]+) GiB가 남아 있습니다\./g,
+      "At least $1 GiB remains across the selected workspaces.",
+    )
+    .replace(
+      /Codex thread ([^\\s]+)의 야간 기록을 읽지 못했습니다: rollout이 (\d+)MB를 넘어 읽지 않았습니다\./g,
+      "Could not read the night record for Codex thread $1 because its rollout exceeded $2 MB.",
+    )
+    .replace(
+      /최근 (\d+)시간에 (.+?) 관련 세션 (\d+)개/g,
+      "$3 $2 sessions in the last $1 hours",
+    )
+    .replace(
+      /(\d+)개 도구에서 같은 프로젝트 맥락이 발견됨/g,
+      "The same project context appears across $1 tools",
+    )
+    .replace(
+      /Codex에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 사용량 창도 약 ([\d.]+)% 남아 있습니다\. 현재 승인 가능한 실행 경로도 확인했습니다\./g,
+      "Codex has a resumable session for this project, the tightest usage window still has about $1% left, and an approval-capable route is verified.",
+    )
+    .replace(
+      /([A-Za-z]+)에 이 프로젝트를 이어갈 세션이 있고, 가장 제한적인 (.+?) 창은 약 ([\d.]+)% 남아 있고, 요금제 규모를 반영하면 (.+?) 약 ([\d.]+)개분으로 추정됩니다\. 현재 승인 가능한 실행 경로도 확인했습니다\./g,
+      "$1 has a resumable session for this project. The tightest $2 window has about $3% remaining, estimated as roughly $5× $4 after plan-size normalization. An approval-capable route is verified.",
+    )
+    .replace(
+      /최근 (?:7일|7-day)에 (.+?) 관련 세션 (\d+)개/g,
+      "$2 $1 sessions in the last 7 days",
+    )
+    .replace(
+      /가장 최근 근거: “(.+?)” · 약 (\d+)분 전/g,
+      "Latest evidence: “$1” · about $2 minutes ago",
+    )
+    .replace(
+      /가장 최근 근거: “(.+?)” · 약 (\d+)시간 전/g,
+      "Latest evidence: “$1” · about $2 hours ago",
+    )
+    .replace(
+      /최근 (?:7일|7-day) 대화 (\d+)개 중 사용자·응답 발췌 (\d+)개를 확인함/g,
+      "Reviewed $2 bounded user/assistant excerpts across $1 conversations from the last 7 days",
+    )
+    .replace(
+      /([A-Za-z]+) 대화의 제한된 발췌만 사용했으므로 오래된 결정이나 생략된 중간 맥락이 있을 수 있습니다\./g,
+      "Only bounded excerpts from $1 conversations were used, so older decisions or omitted intermediate context may be missing.",
+    )
+    .replace(
+      /최근 (?:7일|7-day) 대화의 제한된 발췌만 사용했으므로 오래된 결정이나 생략된 중간 맥락이 있을 수 있습니다\./g,
+      "Only bounded excerpts from the last 7 days were used, so older decisions or omitted intermediate context may be missing.",
+    )
+    .replace(
+      /(.+?) · 사용 가능한 모델 (\d+)개/g,
+      "$1 · $2 available models",
+    )
+    .replace(
+      /(.+?)하고 (\d+)자 Night Contract를 stdin으로 전달/g,
+      "$1 and pass a $2-character Night Contract over stdin",
+    )
+    .replace(
+      /(.+?)하고 (\d+)자 Night Contract를 전용 0600 prompt 파일로 전달/g,
+      "$1 and pass a $2-character Night Contract through a dedicated 0600 prompt file",
+    )
+    .replace(
+      /같은 계약은 Codex turn (.+?)에서 이미 (.+?) 상태입니다\. 자동 재시도하지 않습니다\./g,
+      "The same contract is already $2 in Codex turn $1. It will not be retried automatically.",
+    )
+    .replace(
+      /Codex rollout을 안전하게 확인하지 못했습니다: (.+)/g,
+      "Could not safely inspect the Codex rollout: $1",
+    )
+    .replace(
+      /^(\d+)개 결과가 검토를 기다립니다\.$/g,
+      (_, count: string) =>
+        `${count} ${count === "1" ? "result is" : "results are"} ready to review.`,
+    );
+  return translated;
 }
 
 function translateValue<T>(value: T): T {
@@ -325,4 +551,11 @@ export function localizePreviewFixture<T>(
   language: AppLanguage,
 ): T {
   return language === "en" ? translateValue(value) : value;
+}
+
+export function localizeProductText(
+  value: string,
+  language: AppLanguage,
+): string {
+  return language === "en" ? translatePreviewString(value) : value;
 }

@@ -115,6 +115,64 @@ export function relativeTime(
     : `${Math.round(months / 12)}y ago`;
 }
 
+export type SessionBucket = "needs_me" | "running" | "recent";
+
+/** Single source of truth for session bucketing, so every screen counts the same. */
+export function sessionBucket(status: SessionStatus): SessionBucket {
+  switch (status) {
+    case "needs_input":
+    case "blocked":
+      return "needs_me";
+    case "running":
+    case "waiting":
+      return "running";
+    default:
+      return "recent";
+  }
+}
+
+/** Exact wall-clock time. Relative stamps alone can never answer "which day was this?". */
+export function absoluteDateTime(
+  value: string | null,
+  language: AppLanguage = "ko",
+): string {
+  const ko = language === "ko";
+  if (!value) return ko ? "시간 정보 없음" : "Time unavailable";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return ko ? "시간 정보 없음" : "Time unavailable";
+  return new Date(timestamp).toLocaleString(ko ? "ko-KR" : "en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Calendar-day heading: Today / Yesterday / an explicit date. */
+export function dayBucket(
+  value: string | null,
+  language: AppLanguage = "ko",
+): string {
+  const ko = language === "ko";
+  if (!value) return ko ? "날짜 없음" : "No date";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return ko ? "날짜 없음" : "No date";
+
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round(
+    (startOfDay(new Date()) - startOfDay(new Date(timestamp))) / 86_400_000,
+  );
+  if (days <= 0) return ko ? "오늘" : "Today";
+  if (days === 1) return ko ? "어제" : "Yesterday";
+  return new Date(timestamp).toLocaleDateString(ko ? "ko-KR" : "en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function timeUntil(
   value: string | null,
   language: AppLanguage = "ko",

@@ -25,7 +25,7 @@ pub(crate) use ledger::{
 };
 pub(crate) use worker::{execute_approved, run_night_worker_from_stdin};
 
-const ADAPTER_VERSION: &str = "grok-native-goal-v2";
+const ADAPTER_VERSION: &str = "grok-native-goal-v8";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const MIN_SUPPORTED_VERSION: (u32, u32, u32) = (0, 2, 100);
 const SAFE_ENVIRONMENT_KEYS: &[&str] = &[
@@ -542,5 +542,88 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(keys, vec!["HOME", "PATH"]);
+    }
+
+    #[test]
+    #[ignore = "uses the current user's Grok subscription for one isolated local release canary"]
+    fn installed_grok_resume_completes_one_bounded_workspace_goal() {
+        let workspace = std::env::var("MORROW_GROK_LIVE_WORKSPACE")
+            .expect("set MORROW_GROK_LIVE_WORKSPACE to an isolated Git repository");
+        let source_session = std::env::var("MORROW_GROK_LIVE_SOURCE_SESSION")
+            .expect("set MORROW_GROK_LIVE_SOURCE_SESSION to an idle Grok session ID");
+        let workspace = Path::new(&workspace)
+            .canonicalize()
+            .expect("canonical live workspace");
+        let mut draft = draft(&workspace, RunMode::ResumeExisting);
+        draft.project = workspace
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("grok-live-canary")
+            .to_owned();
+        draft.native_session_id = Some(source_session);
+        draft.time_budget_hours = 1.0;
+        draft.goal =
+            "Implement buildGrokProof in proof.js and make the existing npm test pass".to_owned();
+        draft.contract = GoalContract {
+            outcome: "Only proof.js changes and buildGrokProof returns the tested Grok proof"
+                .to_owned(),
+            verification: "npm test exits 0 and prints GROK-OVERNIGHT-CANARY: 5 assertions passed"
+                .to_owned(),
+            constraints: concat!(
+                "Do not use the network or install dependencies. Do not commit, push, deploy, ",
+                "publish, delete, or contact anyone."
+            )
+            .to_owned(),
+            boundaries: "Change only proof.js inside the approved workspace".to_owned(),
+            stop_when: "Stop after npm test passes, or report the exact local blocker".to_owned(),
+        };
+        draft.prompt = format!(
+            "/goal {}\noutcome: {}\nverify: {}\nconstraints: {}\nboundaries: {}\nstop when: {}",
+            draft.goal,
+            draft.contract.outcome,
+            draft.contract.verification,
+            draft.contract.constraints,
+            draft.contract.boundaries,
+            draft.contract.stop_when
+        );
+        let route = route();
+        let sources = RouteSources::local();
+        let environment = local_environment(
+            &draft,
+            &route,
+            &sources,
+            probe_version(&sources.grok_binary),
+        );
+        let preflight = preview(&draft, &route, &environment);
+        assert_eq!(
+            preflight.state,
+            DispatchPreflightState::ReadyForApproval,
+            "live Grok preflight: {:#?}",
+            preflight.checks
+        );
+        let task_id = preflight.idempotency_key.clone();
+        let receipt = worker::execute_approved(
+            crate::approval::ApprovedDispatch { draft, preflight },
+            &route,
+        )
+        .expect("start approved Grok canary");
+        assert_eq!(receipt.state, crate::model::DispatchReceiptState::Started);
+
+        let terminal = (0..240).find_map(|_| {
+            let record = ledger::load_record(&task_id).ok().flatten();
+            if record
+                .as_ref()
+                .is_some_and(|record| matches!(record.status.as_str(), "done" | "blocked"))
+            {
+                record
+            } else {
+                std::thread::sleep(Duration::from_secs(1));
+                None
+            }
+        });
+        let terminal =
+            terminal.expect("Grok canary did not reach a terminal receipt in four minutes");
+        assert_eq!(terminal.status, "done", "Grok canary failed: {terminal:#?}");
+        eprintln!("Grok live canary task: {task_id}");
     }
 }

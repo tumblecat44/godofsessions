@@ -23,6 +23,14 @@ npm run preview
 
 The build output is `dist/`.
 
+From the repository root, the Cloudflare Worker collector and its strict
+privacy-minimized event schema can be tested and deployed with:
+
+```sh
+npm run landing:test
+npm run landing:deploy
+```
+
 ## Verified launch behavior
 
 - English is the default, and the EN/KO toggle updates all public copy plus the
@@ -36,12 +44,12 @@ The build output is `dist/`.
 - Missing media has a poster/link fallback; a missing DMG disables the
   download action instead of serving the site shell.
 
-## Stage the private-alpha DMG
+## Stage the public Universal DMG
 
 The landing expects this local file:
 
 ```text
-public/downloads/God-of-Sessions_0.1.0_aarch64.dmg
+public/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg
 ```
 
 DMGs are intentionally ignored by Git. Public hosting should receive a
@@ -51,6 +59,6 @@ download action instead of sending the user to an HTML fallback.
 
 ## Launch boundary
 
-The page is public, but the current app download is a private-alpha candidate.
-Do not describe it as a frictionless public Mac release until Apple
-notarization and a clean-machine install test pass.
+The public download must be Developer ID signed, Apple notarized, ticket
+stapled, and verified with Gatekeeper before deployment. The current release
+artifact meets those gates and supports Apple Silicon and Intel Macs.

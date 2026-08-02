@@ -1,9 +1,12 @@
 import { GitBranch, Network, Radio, Waypoints } from "lucide-react";
 import {
+  absoluteDateTime,
   compactPath,
   confidenceLabels,
   confidenceLabelsEn,
+  dayBucket,
   fallbackTitle,
+  providerNames,
   relativeTime,
   statusLabels,
   statusLabelsEn,
@@ -16,6 +19,9 @@ interface SessionRowProps {
   session: Session;
   emphasis?: "attention" | "live" | "standard";
   language: AppLanguage;
+  onOpen?: (session: Session) => void;
+  /** Off when the list already carries a day heading above the row. */
+  showDay?: boolean;
 }
 
 function signalLabels(language: AppLanguage): Record<SessionSignal, string> {
@@ -40,6 +46,8 @@ export function SessionRow({
   session,
   emphasis = "standard",
   language,
+  onOpen,
+  showDay = true,
 }: SessionRowProps) {
   const ko = language === "ko";
   const title = fallbackTitle(session, language);
@@ -48,9 +56,11 @@ export function SessionRow({
   const signals = signalLabels(language);
 
   return (
-    <article
+    <button
+      type="button"
       className={`session-row session-row--${emphasis}`}
-      aria-label={`${title}, ${states[session.status]}`}
+      aria-label={`${title}, ${states[session.status]}, ${ko ? "열기" : "open session"}`}
+      onClick={() => onOpen?.(session)}
     >
       <div className="signal-rail" aria-hidden="true">
         <StatusGlyph status={session.status} />
@@ -68,11 +78,17 @@ export function SessionRow({
             <span className="kind-chip">{ko ? "보관됨" : "Archived"}</span>
           )}
         </div>
-        <div className="session-location">
-          <span>{session.repository || (ko ? "프로젝트 없음" : "No project")}</span>
-          <span className="meta-separator">/</span>
-          <span title={session.cwd || undefined}>
-            {compactPath(session.cwd, language)}
+        {/* provider spelled out (CL/CX/CR are confusable); the bare repo name is
+            dropped because it just repeats the tail of the path */}
+        <div className="session-location" title={session.cwd || undefined}>
+          <span className="session-provider">
+            {providerNames[session.provider]}
+          </span>
+          <span className="meta-separator">·</span>
+          <span>
+            {session.repository ||
+              compactPath(session.cwd, language) ||
+              (ko ? "프로젝트 없음" : "No project")}
           </span>
         </div>
       </div>
@@ -131,26 +147,19 @@ export function SessionRow({
       </div>
 
       <div className="session-state">
-        <strong>{states[session.status]}</strong>
-        <span>
+        <strong className={session.status === "failed" ? "is-failed" : ""}>
+          {states[session.status]}
+        </strong>
+        <span title={absoluteDateTime(session.updated_at, language)}>
           {relativeTime(session.updated_at, language)} ·{" "}
           {confidence[session.status_confidence]}
         </span>
-        <span
-          className="capability-badges"
-          aria-label={ko ? "지원 기능" : "Capabilities"}
-        >
-          {session.capabilities.includes("observe_live") && (
-            <i title={ko ? "실시간 상태 관측" : "Live state observation"}>LIVE</i>
-          )}
-          {session.capabilities.includes("resume") && (
-            <i title={ko ? "네이티브 도구에서 이어갈 수 있음" : "Resumable in provider"}>NATIVE</i>
-          )}
-          {session.capabilities.includes("fork") && (
-            <i title={ko ? "네이티브 포크 지원" : "Native fork supported"}>FORK</i>
-          )}
-        </span>
+        {showDay && (
+          <span className="session-day">
+            {dayBucket(session.updated_at, language)}
+          </span>
+        )}
       </div>
-    </article>
+    </button>
   );
 }

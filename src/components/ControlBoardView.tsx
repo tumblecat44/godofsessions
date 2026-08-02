@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
   Database,
   ListFilter,
   LockKeyhole,
@@ -32,42 +31,38 @@ interface ControlBoardViewProps {
 
 type BoardLane = {
   state: WorkItemState;
-  eyebrow: string;
   title: string;
   description: string;
 };
 
 function boardCopy(language: AppLanguage) {
   const ko = language === "ko";
+  // Lane names deliberately differ from session states: these count work items,
+  // not sessions, so a shared word would show two different numbers.
   const lanes: BoardLane[] = [
     {
       state: "needs_me",
-      eyebrow: "HUMAN GATE",
-      title: ko ? "사람 확인" : "Needs you",
+      title: ko ? "당신이 결정" : "You decide",
       description: ko ? "결정·권한·외부 작업" : "Decisions · access · external actions",
     },
     {
       state: "ready",
-      eyebrow: "NIGHT QUEUE",
       title: ko ? "오늘 밤 준비됨" : "Safe tonight",
       description: ko ? "안전하게 이어갈 후보" : "Candidates with a safe route",
     },
     {
       state: "waiting",
-      eyebrow: "PROVIDER GATE",
-      title: ko ? "대기 중" : "Waiting",
+      title: ko ? "도구 대기" : "Waiting on tools",
       description: ko ? "시간·의존성 해제 전" : "Blocked by time or dependencies",
     },
     {
       state: "running",
-      eyebrow: "LIVE RUNS",
-      title: ko ? "진행 중" : "Running",
+      title: ko ? "진행 중" : "In progress",
       description: ko ? "현재 공급자가 수행 중" : "Active in a provider",
     },
     {
       state: "review",
-      eyebrow: "MORNING REVIEW",
-      title: ko ? "검토 대기" : "Review",
+      title: ko ? "검토 대기" : "Ready to review",
       description: ko ? "끝난 결과를 확인할 차례" : "Completed results awaiting you",
     },
   ];
@@ -136,7 +131,7 @@ function WorkCard({
   contextBrief: ProjectContextBrief | null;
   language: AppLanguage;
 }) {
-  const { ko, lanes, gates, sources } = boardCopy(language);
+  const { ko, gates, sources } = boardCopy(language);
   return (
     <article className={`work-card work-card--${item.state}`}>
       <div className="provenance-rail">
@@ -146,11 +141,8 @@ function WorkCard({
           <span className="all-sources-mark">ALL</span>
         )}
         <i aria-hidden="true" />
+        {/* the lane name is already the column header above this card */}
         <span>{sources[item.origin]}</span>
-        <ArrowRight size={11} aria-hidden="true" />
-        <strong>
-          {lanes.find((lane) => lane.state === item.state)?.title}
-        </strong>
       </div>
 
       <div className="work-card-title">
@@ -267,22 +259,14 @@ export function ControlBoardView({
     <main className="workspace control-board-workspace">
       <header className="workspace-header board-header">
         <div className="header-copy">
-          <span className="kicker">CONTROL BOARD</span>
-          <h1>{ko ? "작업은 어디에 걸려 있나요?" : "Where is work waiting?"}</h1>
+          <h1>{ko ? "실행 대기열" : "Run queue"}</h1>
           <p>
             {ko
-              ? "공급자별 세션을 프로젝트 작업으로 묶고, 지금 사람에게 필요한 것과 밤새 맡길 수 있는 것을 분리합니다."
-              : "Turn provider sessions into project work, then separate what needs you now from what can move safely overnight."}
+              ? "오늘 밤 무인 실행 후보입니다. 승인이 필요한 것과 안전하게 돌릴 수 있는 것을 나눕니다."
+              : "Candidates for tonight's unattended runs, split by what needs your approval and what can run safely."}
           </p>
         </div>
         <div className="board-header-actions">
-          <span className="read-only-seal board-read-only">
-            <ShieldCheck size={15} />
-            <span>
-              <strong>{ko ? "원본 상태 보존" : "SOURCE STATE PRESERVED"}</strong>
-              <small>{ko ? "드래그·수정·실행 없음" : "No edits, drags, or runs"}</small>
-            </span>
-          </span>
           <button
             className="refresh-button"
             type="button"
@@ -297,41 +281,6 @@ export function ControlBoardView({
           </button>
         </div>
       </header>
-
-      <section
-        className="board-pulse"
-        aria-label={ko ? "작업 상태 요약" : "Work status summary"}
-      >
-        <div>
-          <span>{ko ? "사람 확인" : "NEEDS YOU"}</span>
-          <strong>{count("needs_me")}</strong>
-          <small>{ko ? "잠들기 전에 볼 것" : "Before you sleep"}</small>
-        </div>
-        <i aria-hidden="true" />
-        <div className="board-pulse-primary">
-          <span>{ko ? "오늘 밤 준비됨" : "SAFE TONIGHT"}</span>
-          <strong>{count("ready")}</strong>
-          <small>{ko ? "추천 엔진의 후보 풀" : "Candidate pool"}</small>
-        </div>
-        <i aria-hidden="true" />
-        <div>
-          <span>{ko ? "대기 중" : "WAITING"}</span>
-          <strong>{count("waiting")}</strong>
-          <small>{ko ? "아직 실행 불가" : "Not ready to run"}</small>
-        </div>
-        <i aria-hidden="true" />
-        <div>
-          <span>{ko ? "진행 중" : "RUNNING"}</span>
-          <strong>{count("running")}</strong>
-          <small>{ko ? "중복 실행 금지" : "No duplicate runs"}</small>
-        </div>
-        <i aria-hidden="true" />
-        <div>
-          <span>{ko ? "검토 대기" : "REVIEW"}</span>
-          <strong>{count("review")}</strong>
-          <small>{ko ? "아침에 확인할 결과" : "Morning evidence"}</small>
-        </div>
-      </section>
 
       <section className="board-toolbar">
         <label>
@@ -418,7 +367,6 @@ export function ControlBoardView({
             >
               <header>
                 <div>
-                  <span>{lane.eyebrow}</span>
                   <h2>{lane.title}</h2>
                   <p>{lane.description}</p>
                 </div>

@@ -45,6 +45,7 @@ use model::{
     PortfolioApprovalChallenge, PortfolioDispatchResult, Provider, ProviderConnection,
     ProviderLoginResult, Session, Snapshot, StatusConfidence, WorkspaceOverview,
 };
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::{ipc::Channel, State};
 
@@ -56,6 +57,33 @@ type ActionRunState = Result<Arc<action_run_registry::ActionRunRegistry>, String
 type ActionApprovalState = Mutex<action_approval::ActionApprovalRegistry>;
 
 static ACTION_RUN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Serialize)]
+struct TelemetryContext {
+    enabled: bool,
+    app_version: &'static str,
+}
+
+fn telemetry_flag_enabled(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn telemetry_disabled_by_environment() -> bool {
+    ["DO_NOT_TRACK", "GOD_OF_SESSIONS_TELEMETRY_DISABLED"]
+        .iter()
+        .any(|name| std::env::var(name).is_ok_and(|value| telemetry_flag_enabled(&value)))
+}
+
+#[tauri::command]
+fn load_telemetry_context() -> TelemetryContext {
+    TelemetryContext {
+        enabled: !cfg!(debug_assertions) && !telemetry_disabled_by_environment(),
+        app_version: env!("CARGO_PKG_VERSION"),
+    }
+}
 
 fn approval_lock_error(language: approval::ApprovalLanguage) -> String {
     match language {
@@ -1198,7 +1226,7 @@ pub(crate) fn build_overnight_plan_with_advisor(
         now,
         recommendation::PORTFOLIO_ADVISOR_EVIDENCE_WINDOW_HOURS,
     );
-    let envelope = retain_preflight_ready_advisor_options(envelope, &routes);
+    let envelope = retain_preflight_ready_advisor_options(envelope, &routes, &advisor.language);
     let mut plan = portfolio_advisor::judge(&envelope, advisor, store)?;
     plan.dispatch_preflights = dispatch::build_preflights(&plan.run_drafts, &routes);
     plan.approval_fingerprint = approval::plan_fingerprint(
@@ -1216,6 +1244,7 @@ pub(crate) fn build_overnight_plan_with_advisor(
 fn retain_preflight_ready_advisor_options(
     mut envelope: recommendation::PortfolioCandidateEnvelope,
     routes: &ExecutionRouteInventory,
+    language: &str,
 ) -> recommendation::PortfolioCandidateEnvelope {
     let drafts = envelope
         .options
@@ -1224,7 +1253,7 @@ fn retain_preflight_ready_advisor_options(
         .map(|(index, option)| {
             let mut candidate = option.candidate.clone();
             candidate.rank = index + 1;
-            crate::night_contract::build(&candidate)
+            crate::night_contract::build_for_language(&candidate, language)
         })
         .collect::<Vec<_>>();
     let preflights = dispatch::build_preflights(&drafts, routes);
@@ -1351,26 +1380,7 @@ fn validate_overnight_plan_contract(plan: &OvernightPlan) -> Result<(), String> 
         let drafts = plan
             .run_drafts
             .iter()
-            .filter(|draft| {
-                draft.candidate_rank == candidate.rank
-                    && draft.project == candidate.project
-                    && draft.route_id == candidate.execution_route_id
-                    && draft.workspace == candidate.cwd
-                    && draft.goal == candidate.goal
-                    && draft.native_session_id == candidate.native_session_id
-                    && draft.run_mode
-                        == if candidate.resume_existing {
-                            model::RunMode::ResumeExisting
-                        } else {
-                            model::RunMode::NewSession
-                        }
-                    && draft.dispatch_supported
-                        == night_contract::supports_dispatch(
-                            candidate.execution_surface,
-                            candidate.resume_existing,
-                        )
-                    && (draft.time_budget_hours - candidate.estimated_hours).abs() < 0.001
-            })
+            .filter(|draft| draft_matches_candidate(draft, candidate))
             .collect::<Vec<_>>();
         if drafts.len() != 1 {
             return Err(format!(
@@ -1437,6 +1447,16 @@ fn validate_overnight_plan_contract(plan: &OvernightPlan) -> Result<(), String> 
         return Err("야간 계획에 후보와 연결되지 않은 계약 항목이 남아 있습니다.".to_owned());
     }
     Ok(())
+}
+
+fn draft_matches_candidate(
+    draft: &model::NightRunDraft,
+    candidate: &model::OvernightCandidate,
+) -> bool {
+    ["ko", "en"].iter().any(|language| {
+        let expected = night_contract::build_for_language(candidate, language);
+        serde_json::to_value(draft).ok() == serde_json::to_value(expected).ok()
+    })
 }
 
 fn load_exact_route_inventory(route_id: &str) -> ExecutionRouteInventory {
@@ -1556,6 +1576,7 @@ pub fn run() {
         .manage(chat_store)
         .manage(action_runs)
         .invoke_handler(tauri::generate_handler![
+            load_telemetry_context,
             load_snapshot,
             load_workspace_overview,
             load_chat_providers,
@@ -1621,6 +1642,62 @@ mod live_tests {
 
     use super::*;
     use crate::model::{CapacityPool, HumanGateKind, Provider, WorkItemOrigin, WorkItemState};
+
+    #[test]
+    fn english_localized_draft_still_matches_its_host_candidate() {
+        let candidate = model::OvernightCandidate {
+            rank: 1,
+            project: "release-canary".to_owned(),
+            cwd: "/private/tmp/release-canary".to_owned(),
+            goal: "기능 완성 — 검증 가능한 결과까지 진행".to_owned(),
+            provider: Provider::Grok,
+            execution_route_id: "grok:native".to_owned(),
+            execution_surface: Provider::Grok,
+            executor_profile: None,
+            capacity_pool: CapacityPool::GrokSubscription,
+            route_reason: "ready".to_owned(),
+            verification_contract_id: "code-change-v1".to_owned(),
+            native_session_id: Some("source-session".to_owned()),
+            resume_existing: true,
+            score: 100.0,
+            confidence: model::RecommendationConfidence::High,
+            evidence: vec!["explicit priority".to_owned()],
+            source_session_ids: vec!["grok:source-session".to_owned()],
+            provider_reason: "ready".to_owned(),
+            capacity_ready_after_hours: 0.0,
+            expected_outcome: "범위가 분리된 변경 세트와 테스트·검증 결과, 남은 장애물의 아침 보고"
+                .to_owned(),
+            verification: vec![
+                "프로젝트의 기존 테스트·타입 검사·빌드 중 관련 검증을 통과할 것".to_owned(),
+            ],
+            risks: Vec::new(),
+            estimated_hours: 2.0,
+        };
+        let draft = night_contract::build_for_language(&candidate, "en");
+
+        assert_ne!(draft.goal, candidate.goal);
+        assert!(draft_matches_candidate(&draft, &candidate));
+
+        let mut changed = draft;
+        changed.workspace = "/private/tmp/other".to_owned();
+        assert!(!draft_matches_candidate(&changed, &candidate));
+    }
+
+    #[test]
+    #[ignore = "reads the current user's installed provider subscription usage"]
+    fn local_subscription_budgets_are_visible() {
+        let budgets = usage::load_budgets();
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&budgets).expect("budget summary")
+        );
+        assert!(
+            budgets
+                .iter()
+                .any(|budget| budget.provider == Provider::Grok),
+            "Grok budget must be represented even when unavailable"
+        );
+    }
 
     #[test]
     #[ignore = "uses the current user's Codex subscription and reads local project context"]
@@ -1890,6 +1967,16 @@ mod live_tests {
 mod snapshot_tests {
     use super::*;
     use crate::model::{NativeKind, Provider, SessionStatus};
+
+    #[test]
+    fn telemetry_kill_switch_accepts_only_explicit_truthy_values() {
+        for value in ["1", "true", "TRUE", " yes ", "on"] {
+            assert!(telemetry_flag_enabled(value), "{value}");
+        }
+        for value in ["", "0", "false", "off", "disabled"] {
+            assert!(!telemetry_flag_enabled(value), "{value}");
+        }
+    }
 
     fn session(id: &str, updated_at: Option<&str>) -> Session {
         Session {

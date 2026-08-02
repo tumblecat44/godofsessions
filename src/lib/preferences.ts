@@ -24,6 +24,7 @@ export function defaultPreferences(): AppPreferences {
     subscription_plan_tiers: {},
     default_overnight_hours: 7,
     onboarding_complete: false,
+    share_anonymous_usage_data: true,
   };
 }
 
@@ -59,6 +60,12 @@ export function loadPreferences(): AppPreferences {
           ? parsed.default_overnight_hours
           : fallback.default_overnight_hours,
       onboarding_complete: parsed.onboarding_complete === true,
+      share_anonymous_usage_data:
+        typeof parsed.share_anonymous_usage_data === "boolean"
+          ? parsed.share_anonymous_usage_data
+          : parsed.onboarding_complete === true
+            ? false
+            : fallback.share_anonymous_usage_data,
     };
   } catch {
     return fallback;

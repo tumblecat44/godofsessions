@@ -443,3 +443,114 @@ rejection, and standalone fallback. Final review is P0 0, P1 0, P2 0.
 The final post-review read-only slice saw 56 sessions, 9 projects, 3 candidates,
 and 3 provider-native Goal preflights. Claude and Codex are ready; Grok is
 logged out and correctly degraded. No provider Goal was approved or started.
+
+## Cycle 10 context update — 09:37 PDT
+
+The launch canary began with a ten-minute-eight-second active context
+synchronization window from 09:27:50 to 09:37:58 PDT. The full automated suite
+still passed, both Codex and Claude completed bounded disposable-workspace
+write canaries, a real read-only portfolio judgment completed against 281
+sessions, and Grok remained correctly blocked on its missing OAuth login.
+
+The strongest falsification was not provider transport but decision
+consistency. Twelve identical live Claude subscription judgments all produced
+valid JSON and the correct Alpha-selected/Beta-rejected partition, yet four
+also filled `no_run_reason` with an explanation that the data-classification
+request did not require code edits. That field was being interpreted through
+Claude Code's coding-agent context, not MORROW's portfolio semantics.
+
+The existing host rejects that contradiction, so it cannot silently authorize
+an unsafe run. It can, however, make a correct recommendation fail
+nondeterministically. Prompt emphasis alone is not a launch-quality fix.
+Claude's current structured-output path constrains shape, while the installed
+CLI rejects the top-level combinators needed to encode this cross-field
+invariant.
+
+Cycle 10 therefore narrows the model contract. The subscription model will
+return only the complete `selected`/`unselected` partition and concrete
+per-option reasons. The host will deterministically produce an aggregate
+no-run reason only when the selected partition is empty. This preserves model
+judgment where it has value, removes a redundant probabilistic conclusion, and
+keeps all IDs, partitions, safety exclusions, frozen authority, and dispatch
+decisions under host validation.
+
+The first release-bundle GUI attempt then found a second blocker. A disposable
+Codex project was correctly discovered, but its explicit constraint — no
+network, commit, push, deploy, publish, install, or external contact — was
+rejected as if those actions had been requested. The keyword-only external
+action gate could not distinguish a prohibition from an instruction.
+
+The correction is deliberately narrow. It accepts only a pure, allowlisted
+English prohibition clause; any unknown target, mixed positive/negative
+instruction, or separate risky clause still fails closed. `push` is now also a
+first-class risky action. The actual canary wording and adversarial mixed
+phrases have regressions, and the full post-change suite passes. The same GUI
+canary remains pending because macOS locked immediately before the rebuilt app
+could be reopened.
+
+## Cycle 10 final context — 10:33 PDT
+
+The release-equivalent Codex vertical slice is now complete. The exact macOS
+bundle selected the disposable canary from 285 sessions and 30 projects,
+accepted one frozen approval, started one provider-native Goal, survived GUI
+quit, recovered an intentionally terminated coordinator without duplicate
+dispatch, changed only `proof.js`, passed five assertions, and produced one
+Morning Review result.
+
+Dogfooding found and corrected a terminal-ordering defect. A Codex Goal can
+become durably `complete` before the current turn emits its final response and
+`turn/completed`. Killing app-server at the Goal update truncated that final
+rollout evidence. The worker now waits for the exact turn completion, while
+the ledger also cross-checks the exact thread and contract marker in Codex's
+read-only durable Goal store. Spawned review subagents are excluded from the
+top-level run list.
+
+The final English Overnight and expanded Morning Review accessibility tree has
+no Korean product-generated text, reports no active runs, and shows one review
+item with the exact provider and workspace evidence. The final source passed
+270 Rust tests with 19 live tests ignored, the frontend production build, and
+the exact macOS release build.
+
+The claim boundary is now external: do not launch as a complete three-provider
+product until the user completes `grok login --oauth` and a disposable Grok
+Goal passes the same terminal and Morning Review canary. Codex is
+release-equivalent; Claude's live native write and model-judgment paths passed
+in this cycle, but Grok remains truthfully unavailable.
+
+## Cycle 10 Grok completion — 12:03 PDT
+
+The external Grok boundary is now closed. The user's official Grok OAuth login
+was detected through a fresh ready billing window, without reading or copying
+provider credentials. Codex, Claude, and Grok all pass the installed
+subscription-login probe.
+
+A bounded Grok native-Goal canary then forked existing Grok session
+`7bfdd6de-a0e3-4af4-969d-eb98d0e01f60` into isolated target
+`155b1e9d-3827-4de0-9d18-a0ad82a0270f`. It ran for about 104 seconds in
+`/private/tmp/morrow-grok-release-canary-U0jU8Ww3`, changed only `proof.js`,
+passed five assertions, completed the provider Goal, and emitted one terminal
+receipt. It did not commit, push, deploy, contact an external service, or
+modify an unrelated workspace.
+
+Dogfooding also established the actual Grok unattended contract. Provider-owned
+Goal planning and verification subagents must remain available; disabling all
+subagents pauses the Goal. MORROW therefore allows the native Goal planner and
+verifiers while denying model-initiated web/MCP access, destructive Git and
+filesystem actions, credential access, external publishing, and arbitrary
+delegation. The final canary produced one planner result and three independent
+skeptic verdicts before marking the Goal complete.
+
+The connection UI now preserves two separate truths:
+
+- Settings and onboarding always show Codex, Claude, and Grok. A logged-out
+  installed provider shows a sign-in action; the initial probe shows
+  `Checking`, never a false `Sign in`.
+- Chat and portfolio-advisor pickers contain only authenticated providers that
+  those surfaces can actually use. Grok is authenticated and available for
+  overnight execution, but is not advertised as a Morrow chat/advisor provider
+  until those routes exist.
+
+The final automated source gate passes 273 Rust tests with 21 explicit live
+tests ignored, the production frontend build, and the exact macOS release
+build. The remaining release observation is the post-rebuild macOS GUI audit;
+the machine locked before that exact bundle could be inspected.

@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   CornerDownLeft,
-  LockKeyhole,
   MessageSquare,
   MoonStar,
   Plus,
@@ -446,9 +445,9 @@ export function ChatView({
     [overview.context_index.projects, overview.snapshot.sessions],
   );
   const [providers, setProviders] = useState<ChatProviderOption[]>(() =>
-    isTauri() ? unavailableProviders : previewProviders,
+    isTauri() ? [] : previewProviders,
   );
-  const [checkingProviders, setCheckingProviders] = useState(false);
+  const [checkingProviders, setCheckingProviders] = useState(isTauri());
   const [provider, setProvider] = useState<ChatProvider>(
     preferences.default_chat_provider,
   );
@@ -519,6 +518,9 @@ export function ChatView({
   const currentProvider =
     providers.find((option) => option.provider === provider) ??
     unavailableProviders.find((option) => option.provider === provider)!;
+  const selectableProviders = providers.filter(
+    (option) => option.available && option.authenticated,
+  );
   const configuredModel = models.find((option) => option.id === model);
   const selectedModel =
     configuredModel ??
@@ -758,11 +760,37 @@ export function ChatView({
     }
     setCheckingProviders(true);
     try {
-      setProviders(
-        await invoke<ChatProviderOption[]>("load_chat_providers"),
-      );
+      const next =
+        await invoke<ChatProviderOption[]>("load_chat_providers");
+      setProviders(next);
+      if (
+        !activeSessionIdRef.current &&
+        !next.some(
+          (option) =>
+            option.provider === provider &&
+            option.available &&
+            option.authenticated,
+        )
+      ) {
+        const fallback = next.find(
+          (option) => option.available && option.authenticated,
+        );
+        if (fallback) {
+          setProvider(fallback.provider);
+          setModel(
+            preferences.default_chat_models[fallback.provider] ?? null,
+          );
+          setEffort(
+            preferences.default_chat_efforts[fallback.provider] ?? null,
+          );
+          onPreferencesChange({
+            ...preferences,
+            default_chat_provider: fallback.provider,
+          });
+        }
+      }
     } catch {
-      setProviders(unavailableProviders);
+      setProviders([]);
     } finally {
       setCheckingProviders(false);
     }
@@ -1476,65 +1504,42 @@ export function ChatView({
       <section className="chat-main">
         <header className="chat-topbar">
           <div>
-            <span className="kicker">MORROW · SESSION OPERATOR</span>
-            <h1>
-              {activeSession?.title ??
-                (ko
-                  ? "세션 전체를 아는 대화"
-                  : "A conversation across every session")}
-            </h1>
-          </div>
-          <div className="chat-safety">
-            <LockKeyhole size={13} />
-            {ko
-              ? "읽기·추천 · 선택한 작업 공간에서 범위 제한 실행"
-              : "Reads, recommends, and runs workspace-scoped actions"}
+            {/* one title per screen; the empty state carries the pitch */}
+            <h1>{activeSession?.title ?? (ko ? "물어보기" : "Ask")}</h1>
           </div>
         </header>
 
         <MorrowWatchRail
           watch={overview.morrow_watch}
+          sessions={overview.snapshot.sessions}
           language={preferences.language}
           onOpenBoard={() => onNavigate("board")}
         />
 
         <div className="chat-scroll" ref={scrollRef}>
-          {entries.length === 0 ? (
-            <section className="operator-welcome">
-              <div className="operator-stage" aria-hidden="true">
-                <span className="operator-stage__ring" />
-                <img src={operatorImage} alt="" />
-              </div>
+          {entries.length === 0 && actionRuns.length === 0 ? (
+            <section className="operator-welcome operator-welcome--compact">
               <div className="operator-welcome__copy">
-                <span className="operator-status">
-                  <i />
-                  MORROW ON WATCH
-                </span>
                 <h2>
                   {ko ? (
                     <>
-                      오늘은,
+                      세션에 대해
                       <br />
-                      무엇을 볼까요?
+                      물어보세요.
                     </>
                   ) : (
                     <>
-                      What should we
+                      Ask about
                       <br />
-                      look at today?
+                      your sessions.
                     </>
                   )}
                 </h2>
                 <p>
-                  <strong>
-                    {ko
-                      ? "흩어진 모든 세션에서, 지금 할 일 하나."
-                      : "Every session. One clear next move."}
-                  </strong>
                   <span>
                     {ko
-                      ? "편하게 질문하거나, 흩어진 세션과 오늘의 문맥을 함께 읽어 달라고 하세요."
-                      : "Ask anything, or have Morrow inspect fragmented sessions and today's context."}
+                      ? "Morrow는 Codex, Claude, Cursor, Grok 세션 기록을 읽고 답합니다. 원본은 바꾸지 않습니다."
+                      : "Morrow reads your Codex, Claude, Cursor and Grok session records and answers from them. It never changes the originals."}
                   </span>
                 </p>
               </div>
@@ -1825,7 +1830,11 @@ export function ChatView({
               </span>
               <button
                 type="button"
-                onClick={() => void refreshProviderOptions()}
+                onClick={() =>
+                  checkingProviders
+                    ? undefined
+                    : onNavigate("settings")
+                }
                 disabled={checkingProviders}
               >
                 {checkingProviders
@@ -1945,14 +1954,13 @@ export function ChatView({
                 </button>
                 {providerMenuOpen && (
                   <div className="provider-menu">
-                    {providers.map((option) => (
+                    {selectableProviders.map((option) => (
                       <button
                         type="button"
                         key={option.provider}
                         className={
                           option.provider === provider ? "is-selected" : ""
                         }
-                        disabled={!option.available}
                         onClick={() => {
                           setProvider(option.provider);
                           setModel(

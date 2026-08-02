@@ -532,15 +532,15 @@ mod tests {
     };
 
     use super::ledger::{
-        contains_marker_prefix as file_contains_marker_prefix,
+        apply_durable_goal, contains_marker_prefix as file_contains_marker_prefix,
         find_marker_with_root as scan_rollout_marker_with_root,
         history_detail as codex_history_detail, history_record as codex_history_record,
-        MarkerEvent as CodexMarkerEvent, ThreadRunSource as CodexThreadRunSource,
+        DurableGoalState, MarkerEvent as CodexMarkerEvent, ThreadRunSource as CodexThreadRunSource,
     };
     use super::worker::{
-        goal_update, is_completed_turn, is_server_request, receive_response, send_notification,
-        send_request, server_request_denial, start_app_server, validate_goal_response,
-        validate_thread_response,
+        completed_goal_result, goal_update, is_completed_turn, is_server_request, receive_response,
+        send_notification, send_request, server_request_denial, start_app_server,
+        terminal_goal_result, validate_goal_response, validate_thread_response,
     };
     use super::*;
 
@@ -917,6 +917,62 @@ mod tests {
             Some(("complete".to_owned(), Some("turn-9".to_owned())))
         );
         assert!(goal_update(&complete, "thread-2").is_none());
+        assert!(
+            completed_goal_result(&complete, "thread-1", "turn-9", "complete").is_none(),
+            "the goal update must not end the worker before the turn is finished"
+        );
+        let turn_completed = json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": "thread-1",
+                "turn": {"id": "turn-9", "status": "completed"}
+            }
+        });
+        assert!(
+            completed_goal_result(&turn_completed, "thread-1", "turn-9", "complete")
+                .is_some_and(|result| result.is_ok())
+        );
+        assert!(terminal_goal_result("complete").is_ok());
+        for status in ["blocked", "paused", "usageLimited", "budgetLimited"] {
+            assert!(
+                terminal_goal_result(status).is_err(),
+                "{status} must not be reported as success"
+            );
+        }
+    }
+
+    #[test]
+    fn durable_goal_repairs_a_terminal_status_lost_from_the_rollout_tail() {
+        let marker = CodexRunMarker {
+            idempotency_key: "gos-codex-1234567890abcdef12345678".to_owned(),
+            status: "active".to_owned(),
+            started_at: Some("2026-07-28T17:17:33+00:00".to_owned()),
+            prompt: Some(
+                "[God of Sessions contract: gos-codex-1234567890abcdef12345678]\n\nCanary"
+                    .to_owned(),
+            ),
+            goal_mode: true,
+            ..CodexRunMarker::default()
+        };
+        let goal = DurableGoalState {
+            objective: "[God of Sessions contract: gos-codex-1234567890abcdef12345678]\n\nCanary"
+                .to_owned(),
+            status: "complete".to_owned(),
+            created_at_ms: 1_785_259_053_000,
+            updated_at_ms: 1_785_259_236_000,
+        };
+
+        let repaired = apply_durable_goal(marker, &goal);
+
+        assert_eq!(repaired.status, "complete");
+        assert_eq!(
+            repaired.completed_at.as_deref(),
+            Some("2026-07-28T17:20:36+00:00")
+        );
+        assert!(repaired
+            .events
+            .iter()
+            .any(|event| event.kind == "goal_complete_durable"));
     }
 
     #[test]

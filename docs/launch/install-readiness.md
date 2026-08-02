@@ -1,35 +1,58 @@
 # Install readiness
 
+## Current hosting status — 2026-07-28
+
+The English/Korean landing build is live at:
+
+`https://morrow.vibejason.com`
+
+Wrangler deployed the static build as the `morrow-landing` Worker Assets
+project and attached `morrow.vibejason.com` as a Worker custom domain. This
+route let Cloudflare provision the DNS and TLS binding through the existing
+Workers/Routes authorization without requiring a separate DNS-edit token.
+
+The final production version is
+`f469753e-e5d8-4f4d-b119-3e2b9505a28d`. The public hostname resolved through
+Cloudflare, the page and English launch video returned HTTPS 200, and a
+production download of the notarized Universal DMG matched the local release
+SHA-256
+`95f0950cdd9133ed3af3dc4b0845803df69b1027905c2af43f5b2f9eb5a51fac`.
+
 ## Verdict
 
-**PRIVATE ALPHA READY · PUBLIC LAUNCH NO-GO**
+**PUBLIC MAC DOWNLOAD LIVE**
 
-The Apple Silicon app can be handed to a small, trusted tester who understands
-that the build is not notarized. It should not be promoted as a frictionless
-public Mac download yet.
+The Developer ID signed, Apple-notarized Universal DMG is live for Apple
+Silicon and Intel Macs. A quarantined production download passed ticket,
+Gatekeeper, signature, architecture, drag-equivalent copy, and launch-health
+checks without a security workaround.
 
 ## Artifact
 
-- App:
-  `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/God of Sessions.app`
 - DMG:
-  `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/God of Sessions_0.1.0_aarch64.dmg`
+  `src-tauri/target/universal-apple-darwin/release/bundle/dmg/God of Sessions_0.1.0_universal.dmg`
 - Staged landing download:
-  `landing/public/downloads/God-of-Sessions_0.1.0_aarch64.dmg`
-- Architecture: Apple Silicon (`aarch64`)
-- DMG size: 6,144,937 bytes
+  `landing/public/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg`
+- Architecture: Universal (`arm64`, `x86_64`)
+- DMG size: 14,159,714 bytes
 - SHA-256:
-  `3c56434ac1936ec671328c01ebc6a5b49c9d00cb2344bd96a5e830150f45c378`
+  `95f0950cdd9133ed3af3dc4b0845803df69b1027905c2af43f5b2f9eb5a51fac`
 
 ## What passed
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Release app build | Pass | Final English-surface commits were rebuilt for the `aarch64-apple-darwin` target |
+| Release app build | Pass | Current source was rebuilt for the `universal-apple-darwin` target |
 | Developer ID app signature | Pass | Deep/strict `codesign` verification passed; hardened runtime is enabled |
 | Developer ID DMG signature | Pass | DMG signature is valid and satisfies its designated requirement |
+| App icon | Pass | `CFBundleIconFile` declares the bundled 1024 px `icon.icns` |
+| Apple notarization | Pass | Apple Notary Service accepted submission `45fb6638-4a39-4265-9729-7785e057b3f6` |
+| Stapled ticket | Pass | `stapler validate` passed on the local and production-downloaded DMG |
+| Gatekeeper | Pass | Quarantined DMG and copied app report `source=Notarized Developer ID` |
 | DMG contents | Pass | Contains `God of Sessions.app` and an `/Applications` link |
 | Staged download identity | Pass | Landing DMG is byte-identical to the verified release DMG |
+| Hosted download identity | Pass | Production DMG SHA-256 matches the notarized local release |
+| Architecture | Pass | The hosted app executable contains both `arm64` and `x86_64` |
 | Launch from mounted DMG | Pass | Final signed release process stayed healthy during a mounted-DMG smoke launch |
 | Codex subscription check | Pass | ChatGPT OAuth and official Codex app-server reported connected |
 | Claude subscription check | Pass | Claude.ai Max and official Claude Code CLI reported connected |
@@ -42,31 +65,13 @@ public Mac download yet.
 
 Counts are a local test observation, not a public product claim.
 
-## What blocks a public launch
+## Post-launch follow-up
 
-### P0 — Apple notarization
+### P1 — Clean new-user onboarding proof
 
-The app and DMG are Developer ID signed but not notarized. Gatekeeper reports
-`Unnotarized Developer ID`, and neither artifact has a stapled ticket. A public
-download that immediately triggers a security detour breaks the promised
-first-use experience.
-
-Required release input: an App Store Connect notarization credential
-combination (API key/issuer/key file, or Apple ID app-specific password plus
-team ID), followed by notarization, stapling, and a clean Gatekeeper check on
-a downloaded/quarantined copy.
-
-### P0 — Public download path
-
-`sessions.vibejason.com` is the selected candidate, but no DNS, hosting, or
-release upload was performed. That is intentional. The landing currently
-serves a local staged DMG and clearly labels it private alpha.
-
-### P1 — Clean-machine install proof
-
-The release was launched from its mounted DMG on the development Mac. Before a
-public announcement, test a notarized download on a clean Apple Silicon user
-account or machine with quarantine metadata preserved:
+The release passed hosted download, quarantine, Gatekeeper, drag-equivalent
+copy, and launch-health checks on the development Mac. Complete the longer
+product-flow proof on a clean user account or machine:
 
 1. download from the real HTTPS URL;
 2. drag to Applications;
@@ -80,10 +85,10 @@ account or machine with quarantine metadata preserved:
 
 ### P1 — Release ergonomics
 
-The private-alpha DMG uses the functional app-plus-Applications layout without
-polished Finder placement/background. There is no verified auto-update path
-yet. Neither blocks a trusted alpha, but both matter before asking strangers to
-install repeatedly.
+The public DMG uses the functional app-plus-Applications layout without a
+polished Finder background. There is no verified auto-update path yet. Neither
+blocks the initial direct download, but both should improve before frequent
+updates.
 
 ## Product-surface blocker cleared
 
@@ -101,19 +106,15 @@ The earlier English-surface P0 is now cleared for the bundled launch path:
 
 ## Release decision
 
-- **Private alpha:** GO for a small, explicit tester cohort.
-- **Public waitlist/demo page:** GO once hosted without presenting the current
-  DMG as a normal public install.
-- **Public downloadable launch:** NO-GO until notarization, clean-machine
-  install proof, and the hosted artifact path are verified.
+- **Public waitlist/demo page:** LIVE.
+- **Public downloadable launch:** LIVE for Apple Silicon and Intel Macs.
+- **Broader announcement:** GO, with clean-new-user onboarding retained as
+  post-launch evidence rather than a signing or Gatekeeper blocker.
 
 ## Minimum morning actions
 
-1. Provide an App Store Connect notarization credential, rebuild/notarize/
-   staple the app and DMG, then require a clean `spctl` result.
-2. Upload that exact artifact, connect `sessions.vibejason.com`, and run the
-   hosted-download → Applications → onboarding → first question → relaunch
-   test on a clean Apple Silicon account with quarantine preserved.
-3. Recheck the production CTA, video, social preview, and support matrix, then
-   choose between the public post and the already-drafted private-alpha
-   wording.
+1. Run the full onboarding → first question → relaunch test on a clean macOS
+   user account.
+2. Add and verify a signed Tauri updater path before the next public version.
+3. Polish the DMG Finder background and placement if the initial download
+   volume justifies it.

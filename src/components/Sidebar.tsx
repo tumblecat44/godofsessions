@@ -1,6 +1,5 @@
 import {
   Inbox,
-  KanbanSquare,
   LockKeyhole,
   MessageCircle,
   MoonStar,
@@ -18,7 +17,7 @@ import { ProviderMark } from "./ProviderMark";
 import { OperatorMark } from "./OperatorMark";
 
 interface SidebarProps {
-  providers: ProviderSummary[];
+  providers: Array<ProviderSummary & { indexed_count?: number }>;
   selectedProvider: Provider | "all";
   onSelectProvider: (provider: Provider | "all") => void;
   total: number;
@@ -45,7 +44,7 @@ export function Sidebar({
         <OperatorMark size={31} />
         <span>
           <strong>GOD OF SESSIONS</strong>
-          <small>MORROW · NIGHT CONTROL</small>
+          <small>{ko ? "모든 AI 코딩 세션, 한 목록" : "EVERY AI CODING SESSION, ONE LIST"}</small>
         </span>
       </div>
 
@@ -56,41 +55,33 @@ export function Sidebar({
         <button
           className={activeView === "chat" ? "is-selected" : ""}
           type="button"
-          aria-label={ko ? "Morrow에게 묻기" : "Ask Morrow"}
+          aria-label={ko ? "물어보기" : "Ask"}
           onClick={() => onSelectView("chat")}
         >
           <MessageCircle size={16} />
-          <span>{ko ? "Morrow에게 묻기" : "Ask Morrow"}</span>
-          <i className="nav-new">AI</i>
+          <span>{ko ? "물어보기" : "Ask"}</span>
         </button>
         <button
-          className={activeView === "board" ? "is-selected" : ""}
+          className={
+            activeView === "overnight" || activeView === "board"
+              ? "is-selected"
+              : ""
+          }
           type="button"
-          aria-label={ko ? "작업 관제판" : "Control board"}
-          onClick={() => onSelectView("board")}
-        >
-          <KanbanSquare size={16} />
-          <span>{ko ? "작업 관제판" : "Control board"}</span>
-          <i className="nav-new">LIVE</i>
-        </button>
-        <button
-          className={activeView === "overnight" ? "is-selected" : ""}
-          type="button"
-          aria-label={ko ? "오늘 밤 추천" : "Overnight"}
+          aria-label={ko ? "밤새 실행" : "Overnight"}
           onClick={() => onSelectView("overnight")}
         >
           <MoonStar size={16} />
-          <span>{ko ? "오늘 밤 추천" : "Overnight"}</span>
-          <i className="nav-new">M45</i>
+          <span>{ko ? "밤새 실행" : "Overnight"}</span>
         </button>
         <button
           className={activeView === "inbox" ? "is-selected" : ""}
           type="button"
-          aria-label={ko ? "세션 인박스" : "Session inbox"}
+          aria-label={ko ? "세션" : "Sessions"}
           onClick={() => onSelectView("inbox")}
         >
           <Inbox size={16} />
-          <span>{ko ? "세션 인박스" : "Session inbox"}</span>
+          <span>{ko ? "세션" : "Sessions"}</span>
         </button>
         <button
           className={activeView === "settings" ? "is-selected" : ""}
@@ -103,12 +94,13 @@ export function Sidebar({
         </button>
       </nav>
 
-      <nav
-        className="provider-nav"
-        aria-label={ko ? "공급자 필터" : "Provider filters"}
-      >
+      {activeView === "inbox" && (
+        <nav
+          className="provider-nav"
+          aria-label={ko ? "공급자 필터" : "Provider filters"}
+        >
         <span className="nav-label">
-          {ko ? "세션 소스" : "SESSION SOURCES"}
+          {ko ? "도구로 거르기" : "FILTER BY TOOL"}
         </span>
         <button
           className={selectedProvider === "all" ? "is-selected" : ""}
@@ -138,6 +130,11 @@ export function Sidebar({
             title={[
               provider.source_label,
               localizePreviewFixture(provider.message, language),
+              provider.indexed_count !== undefined
+                ? ko
+                  ? `디스크에 ${provider.indexed_count}개 보관됨`
+                  : `${provider.indexed_count} indexed on disk`
+                : null,
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -163,17 +160,18 @@ export function Sidebar({
             />
           </button>
         ))}
-      </nav>
+        </nav>
+      )}
 
       <div className="sidebar-foot">
         <div className="privacy-lock">
           <LockKeyhole size={15} />
           <span>
-            <strong>{ko ? "메타데이터 전용" : "METADATA ONLY"}</strong>
+            <strong>{ko ? "이 맥 안에서만" : "STAYS ON YOUR MAC"}</strong>
             <small>
               {ko
-                ? privacyNote
-                : "Provider records stay read-only. Recent conversation context is bounded and never persisted by the watch room."}
+                ? "세션 기록은 읽기만 하고 바꾸지 않습니다. 작업 실행은 당신이 고른 폴더 안에서, 승인한 뒤에만 일어납니다."
+                : "Session records are read, never changed. Actions run only in the folder you pick, only after you approve."}
             </small>
           </span>
         </div>

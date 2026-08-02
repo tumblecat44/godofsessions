@@ -9,6 +9,8 @@
     "still": "remotion still src/index.ts GodOfSessionsLaunch out/preview.png --frame=450",
     "render": "remotion render src/index.ts GodOfSessionsLaunch out/god-of-sessions-x-launch.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
     "render:proof": "remotion render src/index.ts GodOfSessionsProof out/god-of-sessions-launch-proof.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
+    "render:viral": "remotion render src/index.ts MorrowViralLaunch out/morrow-x.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p",
+    "poster:viral": "remotion still src/index.ts MorrowViralLaunch out/morrow-x-viral-poster.png --frame=1000",
     "poster:proof": "remotion still src/index.ts GodOfSessionsProof out/god-of-sessions-launch-proof-poster.png --frame=472",
     "frames": "remotion still src/index.ts GodOfSessionsLaunch out/frame-000.png --frame=0 && remotion still src/index.ts GodOfSessionsLaunch out/frame-120.png --frame=120 && remotion still src/index.ts GodOfSessionsLaunch out/frame-360.png --frame=360 && remotion still src/index.ts GodOfSessionsLaunch out/frame-600.png --frame=600 && remotion still src/index.ts GodOfSessionsLaunch out/frame-840.png --frame=840"
   },

@@ -6,6 +6,29 @@ execution model.
 
 ## Language
 
+**Morrow**:
+The read-only conversational operator inside God of Sessions. Morrow reasons
+over bounded God of Sessions evidence, keeps conversational continuity through
+Hermes, and hands execution to the existing exact approval flow. It is not a
+replacement coding agent, dispatch authority, or provider source of truth.
+_Avoid_: Generic chat wrapper, autonomous executor, Hermes rebrand
+
+**Conversation State**:
+Morrow's Hermes-owned durable transcript, bounded personalization memory, and
+same-store session recall. The official provider runtime still owns
+authentication and its per-turn model/tool loop. Conversation State never
+becomes Evidence for provider status, approval, dispatch, or run completion.
+_Avoid_: Provider session evidence, control-plane database, prompt cache
+
+**Personalization Memory**:
+Hermes' bounded local MEMORY/USER state used to retain stable preferences,
+corrections, and reusable environment facts across Morrow turns. It is the one
+local mutation permitted on the otherwise operationally read-only Morrow
+surface, is always non-authoritative, and accepts changes only from exact
+quotes in the current user's raw message—not host evidence, history, or model
+inference.
+_Avoid_: Provider evidence, transcript archive, execution receipt
+
 **Provider**:
 An external agent family represented in normalized evidence, such as Codex,
 Claude, Grok, Cursor, Hermes, or OpenClaw. When routing or billing matters,

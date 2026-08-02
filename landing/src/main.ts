@@ -9,14 +9,14 @@ const copy: Record<Language, Copy> = {
     navProof: "실제 시연",
     navSystem: "작동 방식",
     navSupport: "지원 범위",
-    headerCta: "프라이빗 알파 <span aria-hidden=\"true\">↘</span>",
+    headerCta: "Mac용 다운로드 <span aria-hidden=\"true\">↘</span>",
     heroEyebrow: "AI 세션을 위한 야간 관제",
     heroTitle: "대기열에서<br /><em>빠져나오세요.</em>",
     heroPromise: "모든 세션. <strong>하나의 명확한 다음 행동.</strong>",
     heroSupport:
       "God of Sessions는 Codex, Claude Code, Grok, Cursor, Hermes, OpenClaw에 흩어진 일을 보고, 지금 당신이 필요한 일과 잠든 사이 안전하게 진행할 일을 알려줍니다.",
-    primaryCta: "22초 실제 시연 보기",
-    secondaryCta: "프라이빗 알파 확인",
+    primaryCta: "Mac용 다운로드",
+    secondaryCta: "22초 실제 시연 보기",
     heroTrust: "macOS 로컬 우선 · 읽기 전용 계획 · 승인 없이는 실행하지 않음",
     proofEyebrow: "실제 제품 · 22초",
     proofNote:
@@ -75,16 +75,16 @@ const copy: Record<Language, Copy> = {
     adapter: "어댑터",
     supportFootnote:
       "직접 Grok, Cursor, OpenClaw에 쓰는 경로는 정확한 승인 경계와 보존 가능한 실행 기록을 증명할 수 있을 때까지 비활성화합니다.",
-    installEyebrow: "프라이빗 알파 · APPLE SILICON MAC",
+    installEyebrow: "MACOS · APPLE SILICON + INTEL",
     installTitle: "Morrow에게<br /><em>야간 근무를 맡기세요.</em>",
     installBody:
-      "제품은 작동하지만 공개 Mac 빌드는 아직 notarization 전입니다. 초기 로컬 개발 도구와 미공증 빌드 경고를 직접 검토할 수 있는 경우에만 다운로드하세요.",
-    downloadCta: "프라이빗 알파 다운로드",
+      "Apple이 공증한 Universal DMG를 다운로드하고 God of Sessions를 Applications 폴더로 옮기세요. 이 Mac에서 이미 로그인한 provider 계정을 그대로 사용합니다.",
+    downloadCta: "Mac용 다운로드",
     installNotesCta: "설치 안내 읽기 ↓",
     artifactPending: "로컬 산출물은 최종 검증 중입니다.",
     notesTitle: "설치 전에",
     noteOne:
-      "Developer ID 서명은 완료했지만 Apple notarization과 깨끗한 Gatekeeper 검증 전에는 공개 출시용 산출물이 아닙니다.",
+      "Universal DMG는 Developer ID 서명, Apple 공증, 티켓 첨부, Gatekeeper 검증을 완료했습니다.",
     noteTwo:
       "‘구독 연결’은 Codex 또는 Claude의 공식 로그인 화면을 엽니다. Morrow는 토큰 값이 아니라 연결 여부만 확인합니다.",
     noteThree:
@@ -137,8 +137,8 @@ function setLanguage(language: Language) {
   if (readyArtifact) {
     readyArtifact.textContent =
       language === "ko"
-        ? "Developer ID로 서명하고 로컬 검증한 프라이빗 알파입니다. Apple notarization은 아직 진행 전입니다."
-        : "Developer ID signed and locally verified for private alpha. Apple notarization is still pending.";
+        ? "Apple 공증과 Gatekeeper 검증을 완료한 Universal Mac 다운로드입니다."
+        : "Apple notarized, Gatekeeper verified, and ready for Apple Silicon and Intel Macs.";
   }
 
   const toggle = document.querySelector<HTMLButtonElement>(".language-toggle");
@@ -246,7 +246,11 @@ const downloadLink = document.querySelector<HTMLAnchorElement>("[data-download-l
 const artifactState = document.querySelector<HTMLElement>("[data-artifact-state]");
 
 if (downloadLink && artifactState) {
-  fetch(`${downloadLink.href}.checksum.txt`, { method: "HEAD" })
+  const artifactHref =
+    downloadLink.dataset.artifactHref ?? downloadLink.getAttribute("href") ?? "";
+  fetch(`${new URL(artifactHref, window.location.href).href}.checksum.txt`, {
+    method: "HEAD",
+  })
     .then((response) => {
       const contentType = response.headers.get("content-type") ?? "";
       if (!response.ok || contentType.includes("text/html")) {
@@ -254,8 +258,8 @@ if (downloadLink && artifactState) {
       }
       artifactState.textContent =
         currentLanguage() === "ko"
-          ? "Developer ID로 서명하고 로컬 검증한 프라이빗 알파입니다. Apple notarization은 아직 진행 전입니다."
-          : "Developer ID signed and locally verified for private alpha. Apple notarization is still pending.";
+          ? "Apple 공증과 Gatekeeper 검증을 완료한 Universal Mac 다운로드입니다."
+          : "Apple notarized, Gatekeeper verified, and ready for Apple Silicon and Intel Macs.";
       artifactState.classList.add("is-ready");
     })
     .catch(() => {

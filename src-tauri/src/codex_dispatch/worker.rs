@@ -680,6 +680,7 @@ pub(super) fn goal_update(value: &Value, thread_id: &str) -> Option<(String, Opt
 
 fn monitor_goal(running: &mut RunningCodexTurn) -> Result<(), String> {
     let started = Instant::now();
+    let mut terminal_goal_status = None::<String>;
     while started.elapsed() < running.max_runtime {
         match running.receiver.recv_timeout(Duration::from_millis(500)) {
             Ok(line) => {
@@ -713,11 +714,8 @@ fn monitor_goal(running: &mut RunningCodexTurn) -> Result<(), String> {
                         running.turn_id = turn_id;
                     }
                     match status.as_str() {
-                        "complete" => return Ok(()),
-                        "blocked" | "paused" | "usageLimited" | "budgetLimited" => {
-                            return Err(format!(
-                                "Codex provider-native goal이 {status} 상태로 멈췄습니다."
-                            ))
+                        "complete" | "blocked" | "paused" | "usageLimited" | "budgetLimited" => {
+                            terminal_goal_status = Some(status)
                         }
                         "active" => {}
                         _ => {
@@ -725,6 +723,15 @@ fn monitor_goal(running: &mut RunningCodexTurn) -> Result<(), String> {
                                 "Codex가 알 수 없는 goal 상태 {status}를 반환했습니다."
                             ))
                         }
+                    }
+                }
+                if let (Some(turn_id), Some(status)) =
+                    (running.turn_id.as_deref(), terminal_goal_status.as_deref())
+                {
+                    if let Some(result) =
+                        completed_goal_result(&value, &running.thread_id, turn_id, status)
+                    {
+                        return result;
                     }
                 }
             }
@@ -738,11 +745,36 @@ fn monitor_goal(running: &mut RunningCodexTurn) -> Result<(), String> {
             }
         }
     }
+    if let Some(status) = terminal_goal_status {
+        return Err(format!(
+            "Codex goal은 {status} 상태가 됐지만 현재 turn의 완료 영수증을 받지 못했습니다."
+        ));
+    }
     stop_goal(running, "paused");
     Err("Night Contract 시간 예산이 끝나 Codex goal을 일시중지했습니다.".to_owned())
 }
 
-#[cfg(test)]
+pub(super) fn terminal_goal_result(status: &str) -> Result<(), String> {
+    match status {
+        "complete" => Ok(()),
+        "blocked" | "paused" | "usageLimited" | "budgetLimited" => Err(format!(
+            "Codex provider-native goal이 {status} 상태로 멈췄습니다."
+        )),
+        _ => Err(format!(
+            "Codex가 알 수 없는 goal 상태 {status}를 반환했습니다."
+        )),
+    }
+}
+
+pub(super) fn completed_goal_result(
+    value: &Value,
+    thread_id: &str,
+    turn_id: &str,
+    terminal_status: &str,
+) -> Option<Result<(), String>> {
+    is_completed_turn(value, thread_id, turn_id).then(|| terminal_goal_result(terminal_status))
+}
+
 pub(super) fn is_completed_turn(value: &Value, thread_id: &str, turn_id: &str) -> bool {
     value.get("method").and_then(Value::as_str) == Some("turn/completed")
         && value.pointer("/params/threadId").and_then(Value::as_str) == Some(thread_id)
