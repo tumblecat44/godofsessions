@@ -6,6 +6,13 @@ use serde_json::{json, Value};
 use std::sync::Mutex;
 use tauri::{Listener, Manager};
 
+fn require_ready(state: &PiState) -> Result<(), String> {
+    if !*state.ready.lock().unwrap() {
+        return Err(state.reason.lock().unwrap().clone());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn pi_status(state: tauri::State<PiState>) -> Value {
     json!({
@@ -21,9 +28,7 @@ fn pi_prompt(
     message: String,
     streaming_behavior: Option<String>,
 ) -> Result<(), String> {
-    if !*state.ready.lock().unwrap() {
-        return Err(state.reason.lock().unwrap().clone());
-    }
+    require_ready(&state)?;
     let mut body = json!({"id": id, "type": "prompt", "message": message});
     if let Some(behavior) = streaming_behavior {
         body["streamingBehavior"] = json!(behavior);
@@ -33,21 +38,25 @@ fn pi_prompt(
 
 #[tauri::command]
 fn pi_steer(state: tauri::State<PiState>, id: String, message: String) -> Result<(), String> {
+    require_ready(&state)?;
     write_command(&state, json!({"id": id, "type": "steer", "message": message}))
 }
 
 #[tauri::command]
 fn pi_follow_up(state: tauri::State<PiState>, id: String, message: String) -> Result<(), String> {
+    require_ready(&state)?;
     write_command(&state, json!({"id": id, "type": "follow_up", "message": message}))
 }
 
 #[tauri::command]
 fn pi_abort(state: tauri::State<PiState>, id: String) -> Result<(), String> {
+    require_ready(&state)?;
     write_command(&state, json!({"id": id, "type": "abort"}))
 }
 
 #[tauri::command]
 fn pi_new_session(state: tauri::State<PiState>, id: String) -> Result<(), String> {
+    require_ready(&state)?;
     write_command(&state, json!({"id": id, "type": "new_session"}))
 }
 
@@ -58,6 +67,7 @@ fn pi_get_state(state: tauri::State<PiState>, id: String) -> Result<(), String> 
 
 #[tauri::command]
 fn pi_get_messages(state: tauri::State<PiState>, id: String) -> Result<(), String> {
+    require_ready(&state)?;
     write_command(&state, json!({"id": id, "type": "get_messages"}))
 }
 
@@ -68,6 +78,7 @@ fn pi_extension_ui_response(
     confirmed: Option<bool>,
     cancelled: Option<bool>,
 ) -> Result<(), String> {
+    require_ready(&state)?;
     let mut body = json!({"type": "extension_ui_response", "id": id});
     if let Some(c) = confirmed {
         body["confirmed"] = json!(c);
@@ -90,10 +101,6 @@ pub fn run() {
             match spawn_pi(&handle) {
                 Ok(()) => {
                     let id = "ready-1";
-                    let _ = write_command(
-                        app.state::<PiState>().inner(),
-                        json!({"id": id, "type": "get_state"}),
-                    );
                     let handle2 = handle.clone();
                     let _unlisten = handle.listen("pi-event", move |event| {
                         let payload = event.payload();
@@ -115,6 +122,10 @@ pub fn run() {
                         }
                     });
                     let _event_id = _unlisten;
+                    let _ = write_command(
+                        app.state::<PiState>().inner(),
+                        json!({"id": id, "type": "get_state"}),
+                    );
                 }
                 Err(reason) => {
                     let state = app.state::<PiState>();
