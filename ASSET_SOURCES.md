@@ -8,7 +8,7 @@ official release.
 | --- | --- | --- | --- |
 | `landing/public/instrument-sans.woff2` | Fontsource package, matching `instrument-sans-latin-wght-normal.woff2` | OFL-1.1; see `THIRD_PARTY_NOTICES.md` | Approved |
 | `promo-video/public/fonts/instrument-sans.woff2` | Same Fontsource file as the landing font | OFL-1.1; see `THIRD_PARTY_NOTICES.md` | Approved |
-| `src-tauri/icons/**`, `landing/public/app-icon.png`, `src-tauri/icons/app-icon.svg` | God of Sessions application identity | Maintainer must confirm original authorship and trademark treatment | Hold until confirmed |
+| `build/icons/**`, `landing/public/app-icon.png` | God of Sessions application identity | Maintainer must confirm original authorship and trademark treatment | Hold until confirmed |
 | `src/assets/morrow.png`, `landing/public/morrow-morning.webp`, `promo-video/public/assets/morrow*.png` | Project artwork | Maintainer must record the creator, generation method where applicable, and redistribution rights | Hold until confirmed |
 | `landing/public/og-launch.png`, `landing/public/proof-poster.jpg` | Generated launch artwork | Regenerate after the synthetic-data and visible-content review | Hold |
 | `landing/public/god-of-sessions-launch-proof.mp4` | Product proof recording | Regenerate only from synthetic fixtures; remove metadata before publication | Hold |

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-electron/
 src-tauri/target/
 landing/public/downloads/*.dmg
 .DS_Store

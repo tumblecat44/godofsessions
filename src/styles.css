@@ -35,6 +35,98 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+/* V2 — the V1 room, simplified around Morrow */
+.chat-workspace {
+  height: 100vh;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 214px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--void);
+}
+
+.morrow-chat-head {
+  min-height: 92px;
+  padding: 42px 30px 14px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--etched-edge-soft);
+  background: rgba(12, 15, 21, 0.96);
+  position: relative;
+  z-index: 3;
+}
+
+.morrow-chat-head > div,
+.morrow-chat-head > div > span {
+  display: flex;
+  align-items: center;
+}
+
+.morrow-chat-head > div { gap: 10px; }
+.morrow-chat-head > div > span { align-items: flex-start; flex-direction: column; gap: 3px; }
+.morrow-chat-head strong { color: var(--signal-amber); font: 660 9px "JetBrains Mono Variable", monospace; letter-spacing: .14em; }
+.morrow-chat-head small { color: var(--ink-muted); font: 550 7px "JetBrains Mono Variable", monospace; letter-spacing: .1em; }
+.root-chip { padding: 6px 8px; color: var(--ink-muted); border: 1px solid var(--etched-edge-soft); border-radius: 6px; font: 550 7px "JetBrains Mono Variable", monospace; letter-spacing: .07em; }
+
+.chat-main { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.chat-transcript { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 34px clamp(28px, 6vw, 92px) 40px; position: relative; z-index: 2; }
+.morrow-message { width: min(790px, 100%); margin: 0 auto 30px; display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 14px; }
+.morrow-message--user { width: min(650px, 86%); margin-right: 0; padding: 15px 16px; display: block; border: 1px solid var(--etched-edge); border-radius: 12px 12px 3px 12px; background: var(--deck-raised); }
+.message-author { padding-top: 3px; color: var(--ink-muted); font: 650 7px "JetBrains Mono Variable", monospace; letter-spacing: .12em; }
+.morrow-message--assistant .message-author { color: var(--signal-amber); }
+.message-body { min-width: 0; color: var(--ink-secondary); font-size: 13px; line-height: 1.78; }
+.message-body p { margin: 0 0 12px; white-space: pre-wrap; }
+.message-body p:last-child { margin-bottom: 0; }
+.morrow-message--user .message-body { color: var(--ink-primary); }
+
+.tool-event { margin: 8px 0; padding: 9px 10px; display: grid; grid-template-columns: 22px minmax(0,1fr) 20px; align-items: center; gap: 8px; color: var(--ink-tertiary); border: 1px solid var(--etched-edge-soft); border-radius: 8px; background: rgba(255,255,255,.018); }
+.tool-event > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tool-event strong { color: var(--ink-secondary); font-size: 9px; }
+.tool-event small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 7px "JetBrains Mono Variable", monospace; }
+.tool-event > svg:last-child { color: var(--signal-teal); }
+.thinking-block { margin: 5px 0 14px; color: var(--ink-muted); border-left: 1px solid rgba(231,168,77,.28); }
+.thinking-block summary { padding: 5px 9px; display: flex; align-items: center; gap: 7px; cursor: pointer; font: 550 8px "JetBrains Mono Variable", monospace; }
+.thinking-block p { padding: 3px 9px 8px; font-size: 10px; }
+.morrow-thinking { width: min(790px,100%); margin: 0 auto; display: flex; align-items: center; gap: 5px; color: var(--ink-muted); font: 500 8px "JetBrains Mono Variable", monospace; }
+.morrow-thinking i { width: 4px; height: 4px; border-radius: 50%; background: var(--signal-amber); animation: morrow-pulse 1s infinite alternate; }
+.morrow-thinking i:nth-child(2) { animation-delay: .18s; }.morrow-thinking i:nth-child(3) { animation-delay: .36s; }.morrow-thinking span { margin-left: 5px; }
+@keyframes morrow-pulse { to { opacity: .2; transform: translateY(-2px); } }
+
+.morrow-empty { min-height: 100%; width: min(900px,100%); margin: 0 auto; display: grid; grid-template-columns: minmax(260px,.86fr) minmax(320px,1fr); align-items: center; gap: clamp(30px,6vw,80px); }
+.morrow-empty__portrait { aspect-ratio: 1; display: grid; place-items: center; position: relative; border: 1px solid var(--etched-edge-soft); border-radius: 50%; background: radial-gradient(circle, rgba(231,168,77,.08), transparent 65%); }
+.morrow-empty__portrait::before { content:""; width: 82%; height:82%; position:absolute; border:1px dashed rgba(231,168,77,.16); border-radius:50%; }
+.morrow-empty__portrait img { width: 110%; height:110%; z-index:1; object-fit:contain; filter:drop-shadow(0 24px 30px rgba(0,0,0,.34)); }
+.morrow-empty__portrait span { padding: 6px 9px; position:absolute; right:1%; bottom:12%; z-index:2; color:var(--signal-amber); border:1px solid rgba(231,168,77,.24); border-radius:20px; background:rgba(12,15,21,.9); font:650 7px "JetBrains Mono Variable",monospace; letter-spacing:.1em; }
+.morrow-empty__portrait i { width:5px;height:5px;margin-right:6px;display:inline-block;border-radius:50%;background:var(--signal-amber); }
+.morrow-empty h1 { margin: 12px 0; font-size: clamp(30px,3vw,48px); font-weight: 490; letter-spacing: -.05em; line-height:1.04; }
+.morrow-empty p { max-width: 500px; margin:0; color:var(--ink-tertiary); font-size:12px; line-height:1.75; }
+.eyebrow { color:var(--signal-amber); font:650 8px "JetBrains Mono Variable",monospace; letter-spacing:.14em; }
+
+.approval-card { width:min(860px,calc(100% - 64px)); margin:0 auto 10px; padding:13px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:12px; align-items:center; position:relative; z-index:5; border:1px solid rgba(231,168,77,.3); border-radius:11px; background:#171811; box-shadow:0 16px 36px rgba(0,0,0,.3); }
+.approval-card__icon { width:32px;height:32px;display:grid;place-items:center;color:var(--signal-amber);border:1px solid rgba(231,168,77,.22);border-radius:50%; }
+.approval-card h3 { margin:3px 0 6px;font-size:12px;font-weight:600; }.approval-card code { display:block;max-width:540px;overflow:hidden;color:var(--ink-secondary);font-size:8px;text-overflow:ellipsis;white-space:nowrap; }.approval-card label { margin-top:8px;display:flex;align-items:center;gap:6px;color:var(--ink-muted);font-size:8px; }
+.approval-actions { display:flex;gap:6px; }.approval-actions button,.provider-card button,.settings-header button,.dialog-actions button,.auth-notice button { min-height:30px;padding:0 9px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ink-secondary);border:1px solid var(--etched-edge);border-radius:7px;background:var(--deck);cursor:pointer;font-size:8px; }.approval-actions .primary,.provider-card button.primary,.dialog-actions .primary { color:#181208;border-color:transparent;background:var(--signal-amber); }
+
+.chat-composer { margin-bottom:16px; padding:0; display:block; }
+.chat-composer textarea { height:53px; padding:15px 15px 8px; }
+.composer-bar { min-height:39px;padding:5px 7px;display:flex;align-items:center;gap:6px;border-top:1px solid var(--etched-edge-soft); }
+.composer-bar button,.composer-bar select { height:28px;color:var(--ink-tertiary);border:1px solid transparent;border-radius:6px;background:transparent;font:500 8px "JetBrains Mono Variable",monospace; }
+.composer-bar button { padding:0 7px;display:flex;align-items:center;gap:6px;cursor:pointer; }.composer-bar select { padding:0 7px; }.composer-spacer { flex:1; }.model-picker { position:relative; }.model-dot { width:6px;height:6px;border-radius:50%;background:var(--signal-teal);box-shadow:0 0 7px rgba(99,181,160,.5); }.model-menu { width:240px;max-height:300px;padding:5px;position:absolute;bottom:34px;left:0;display:flex;flex-direction:column;overflow:auto;border:1px solid var(--etched-edge);border-radius:9px;background:var(--deck-raised);box-shadow:0 18px 50px rgba(0,0,0,.44); }.model-menu button { height:auto;min-height:42px;align-items:flex-start;flex-direction:column; }.model-menu strong { color:var(--ink-primary);font-size:9px; }.model-menu small { color:var(--ink-muted);font-size:7px; }.composer-bar .send-button { width:30px;height:30px;padding:0;display:grid;place-items:center;color:#17120b;background:var(--signal-amber); }.composer-bar .send-button:disabled { color:var(--ink-muted);background:var(--deck-raised); }.composer-bar .send-button.is-stop { color:var(--signal-red);background:var(--signal-red-soft); }
+
+.provider-connections { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px; }.provider-card { min-height:72px;padding:11px;display:grid;grid-template-columns:32px minmax(0,1fr) auto;align-items:center;gap:9px;border:1px solid var(--etched-edge-soft);border-radius:9px;background:var(--console); }.provider-card.is-connected { border-color:rgba(99,181,160,.22); }.provider-card__mark { width:30px;height:30px;display:grid;place-items:center;color:var(--ink-muted);border:1px solid var(--etched-edge);border-radius:8px; }.provider-card.is-connected .provider-card__mark { color:var(--signal-teal); }.provider-card > div:nth-child(2) { min-width:0;display:flex;flex-direction:column;gap:3px; }.provider-card strong { color:var(--ink-primary);font-size:10px; }.provider-card small { overflow:hidden;color:var(--ink-muted);font-size:8px;text-overflow:ellipsis;white-space:nowrap; }.provider-card__actions { display:flex;gap:5px; }.provider-connections.is-compact { max-height:480px;overflow-y:auto;grid-template-columns:1fr; }.provider-connections.is-compact .provider-card { min-height:61px; }
+
+.morrow-settings { height:100vh;padding:72px clamp(28px,5vw,72px);overflow-y:auto;background:var(--void); }.settings-header { padding-bottom:30px;display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid var(--etched-edge-soft); }.settings-header h1 { margin:8px 0 7px;font-size:29px;font-weight:510;letter-spacing:-.04em; }.settings-header p,.settings-section p { margin:0;color:var(--ink-tertiary);font-size:10px;line-height:1.65; }.settings-section { margin-top:28px;padding-bottom:28px;border-bottom:1px solid var(--etched-edge-soft); }.settings-section__intro { margin-bottom:15px; }.settings-section h2 { margin:0 0 6px;font-size:13px;font-weight:590; }.settings-grid { display:grid;grid-template-columns:minmax(240px,1fr) auto;align-items:center;gap:28px; }.segmented { padding:3px;display:flex;border:1px solid var(--etched-edge);border-radius:8px;background:var(--control-inset); }.segmented button { min-height:31px;padding:0 12px;color:var(--ink-tertiary);border:0;border-radius:6px;background:transparent;cursor:pointer;font-size:9px; }.segmented button.is-selected { color:var(--ink-primary);background:var(--deck-raised); }.trust-note { display:flex;gap:13px;color:var(--signal-teal); }.trust-note div { color:var(--ink-primary); }
+
+.modal-backdrop { position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(4,6,8,.72);backdrop-filter:blur(8px); }.auth-dialog { width:min(460px,calc(100% - 40px));padding:22px;border:1px solid var(--etched-edge-focus);border-radius:13px;background:var(--deck-raised);box-shadow:0 28px 80px rgba(0,0,0,.55); }.auth-dialog h2 { margin:8px 0 18px;font-size:17px;font-weight:560; }.auth-dialog input { width:100%;height:42px;padding:0 11px;color:var(--ink-primary);border:1px solid var(--etched-edge);border-radius:8px;outline:0;background:var(--control-inset); }.dialog-actions { margin-top:15px;display:flex;justify-content:flex-end;gap:7px; }.auth-options { display:flex;flex-direction:column;gap:7px; }.auth-options button { padding:11px;display:flex;align-items:flex-start;flex-direction:column;color:var(--ink-primary);border:1px solid var(--etched-edge);border-radius:8px;background:var(--console);cursor:pointer; }.auth-options small { color:var(--ink-muted); }.auth-notice { max-width:460px;padding:12px 14px;position:fixed;right:22px;bottom:22px;z-index:110;display:flex;align-items:center;gap:10px;border:1px solid rgba(99,181,160,.26);border-radius:10px;background:var(--deck-raised);box-shadow:0 16px 45px rgba(0,0,0,.45);font-size:9px; }.auth-notice > button:first-child { width:25px;padding:0;border:0;background:transparent; }.auth-notice code { padding:5px 8px;color:var(--signal-amber);border-radius:5px;background:var(--control-inset); }
+
+@media (max-width: 1100px) {
+  :root { --rail-width: 205px; }
+  .chat-workspace { grid-template-columns:190px minmax(0,1fr); }
+  .provider-connections { grid-template-columns:1fr; }
+  .morrow-empty { grid-template-columns:minmax(220px,.75fr) minmax(290px,1fr);gap:30px; }
+}
+
 /* Morrow inline action run */
 
 .action-run-card {
@@ -9971,3 +10063,16 @@ button:active:not(:disabled) {
     grid-row: 1;
   }
 }
+
+/* Keep V2 room rules above the legacy V1 archive in the cascade. */
+.chat-workspace .chat-main { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.chat-workspace .chat-composer { margin: 0 auto 16px; padding: 0; display: block; }
+.chat-workspace .chat-composer textarea { height: 53px; padding: 15px 15px 8px; }
+.chat-workspace .composer-bar { min-height: 39px; padding: 5px 7px; display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--etched-edge-soft); }
+.chat-workspace .composer-bar button,
+.chat-workspace .composer-bar select { height: 28px; color: var(--ink-tertiary); border: 1px solid transparent; border-radius: 6px; background: transparent; font: 500 8px "JetBrains Mono Variable", monospace; }
+.chat-workspace .composer-bar button { padding: 0 7px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.chat-workspace .composer-bar select { padding: 0 7px; }
+.chat-workspace .composer-bar .send-button { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; color: #17120b; background: var(--signal-amber); }
+.chat-workspace .composer-bar .send-button:disabled { color: var(--ink-muted); background: var(--deck-raised); }
+.chat-workspace .composer-bar .send-button.is-stop { color: var(--signal-red); background: var(--signal-red-soft); }
