@@ -77,9 +77,15 @@ function App() {
     return (
       <Onboarding
         state={state}
+        error={error}
         onConnect={async (providerId, authType) => {
-          await bridge.connectProvider({ providerId, authType });
-          await refresh();
+          setError(undefined);
+          try {
+            await bridge.connectProvider({ providerId, authType });
+            await refresh();
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
+          }
         }}
         onComplete={completeOnboarding}
         onClose={state.onboardingComplete ? () => setReplayOnboarding(false) : undefined}
@@ -96,9 +102,17 @@ function App() {
           state={state}
           conversation={conversation}
           approval={approval}
-          onNew={async () => setConversation(await bridge.startConversation())}
-          onOpen={async (path) => setConversation(await bridge.openConversation(path))}
-          onSend={(text) => bridge.sendMessage({ text })}
+          error={error}
+          onNew={async () => { setApproval(undefined); setConversation(await bridge.startConversation()); }}
+          onOpen={async (path) => { setApproval(undefined); setConversation(await bridge.openConversation(path)); }}
+          onSend={async (text) => {
+            setError(undefined);
+            try {
+              await bridge.sendMessage({ text });
+            } catch (reason) {
+              setError(reason instanceof Error ? reason.message : "Morrow could not finish that thought.");
+            }
+          }}
           onAbort={() => bridge.abort()}
           onApproval={async (allowed, remember) => {
             if (!approval) return;
@@ -117,9 +131,15 @@ function App() {
       ) : (
         <SettingsView
           state={state}
+          error={error}
           onConnect={async (providerId, authType) => {
-            await bridge.connectProvider({ providerId, authType });
-            await refresh();
+            setError(undefined);
+            try {
+              await bridge.connectProvider({ providerId, authType });
+              await refresh();
+            } catch (reason) {
+              setError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
+            }
           }}
           onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}
           onLanguage={async (language) => {
@@ -143,8 +163,8 @@ function App() {
         <div className="auth-notice" role="status">
           <button type="button" aria-label="Close" onClick={() => setAuthNotice(undefined)}><X size={15} /></button>
           <strong>{String(authNotice.message ?? "Continue in your browser")}</strong>
-          {typeof authNotice.url === "string" && (
-            <button type="button" onClick={() => void bridge.openExternal(String(authNotice.url))}>Open securely <ExternalLink size={14} /></button>
+          {noticeUrl(authNotice) && (
+            <button type="button" onClick={() => void bridge.openExternal(noticeUrl(authNotice)!)}>Open securely <ExternalLink size={14} /></button>
           )}
           {typeof authNotice.userCode === "string" && <code>{authNotice.userCode}</code>}
         </div>
@@ -153,11 +173,25 @@ function App() {
   );
 }
 
+function noticeUrl(notice: Record<string, unknown>) {
+  if (typeof notice.url === "string") return notice.url;
+  if (typeof notice.verificationUri === "string") return notice.verificationUri;
+  if (Array.isArray(notice.links)) {
+    const link = notice.links.find((item) => item && typeof item === "object" && typeof (item as Record<string, unknown>).url === "string") as Record<string, unknown> | undefined;
+    if (link) return String(link.url);
+  }
+  return undefined;
+}
+
 function AuthDialog({ request, onAnswer }: { request: AuthPromptRequest; onAnswer(value?: string, cancelled?: boolean): Promise<void> }) {
-  const [value, setValue] = useState("");
   return (
     <div className="modal-backdrop" role="presentation">
-      <form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); void onAnswer(value); }}>
+      <form className="auth-dialog" onSubmit={(event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        void onAnswer(String(form.get("credential") ?? ""));
+        event.currentTarget.reset();
+      }}>
         <span className="eyebrow">SECURE CONNECTION</span>
         <h2>{request.message}</h2>
         {request.options ? (
@@ -165,7 +199,7 @@ function AuthDialog({ request, onAnswer }: { request: AuthPromptRequest; onAnswe
             {request.options.map((option) => <button type="button" key={option.id} onClick={() => void onAnswer(option.id)}><strong>{option.label}</strong><small>{option.description}</small></button>)}
           </div>
         ) : (
-          <input autoFocus type={request.promptType === "secret" ? "password" : "text"} value={value} placeholder={request.placeholder} onChange={(event) => setValue(event.target.value)} />
+          <input autoFocus name="credential" autoComplete="off" type={request.promptType === "secret" ? "password" : "text"} placeholder={request.placeholder} />
         )}
         <div className="dialog-actions">
           <button type="button" onClick={() => void onAnswer(undefined, true)}>Cancel</button>

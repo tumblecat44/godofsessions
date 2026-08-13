@@ -8,6 +8,7 @@ interface ChatViewProps {
   state: BootstrapState;
   conversation?: ConversationDetail;
   approval?: ApprovalRequest;
+  error?: string;
   onNew(): Promise<void>;
   onOpen(path: string): Promise<void>;
   onSend(text: string): Promise<void>;
@@ -61,7 +62,7 @@ export function ChatView(props: ChatViewProps) {
         <header className="morrow-chat-head"><div><OperatorMark size={32} active={props.conversation?.busy} /><span><strong>MORROW</strong><small>{props.conversation?.busy ? (ko ? "생각하는 중" : "THINKING WITH YOU") : (ko ? "대화 준비됨" : "READY TO TALK")}</small></span></div><span className="root-chip" title="Fixed execution root">ROOT · {props.state.rootName}</span></header>
 
         <div className="chat-transcript" ref={scrollRef}>
-          {!props.conversation?.messages.length ? <FriendlyEmpty ko={ko} /> : props.conversation.messages.map((message) => (
+          {props.error ? <FriendlyError message={props.error} ko={ko} /> : !props.conversation?.messages.length ? <FriendlyEmpty ko={ko} /> : props.conversation.messages.map((message) => (
             <article className={`morrow-message morrow-message--${message.role}`} key={message.id}>
               <span className="message-author">{message.role === "user" ? (ko ? "나" : "YOU") : message.role === "assistant" ? "MORROW" : "TOOL"}</span>
               <div className="message-body">
@@ -107,6 +108,15 @@ function FriendlyEmpty({ ko }: { ko: boolean }) {
     <div className="morrow-empty">
       <div className="morrow-empty__portrait"><img src={morrowImage} alt="Morrow waiting beside a small light" /><span><i />MORROW IS HERE</span></div>
       <div><span className="eyebrow">A QUIET PLACE TO THINK</span><h1>{ko ? "무엇부터 같이 풀어볼까요?" : "What shall we untangle together?"}</h1><p>{ko ? "그냥 이야기해도 좋아요. 파일이나 명령은 부탁할 때만 사용하고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. I only reach for files or commands when you ask—and I pause before changing anything."}</p></div>
+    </div>
+  );
+}
+
+function FriendlyError({ message, ko }: { message: string; ko: boolean }) {
+  return (
+    <div className="morrow-error" role="alert">
+      <img src={morrowImage} alt="Morrow looking for a missing thread" />
+      <div><span className="eyebrow">MORROW LOST THE THREAD</span><h2>{ko ? "잠깐 길을 잃었어요." : "I couldn’t find the next step."}</h2><p>{message}</p><small>{ko ? "대화는 그대로 남아 있어요. 다시 말해주면 이어갈게요." : "Your conversation is still here. Try saying it once more and I’ll pick it up."}</small></div>
     </div>
   );
 }

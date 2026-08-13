@@ -37,7 +37,8 @@ Permission defaults:
 
 - `read`, `grep`, `find`, and `ls`: automatic
 - `edit` and `write` in the fixed root: ask, optionally remember for the conversation
-- ordinary shell commands: ask, optionally remember for the conversation
+- ordinary shell commands: ask, and optionally remember only that exact command
+  for the active conversation
 - writes outside the root and destructive/publish/deploy/push commands: ask every time
 
 ## Development

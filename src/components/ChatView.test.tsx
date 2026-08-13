@@ -23,4 +23,11 @@ describe("Morrow first-use conversation", () => {
     expect(screen.getByText(/only reach for files or commands when you ask/i)).toBeInTheDocument();
     expect(screen.queryByText(/select project/i)).not.toBeInTheDocument();
   });
+
+  it("turns runtime failures into a friendly Morrow scene", () => {
+    render(<ChatView state={state} error="Model connection slipped." onNew={vi.fn()} onOpen={vi.fn()} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("I couldn’t find the next step.");
+    expect(screen.getByAltText("Morrow looking for a missing thread")).toBeInTheDocument();
+  });
 });

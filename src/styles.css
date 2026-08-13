@@ -101,6 +101,10 @@
 .morrow-empty__portrait i { width:5px;height:5px;margin-right:6px;display:inline-block;border-radius:50%;background:var(--signal-amber); }
 .morrow-empty h1 { margin: 12px 0; font-size: clamp(30px,3vw,48px); font-weight: 490; letter-spacing: -.05em; line-height:1.04; }
 .morrow-empty p { max-width: 500px; margin:0; color:var(--ink-tertiary); font-size:12px; line-height:1.75; }
+.morrow-error { width:min(790px,100%);margin:0 auto 24px;padding:13px;display:grid;grid-template-columns:72px minmax(0,1fr);gap:13px;align-items:center;border:1px solid rgba(214,120,105,.24);border-radius:11px;background:var(--signal-red-soft); }
+.morrow-error img { width:72px;height:72px;object-fit:contain;filter:grayscale(.25) drop-shadow(0 8px 14px rgba(0,0,0,.25)); }.morrow-error h2 { margin:3px 0 5px;font-size:13px;font-weight:600; }.morrow-error p { margin:0;color:#d99b91;font:500 8px "JetBrains Mono Variable",monospace; }.morrow-error small { margin-top:5px;display:block;color:var(--ink-muted);font-size:8px; }
+.onboarding-error { margin-top:16px;padding:10px;display:grid;grid-template-columns:54px minmax(0,1fr);align-items:center;gap:10px;border:1px solid rgba(214,120,105,.24);border-radius:9px;background:var(--signal-red-soft); }.onboarding-error img { width:54px;height:54px;object-fit:contain; }.onboarding-error span { display:flex;flex-direction:column;gap:3px; }.onboarding-error strong { color:#d99b91;font-size:10px; }.onboarding-error small { color:var(--ink-muted);font-size:8px; }
+.settings-error { margin:0 0 12px;padding:10px;color:#d99b91;border:1px solid rgba(214,120,105,.24);border-radius:8px;background:var(--signal-red-soft);font-size:9px; }.settings-error small { margin-left:6px;color:var(--ink-muted); }
 .eyebrow { color:var(--signal-amber); font:650 8px "JetBrains Mono Variable",monospace; letter-spacing:.14em; }
 
 .approval-card { width:min(860px,calc(100% - 64px)); margin:0 auto 10px; padding:13px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:12px; align-items:center; position:relative; z-index:5; border:1px solid rgba(231,168,77,.3); border-radius:11px; background:#171811; box-shadow:0 16px 36px rgba(0,0,0,.3); }
@@ -126,6 +130,7 @@
   .provider-connections { grid-template-columns:1fr; }
   .morrow-empty { grid-template-columns:minmax(220px,.75fr) minmax(290px,1fr);gap:30px; }
 }
+.provider-ready { color:var(--signal-teal);font:650 7px "JetBrains Mono Variable",monospace;letter-spacing:.08em; }
 
 /* Morrow inline action run */
 

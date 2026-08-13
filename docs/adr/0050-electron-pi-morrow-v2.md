@@ -28,6 +28,10 @@ directories. Pi extensions, prompt templates, and themes are disabled.
   required by the active application.
 - V1's session inbox, Control Board, and Overnight runtime are removed.
 - Read-only tools run automatically. Writes and shell commands cross an app-owned
-  approval boundary before Pi executes them.
-- Credentials and conversation files remain local app data and are never sent
-  to the renderer as secrets.
+  approval boundary before Pi executes them. A session may remember in-root
+  file-write approval or one exact ordinary shell command; high-risk commands
+  and root escapes always ask again.
+- Stored credentials and conversation files remain local app data. A key or
+  manual code typed by the user crosses the isolated IPC bridge once and is
+  handed directly to Pi; it is not retained in React state, echoed back from
+  the main process, logged, or persisted by the renderer.

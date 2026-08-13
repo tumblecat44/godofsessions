@@ -1,16 +1,16 @@
 # Contributing to God of Sessions
 
-Thanks for helping build a local-first control plane for AI coding agents.
+Thanks for helping build a local-first home for conversations with Morrow.
 The project is maintainer-led and contributions are welcome, but there is no
 guaranteed response time or feature commitment.
 
 ## Good contribution areas
 
-- provider adapters and synthetic parser fixtures;
+- Pi provider/auth integration using synthetic fixtures;
 - Linux and Windows portability;
-- tests for recovery, capacity, approval, and workspace boundaries;
+- tests for session resume, streaming, approval, and fixed-root boundaries;
 - documentation, translations, and accessibility;
-- small UI improvements that preserve the answer-first workflow.
+- small UI improvements that preserve the V1 Morrow conversation experience.
 
 Before proposing a large feature, open an issue describing the user problem,
 the provider or platform boundary involved, and how the behavior can be
@@ -23,14 +23,7 @@ Requirements and commands are documented in `README.md`:
 ```sh
 npm ci
 npm run check
-npm run tauri dev
-```
-
-Rust changes should also pass:
-
-```sh
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+npm run dev
 ```
 
 Live-provider tests are local-only, ignored by default, and must not be made a

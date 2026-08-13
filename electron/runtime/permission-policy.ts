@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 export type ApprovalScope =
   | "write-in-root"
   | "write-outside-root"
-  | "bash"
+  | `bash:${string}`
   | "high-risk-command";
 
 export type PermissionDecision =
@@ -91,10 +91,11 @@ export class PermissionPolicy {
           detail: command,
         };
       }
-      if (this.remembered.get("bash")) return { kind: "allow" };
+      const scope = `bash:${command}` as const;
+      if (this.remembered.get(scope)) return { kind: "allow" };
       return {
         kind: "ask",
-        scope: "bash",
+        scope,
         rememberable: true,
         title: "Morrow가 명령을 실행하려고 해요",
         detail: command,
@@ -103,7 +104,7 @@ export class PermissionPolicy {
 
     return {
       kind: "ask",
-      scope: "bash",
+      scope: `bash:${call.toolName}`,
       rememberable: false,
       title: `${call.toolName} 도구를 사용하려고 해요`,
       detail: JSON.stringify(call.input),

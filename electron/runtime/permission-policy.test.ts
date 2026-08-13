@@ -36,7 +36,6 @@ describe("PermissionPolicy", () => {
 
   it("always re-prompts for destructive and publishing commands", () => {
     const policy = new PermissionPolicy(root);
-    policy.remember("bash", true);
 
     for (const command of ["rm -rf build", "git push origin main", "npm publish", "vercel deploy"]) {
       expect(policy.evaluate({ toolName: "bash", input: { command } })).toMatchObject({
@@ -45,5 +44,16 @@ describe("PermissionPolicy", () => {
         rememberable: false,
       });
     }
+  });
+
+  it("remembers only the exact approved shell command", () => {
+    const policy = new PermissionPolicy(root);
+    policy.remember("bash:pwd", true);
+    expect(policy.evaluate({ toolName: "bash", input: { command: "pwd" } })).toEqual({ kind: "allow" });
+    expect(policy.evaluate({ toolName: "bash", input: { command: "ls" } })).toMatchObject({
+      kind: "ask",
+      scope: "bash:ls",
+      rememberable: true,
+    });
   });
 });

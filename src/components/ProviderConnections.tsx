@@ -20,7 +20,7 @@ export function ProviderConnections({ state, onConnect, onDisconnect, compact = 
           <div className="provider-card__mark">{provider.connected ? <Check size={17} /> : <Sparkles size={17} />}</div>
           <div><strong>{provider.name}</strong><small>{provider.connected ? "Ready for Morrow" : provider.authLabel ?? "Connect securely"}</small></div>
           <div className="provider-card__actions">
-            {provider.connected ? <button type="button" onClick={() => void onDisconnect(provider.id)}><LogOut size={13} />Disconnect</button> : provider.authTypes.map((authType) => <button className={authType === "oauth" ? "primary" : ""} type="button" key={authType} onClick={() => void onConnect(provider.id, authType)}>{authType === "oauth" ? <Link2 size={13} /> : <KeyRound size={13} />}{authType === "oauth" ? "Sign in" : "API key"}</button>)}
+            {provider.connected ? compact ? <span className="provider-ready">CONNECTED</span> : <button type="button" onClick={() => void onDisconnect(provider.id)}><LogOut size={13} />Disconnect</button> : provider.authTypes.map((authType) => <button className={authType === "oauth" ? "primary" : ""} type="button" key={authType} onClick={() => void onConnect(provider.id, authType)}>{authType === "oauth" ? <Link2 size={13} /> : <KeyRound size={13} />}{authType === "oauth" ? "Sign in" : "API key"}</button>)}
           </div>
         </article>
       ))}

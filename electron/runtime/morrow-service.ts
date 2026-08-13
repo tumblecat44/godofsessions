@@ -55,7 +55,7 @@ function textFromContent(content: unknown): string {
     .join("\n");
 }
 
-function transcriptParts(content: unknown): TranscriptPart[] {
+function transcriptParts(content: unknown, completedToolCalls: ReadonlySet<string>): TranscriptPart[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   if (!Array.isArray(content)) return [];
   return content.flatMap((part): TranscriptPart[] => {
@@ -64,19 +64,24 @@ function transcriptParts(content: unknown): TranscriptPart[] {
     if (value.type === "text") return [{ type: "text", text: String(value.text ?? "") }];
     if (value.type === "thinking") return [{ type: "thinking", text: String(value.thinking ?? value.text ?? "") }];
     if (value.type === "toolCall") {
-      return [{ type: "tool", toolName: String(value.name ?? "tool"), text: JSON.stringify(value.arguments ?? {}), state: "running" }];
+      return [{ type: "tool", toolName: String(value.name ?? "tool"), text: JSON.stringify(value.arguments ?? {}), state: completedToolCalls.has(String(value.id ?? "")) ? "done" : "running" }];
     }
     return [];
   });
 }
 
 function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
+  const completedToolCalls = new Set(messages.flatMap((message) => {
+    if (!message || typeof message !== "object") return [];
+    const value = message as Record<string, unknown>;
+    return value.role === "toolResult" && typeof value.toolCallId === "string" ? [value.toolCallId] : [];
+  }));
   return messages.flatMap((message, index): TranscriptMessage[] => {
     if (!message || typeof message !== "object") return [];
     const value = message as Record<string, unknown>;
     const role = value.role;
     if (role !== "user" && role !== "assistant" && role !== "toolResult") return [];
-    const parts = transcriptParts(value.content);
+    const parts = transcriptParts(value.content, completedToolCalls);
     if (parts.length === 0) return [];
     return [{
       id: String(value.id ?? `${role}-${index}`),
@@ -109,6 +114,7 @@ export class MorrowService {
   private thinkingLevel: ThinkingLevel = "medium";
   private language: AppLanguage = "en";
   private onboardingComplete = false;
+  private initializationError?: Error;
 
   constructor(options: { root: string; dataDir: string; sendEvent: SendEvent }) {
     this.root = options.root;
@@ -119,16 +125,21 @@ export class MorrowService {
   }
 
   async initialize() {
-    const preferences = await this.readPreferences();
-    this.language = preferences.language;
-    this.onboardingComplete = preferences.onboardingComplete;
-    this.thinkingLevel = preferences.thinkingLevel;
-    this.selectedModel = preferences.selectedModel;
-    this.modelRuntime = await ModelRuntime.create({
-      authPath: join(this.dataDir, "auth.json"),
-      modelsStorePath: join(this.dataDir, "models.json"),
-      refreshOnCreate: false,
-    });
+    try {
+      const preferences = await this.readPreferences();
+      this.language = preferences.language;
+      this.onboardingComplete = preferences.onboardingComplete;
+      this.thinkingLevel = preferences.thinkingLevel;
+      this.selectedModel = preferences.selectedModel;
+      this.modelRuntime = await ModelRuntime.create({
+        authPath: join(this.dataDir, "auth.json"),
+        modelsStorePath: join(this.dataDir, "models.json"),
+        refreshOnCreate: false,
+      });
+      this.initializationError = undefined;
+    } catch (reason) {
+      this.initializationError = reason instanceof Error ? reason : new Error("Morrow could not initialize the embedded Pi runtime.");
+    }
   }
 
   private async readPreferences(): Promise<{
@@ -158,19 +169,19 @@ export class MorrowService {
 
   async bootstrap(): Promise<BootstrapState> {
     const runtime = this.requireRuntime();
-    const credentials = new Set((await runtime.listCredentials()).map((entry) => entry.providerId));
-    const providers = runtime.getProviders().map((provider) => ({
+    const providers = await Promise.all(runtime.getProviders().map(async (provider) => ({
       id: provider.id,
       name: provider.name,
-      connected: credentials.has(provider.id) || runtime.hasConfiguredAuth(provider.id),
+      connected: Boolean(await runtime.checkAuth(provider.id).catch(() => undefined)),
       authTypes: [provider.auth?.apiKey ? "api_key" as const : null, provider.auth?.oauth ? "oauth" as const : null].filter((value): value is "api_key" | "oauth" => value !== null),
       authLabel: provider.auth?.oauth?.loginLabel ?? provider.auth?.oauth?.name ?? provider.auth?.apiKey?.name,
-    })).filter((provider) => provider.authTypes.length > 0);
-    const models = runtime.getModels().map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
+    })));
+    const visibleProviders = providers.filter((provider) => provider.authTypes.length > 0);
+    const models = (await runtime.getAvailable().catch(() => runtime.getAvailableSnapshot())).map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
     return {
       rootName: basename(this.root) || this.root,
       onboardingComplete: this.onboardingComplete,
-      providers,
+      providers: visibleProviders,
       models,
       conversations: await this.listConversations(),
       selectedModel: this.selectedModel,
@@ -232,6 +243,8 @@ export class MorrowService {
   }
 
   private async activateSession(manager: SessionManager): Promise<ConversationDetail> {
+    for (const waiter of this.approvalWaiters.values()) waiter.deferred.resolve(false);
+    this.approvalWaiters.clear();
     this.permissionPolicy.clear();
     this.unsubscribe?.();
     this.session?.dispose();
@@ -253,15 +266,16 @@ export class MorrowService {
       extensionFactories: [this.permissionExtension(() => manager.getSessionId())],
     });
     await loader.reload();
-    const selected = this.selectedModel ? runtime.getModel(this.selectedModel.provider, this.selectedModel.id) : undefined;
+    const restoring = manager.getEntries().length > 0;
+    const selected = !restoring && this.selectedModel ? runtime.getModel(this.selectedModel.provider, this.selectedModel.id) : undefined;
     const available = runtime.getAvailableSnapshot();
     const model = selected ?? available[0];
     const result = await createAgentSession({
       cwd: this.root,
       agentDir: join(this.dataDir, "agent"),
-      model,
+      model: restoring ? undefined : model,
       modelRuntime: runtime,
-      thinkingLevel: this.thinkingLevel,
+      thinkingLevel: restoring ? undefined : this.thinkingLevel,
       tools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
       resourceLoader: loader,
       settingsManager: settings,
@@ -365,6 +379,7 @@ export class MorrowService {
   }
 
   private requireRuntime() {
+    if (this.initializationError) throw this.initializationError;
     if (!this.modelRuntime) throw new Error("Morrow is still starting.");
     return this.modelRuntime;
   }
