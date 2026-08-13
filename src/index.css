@@ -1,0 +1,27 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 4rem;
+  margin-bottom: 0.5rem;
+}
+
+pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
