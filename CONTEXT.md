@@ -43,8 +43,8 @@ _Avoid_: action run, overnight run, project task
 **Approval**
 A human decision made before a mutation or shell command. In-root file-write
 approval may be remembered only for the active conversation. An ordinary shell
-approval remembers only the exact command; root escapes and high-risk commands
-are never rememberable.
+approval may remember only an allowlisted read-only command exactly; every
+other command, root escape, and high-risk command is never rememberable.
 _Avoid_: permanent blanket access, hidden confirmation
 
 **Overnight**

@@ -25,7 +25,7 @@ export interface ToolCallLike {
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const WRITE_TOOLS = new Set(["edit", "write"]);
 const HIGH_RISK_COMMAND = /(?:^|\s)(?:rm\s+-\S*r\S*|git\s+push|npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|vercel\s+(?:deploy|--prod)|netlify\s+deploy|wrangler\s+deploy)(?:\s|$)/i;
-const NEVER_REMEMBER_COMMAND = /(?:(?:^|\s)\.\.(?:[/\\]|\s|$)|[<>]|\b(?:rm|mv|cp|install|tee|truncate|chmod|chown)\b|\bgit\s+(?:reset|clean|checkout|restore|rebase|merge|commit|switch)\b|\b(?:python|python3|node|ruby|perl|sh|bash|zsh)\s+-[ce]\b|(?:^|\s)\/(?:tmp|private|Users|home|etc|var)(?:\/|\s|$))/i;
+const REMEMBERABLE_READ_COMMAND = /^(?:pwd|ls(?:\s+[^;&|<>]*)?|rg(?:\s+[^;&|<>]*)?|grep(?:\s+[^;&|<>]*)?|find(?:\s+[^;&|<>]*)?|git\s+(?:status|diff|log|show)(?:\s+[^;&|<>]*)?)$/i;
 
 function stringField(input: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
@@ -94,7 +94,7 @@ export class PermissionPolicy {
       }
       const scope = `bash:${command}` as const;
       if (this.remembered.get(scope)) return { kind: "allow" };
-      const rememberable = !NEVER_REMEMBER_COMMAND.test(command);
+      const rememberable = REMEMBERABLE_READ_COMMAND.test(command.trim()) && !/(?:^|\s)\.\.(?:[/\\]|\s|$)/.test(command);
       return {
         kind: "ask",
         scope,

@@ -34,8 +34,9 @@ picker, subagents, or active Overnight runtime. It is not a cloud service.
 
 - Keep Pi SessionManager records authoritative for Morrow conversations.
 - Preserve a fail-closed approval boundary before file mutations and commands.
-- An ordinary shell approval may remember only the exact approved command for
-  the active conversation; in-root file-write approval may also be remembered.
+- Only allowlisted read-only shell commands may be remembered, and then only as
+  the exact approved command for the active conversation. In-root file-write
+  approval may also be remembered.
 - Use official provider runtimes for authentication and execution.
 - Keep provider-specific limitations visible instead of presenting an
   unsupported route as ready.

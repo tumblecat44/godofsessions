@@ -168,6 +168,7 @@ export class MorrowService {
   }
 
   async bootstrap(): Promise<BootstrapState> {
+    if (this.initializationError) await this.initialize();
     const runtime = this.requireRuntime();
     const providers = await Promise.all(runtime.getProviders().map(async (provider) => ({
       id: provider.id,

@@ -70,8 +70,9 @@ their source assets are redistributable.
   fixtures, documentation, or tests.
 - Pi `SessionManager` records remain the source of truth for Morrow conversations.
 - Preserve the explicit approval gate before mutations and commands. Ordinary
-  shell approval may remember only the exact approved command; in-root
-  file-write approval may be remembered for one active conversation.
+  shell approval may remember only an allowlisted read-only command and only
+  exactly; in-root file-write approval may be remembered for one active
+  conversation.
 - Tests must use synthetic data unless a test is explicitly local-only and
   ignored by default.
 
