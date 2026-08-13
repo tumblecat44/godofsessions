@@ -29,7 +29,7 @@ directories. Pi extensions, prompt templates, and themes are disabled.
 - V1's session inbox, Control Board, and Overnight runtime are removed.
 - Read-only tools run automatically. Writes and shell commands cross an app-owned
   approval boundary before Pi executes them. A session may remember in-root
-  file-write approval or one exact allowlisted read-only shell command; all
+  file-write approval or exact argument-free `pwd` or `git status`; all
   other shell commands, high-risk commands, and root escapes always ask again.
 - Stored credentials and conversation files remain local app data. A key or
   manual code typed by the user crosses the isolated IPC bridge once and is

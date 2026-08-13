@@ -50,7 +50,7 @@ describe("PermissionPolicy", () => {
     const policy = new PermissionPolicy(root);
     policy.remember("bash:pwd", true);
     expect(policy.evaluate({ toolName: "bash", input: { command: "pwd" } })).toEqual({ kind: "allow" });
-    expect(policy.evaluate({ toolName: "bash", input: { command: "ls" } })).toMatchObject({ kind: "ask", scope: "bash:ls", rememberable: true });
+    expect(policy.evaluate({ toolName: "bash", input: { command: "ls" } })).toMatchObject({ kind: "ask", scope: "bash:ls", rememberable: false });
   });
 
   it.each([
@@ -71,8 +71,13 @@ describe("PermissionPolicy", () => {
     });
   });
 
-  it.each(["pwd", "ls -la", "rg TODO src", "grep -n word README.md", "find src -name '*.ts'", "git status --short", "git diff", "git log -5", "git show HEAD"])("offers exact-session memory for a read-only command: %s", (command) => {
+  it.each(["pwd", "git status"])("offers exact-session memory for a root-local, argument-free read command: %s", (command) => {
     const policy = new PermissionPolicy(root);
     expect(policy.evaluate({ toolName: "bash", input: { command } })).toMatchObject({ kind: "ask", rememberable: true });
+  });
+
+  it.each(["ls /etc", "rg secret /private", "find / -name x", "find . -delete", "git diff --output=/tmp/x", "git status --short"])("never offers memory when command arguments could escape or mutate: %s", (command) => {
+    const policy = new PermissionPolicy(root);
+    expect(policy.evaluate({ toolName: "bash", input: { command } })).toMatchObject({ kind: "ask", rememberable: false });
   });
 });

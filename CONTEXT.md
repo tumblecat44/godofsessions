@@ -43,7 +43,7 @@ _Avoid_: action run, overnight run, project task
 **Approval**
 A human decision made before a mutation or shell command. In-root file-write
 approval may be remembered only for the active conversation. An ordinary shell
-approval may remember only an allowlisted read-only command exactly; every
+approval may remember only exact argument-free `pwd` or `git status`; every
 other command, root escape, and high-risk command is never rememberable.
 _Avoid_: permanent blanket access, hidden confirmation
 

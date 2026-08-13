@@ -25,7 +25,7 @@ export interface ToolCallLike {
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const WRITE_TOOLS = new Set(["edit", "write"]);
 const HIGH_RISK_COMMAND = /(?:^|\s)(?:rm\s+-\S*r\S*|git\s+push|npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|vercel\s+(?:deploy|--prod)|netlify\s+deploy|wrangler\s+deploy)(?:\s|$)/i;
-const REMEMBERABLE_READ_COMMAND = /^(?:pwd|ls(?:\s+[^;&|<>]*)?|rg(?:\s+[^;&|<>]*)?|grep(?:\s+[^;&|<>]*)?|find(?:\s+[^;&|<>]*)?|git\s+(?:status|diff|log|show)(?:\s+[^;&|<>]*)?)$/i;
+const REMEMBERABLE_READ_COMMAND = /^(?:pwd|git status)$/i;
 
 function stringField(input: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {

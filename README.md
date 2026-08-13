@@ -37,8 +37,8 @@ Permission defaults:
 
 - `read`, `grep`, `find`, and `ls`: automatic
 - `edit` and `write` in the fixed root: ask, optionally remember for the conversation
-- shell commands: ask; a narrow read-only command may remember only that exact
-  command for the active conversation, while every other command asks again
+- shell commands: ask; only the exact argument-free `pwd` or `git status` may
+  be remembered for the active conversation, while every other command asks again
 - writes outside the root and destructive/publish/deploy/push commands: ask every time
 
 ## Development
