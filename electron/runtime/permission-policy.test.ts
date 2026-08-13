@@ -56,4 +56,18 @@ describe("PermissionPolicy", () => {
       rememberable: true,
     });
   });
+
+  it.each([
+    "echo x > /tmp/x",
+    "cd .. && pwd",
+    "git reset --hard HEAD~1",
+    "git clean -fd",
+    "python -c 'open(\"/tmp/x\", \"w\").write(\"x\")'",
+  ])("never offers memory for an escaping or mutating command: %s", (command) => {
+    const policy = new PermissionPolicy(root);
+    expect(policy.evaluate({ toolName: "bash", input: { command } })).toMatchObject({
+      kind: "ask",
+      rememberable: false,
+    });
+  });
 });

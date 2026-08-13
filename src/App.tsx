@@ -25,19 +25,21 @@ function App() {
   const [approval, setApproval] = useState<ApprovalRequest>();
   const [authPrompt, setAuthPrompt] = useState<AuthPromptRequest>();
   const [authNotice, setAuthNotice] = useState<Record<string, unknown>>();
-  const [error, setError] = useState<string>();
+  const [startupError, setStartupError] = useState<string>();
+  const [chatError, setChatError] = useState<string>();
+  const [providerError, setProviderError] = useState<string>();
   const [replayOnboarding, setReplayOnboarding] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const next = await bridge.bootstrap();
       setState(next);
-      setError(undefined);
+      setStartupError(undefined);
       if (!conversation && next.onboardingComplete && next.conversations[0]) {
         setConversation(await bridge.openConversation(next.conversations[0].path));
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Morrow could not open this room.");
+      setStartupError(reason instanceof Error ? reason.message : "Morrow could not open this room.");
     }
   }, [conversation]);
 
@@ -52,16 +54,16 @@ function App() {
     if (event.type === "approval") setApproval(event.request);
     if (event.type === "auth-prompt") setAuthPrompt(event.request);
     if (event.type === "auth-notice") setAuthNotice(event.event);
-    if (event.type === "error") setError(event.message);
+    if (event.type === "error") event.sessionId ? setChatError(event.message) : setStartupError(event.message);
   }), []);
 
   if (!state) {
     return (
       <main className="startup-state">
-        {error ? <AlertTriangle size={24} /> : <OperatorMark size={46} active />}
-        <p>{error ?? "Morrow is opening the room"}</p>
-        <small>{error ? "Nothing was changed. You can safely try again." : "Restoring your conversations"}</small>
-        {error && <button type="button" onClick={() => void refresh()}>Try again</button>}
+        {startupError ? <AlertTriangle size={24} /> : <OperatorMark size={46} active />}
+        <p>{startupError ?? "Morrow is opening the room"}</p>
+        <small>{startupError ? "Nothing was changed. You can safely try again." : "Restoring your conversations"}</small>
+        {startupError && <button type="button" onClick={() => void refresh()}>Try again</button>}
       </main>
     );
   }
@@ -77,14 +79,14 @@ function App() {
     return (
       <Onboarding
         state={state}
-        error={error}
+        error={providerError}
         onConnect={async (providerId, authType) => {
-          setError(undefined);
+          setProviderError(undefined);
           try {
             await bridge.connectProvider({ providerId, authType });
             await refresh();
           } catch (reason) {
-            setError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
+            setProviderError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
           }
         }}
         onComplete={completeOnboarding}
@@ -102,15 +104,15 @@ function App() {
           state={state}
           conversation={conversation}
           approval={approval}
-          error={error}
+          error={chatError}
           onNew={async () => { setApproval(undefined); setConversation(await bridge.startConversation()); }}
           onOpen={async (path) => { setApproval(undefined); setConversation(await bridge.openConversation(path)); }}
           onSend={async (text) => {
-            setError(undefined);
+            setChatError(undefined);
             try {
               await bridge.sendMessage({ text });
             } catch (reason) {
-              setError(reason instanceof Error ? reason.message : "Morrow could not finish that thought.");
+              setChatError(reason instanceof Error ? reason.message : "Morrow could not finish that thought.");
             }
           }}
           onAbort={() => bridge.abort()}
@@ -131,14 +133,14 @@ function App() {
       ) : (
         <SettingsView
           state={state}
-          error={error}
+          error={providerError}
           onConnect={async (providerId, authType) => {
-            setError(undefined);
+            setProviderError(undefined);
             try {
               await bridge.connectProvider({ providerId, authType });
               await refresh();
             } catch (reason) {
-              setError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
+              setProviderError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
             }
           }}
           onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}

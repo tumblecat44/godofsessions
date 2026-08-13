@@ -62,7 +62,8 @@ export function ChatView(props: ChatViewProps) {
         <header className="morrow-chat-head"><div><OperatorMark size={32} active={props.conversation?.busy} /><span><strong>MORROW</strong><small>{props.conversation?.busy ? (ko ? "생각하는 중" : "THINKING WITH YOU") : (ko ? "대화 준비됨" : "READY TO TALK")}</small></span></div><span className="root-chip" title="Fixed execution root">ROOT · {props.state.rootName}</span></header>
 
         <div className="chat-transcript" ref={scrollRef}>
-          {props.error ? <FriendlyError message={props.error} ko={ko} /> : !props.conversation?.messages.length ? <FriendlyEmpty ko={ko} /> : props.conversation.messages.map((message) => (
+          {props.error && <FriendlyError message={props.error} ko={ko} />}
+          {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} /> : props.conversation.messages.map((message) => (
             <article className={`morrow-message morrow-message--${message.role}`} key={message.id}>
               <span className="message-author">{message.role === "user" ? (ko ? "나" : "YOU") : message.role === "assistant" ? "MORROW" : "TOOL"}</span>
               <div className="message-body">
