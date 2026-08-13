@@ -9,31 +9,35 @@ export function PromptBar(props: {
 }) {
   const [text, setText] = useState("");
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const next = text.trim();
-        if (!next || props.disabled) return;
-        props.onSubmit(next);
-        setText("");
-      }}
-    >
-      <Textarea
-        aria-label="Prompt"
-        disabled={props.disabled}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            e.currentTarget.form?.requestSubmit();
-          }
+    <div className="composer-dock">
+      <form
+        className="chat-composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const next = text.trim();
+          if (!next || props.disabled) return;
+          props.onSubmit(next);
+          setText("");
         }}
-      />
-      <Button type="submit" disabled={props.disabled}>
-        Send
-      </Button>
-      {props.error ? <p role="alert">{props.error}</p> : null}
-    </form>
+      >
+        <Textarea
+          aria-label="Prompt"
+          placeholder="Talk to Morrow"
+          disabled={props.disabled}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+        />
+        <Button className="chat-send" type="submit" disabled={props.disabled} size="icon">
+          ↑
+        </Button>
+      </form>
+      {props.error ? <p className="composer-error" role="alert">{props.error}</p> : null}
+    </div>
   );
 }

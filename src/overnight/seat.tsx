@@ -7,7 +7,7 @@ import {
 
 export function OvernightSeat() {
   return (
-    <aside aria-label="Overnight">
+    <aside className="overnight-rail" aria-label="Overnight">
       <Card>
         <CardHeader>
           <CardTitle>Overnight</CardTitle>

@@ -81,9 +81,14 @@ export function MorrowChat(props: { status: BridgeStatus }) {
   const disabled = props.status.kind !== "ready";
 
   return (
-    <section aria-label="Morrow" className="flex min-h-0 flex-1 flex-col gap-4">
-      <h1 className="text-lg font-semibold">Morrow</h1>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+    <section className="chat-main" aria-label="Morrow">
+      <header className="chat-topbar">
+        <h1>Morrow</h1>
+        <span className={disabled ? "chat-safety is-wait" : "chat-safety"}>
+          {disabled ? "PI BOOTING" : "PI ATTACHED"}
+        </span>
+      </header>
+      <div className="chat-scroll">
         <Transcript
           items={items}
           onApprove={(id, confirmed) => {

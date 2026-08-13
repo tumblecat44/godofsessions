@@ -23,13 +23,9 @@ export function Shell() {
   }
 
   return (
-    <div className="flex min-h-screen gap-4 p-4">
-      <main className="flex min-w-0 flex-1 flex-col">
-        <MorrowChat status={status} />
-      </main>
-      <aside className="w-80 shrink-0">
-        <OvernightSeat />
-      </aside>
+    <div className="app-shell">
+      <MorrowChat status={status} />
+      <OvernightSeat />
     </div>
   );
 }
