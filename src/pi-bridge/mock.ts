@@ -1,13 +1,20 @@
 import type { BridgeStatus, PiCommand } from "./types";
 
 type Handler = (event: unknown) => void;
+type StatusHandler = (status: BridgeStatus) => void;
 
 const listeners = new Set<Handler>();
+const statusListeners = new Set<StatusHandler>();
 let status: BridgeStatus = { kind: "booting" };
 let streaming = false;
 
 function emit(event: unknown) {
   for (const listener of listeners) listener(event);
+}
+
+function emitStatus(next: BridgeStatus) {
+  status = next;
+  for (const listener of statusListeners) listener(next);
 }
 
 export function isTauri(): boolean {
@@ -18,8 +25,15 @@ export function mockStatus(): BridgeStatus {
   return status;
 }
 
+export function onMockStatus(handler: StatusHandler): () => void {
+  statusListeners.add(handler);
+  return () => {
+    statusListeners.delete(handler);
+  };
+}
+
 export function startMock() {
-  status = { kind: "ready", model: null };
+  emitStatus({ kind: "ready", model: null });
   emit({ type: "response", command: "get_state", id: "ready-1", success: true, data: { model: null } });
 }
 

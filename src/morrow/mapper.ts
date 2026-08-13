@@ -62,6 +62,15 @@ export function mapPiEvent(event: unknown): MorrowView[] {
         message: str(rec.message) ?? "",
       }];
     }
+    case "parse_error":
+      return [{ kind: "error", message: str(rec.error) ?? "parse error" }];
+    case "extension_error":
+      return [{ kind: "error", message: str(rec.error) ?? "extension error" }];
+    case "auto_retry_end":
+      if (rec.success === false) {
+        return [{ kind: "error", message: str(rec.finalError) ?? "auto retry failed" }];
+      }
+      return [];
     default: {
       const neverType: string = type;
       void neverType;

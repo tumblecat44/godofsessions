@@ -1,16 +1,42 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { isTauri, mockInvoke, mockStatus, onMockEvent, startMock } from "./mock";
+import { isTauri, mockInvoke, mockStatus, onMockEvent, onMockStatus, startMock } from "./mock";
 import type { BridgeStatus, PiCommand } from "./types";
+
+type RawStatus = { ready: boolean; reason: string; kind: string };
+
+function mapStatus(raw: RawStatus): BridgeStatus {
+  switch (raw.kind) {
+    case "ready":
+      return { kind: "ready", model: null };
+    case "booting":
+      return { kind: "booting" };
+    case "setup":
+      return { kind: "setup", reason: raw.reason };
+    case "dead":
+      return { kind: "dead", reason: raw.reason };
+    default: {
+      const neverKind: string = raw.kind;
+      throw new Error(`unhandled pi status kind ${neverKind}`);
+    }
+  }
+}
 
 export async function readStatus(): Promise<BridgeStatus> {
   if (!isTauri()) {
     startMock();
     return mockStatus();
   }
-  const raw = await invoke<{ ready: boolean; reason: string }>("pi_status");
-  if (raw.ready) return { kind: "ready", model: null };
-  return { kind: "setup", reason: raw.reason };
+  const raw = await invoke<RawStatus>("pi_status");
+  return mapStatus(raw);
+}
+
+export async function subscribeStatus(handler: (status: BridgeStatus) => void): Promise<() => void> {
+  if (!isTauri()) {
+    startMock();
+    return onMockStatus(handler);
+  }
+  return listen<RawStatus>("pi-status", (event) => handler(mapStatus(event.payload)));
 }
 
 export async function send(cmd: PiCommand): Promise<void> {

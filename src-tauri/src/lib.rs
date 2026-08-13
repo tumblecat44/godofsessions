@@ -1,7 +1,7 @@
 mod jsonl;
 mod pi_child;
 
-use pi_child::{reap, spawn_pi, write_command, PiState};
+use pi_child::{emit_status, reap, set_status, spawn_pi, write_command, PiState};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use tauri::{Listener, Manager};
@@ -18,6 +18,7 @@ fn pi_status(state: tauri::State<PiState>) -> Value {
     json!({
         "ready": *state.ready.lock().unwrap(),
         "reason": *state.reason.lock().unwrap(),
+        "kind": *state.kind.lock().unwrap(),
     })
 }
 
@@ -94,10 +95,15 @@ pub fn run() {
         .manage(PiState {
             child: Mutex::new(None),
             ready: Mutex::new(false),
-            reason: Mutex::new("Pi is not ready".into()),
+            reason: Mutex::new("Pi is starting".into()),
+            kind: Mutex::new("booting".into()),
+            stderr_tail: Mutex::new(String::new()),
         })
         .setup(|app| {
             let handle = app.handle().clone();
+            let state = app.state::<PiState>();
+            emit_status(&handle, &state);
+
             match spawn_pi(&handle) {
                 Ok(()) => {
                     let id = "ready-1";
@@ -111,12 +117,13 @@ pub fn run() {
                             {
                                 let state = handle2.state::<PiState>();
                                 if v["success"] == true {
-                                    *state.ready.lock().unwrap() = true;
-                                    *state.reason.lock().unwrap() = String::new();
+                                    set_status(&handle2, &state, "ready", true, "");
                                 } else {
-                                    *state.ready.lock().unwrap() = false;
-                                    *state.reason.lock().unwrap() =
-                                        v["error"].as_str().unwrap_or("get_state failed").to_string();
+                                    let reason = v["error"]
+                                        .as_str()
+                                        .unwrap_or("get_state failed")
+                                        .to_string();
+                                    set_status(&handle2, &state, "setup", false, &reason);
                                 }
                             }
                         }
@@ -129,8 +136,7 @@ pub fn run() {
                 }
                 Err(reason) => {
                     let state = app.state::<PiState>();
-                    *state.ready.lock().unwrap() = false;
-                    *state.reason.lock().unwrap() = reason;
+                    set_status(&handle, &state, "setup", false, &reason);
                 }
             }
             Ok(())

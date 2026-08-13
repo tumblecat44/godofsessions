@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { readStatus, send, subscribe } from "../pi-bridge/client";
+import { send, subscribe } from "../pi-bridge/client";
 import type { BridgeStatus } from "../pi-bridge/types";
 import { mapPiEvent, type MorrowView } from "./mapper";
 import { PromptBar } from "./widgets/prompt-bar";
@@ -41,8 +41,7 @@ function applyView(
   }
 }
 
-export function MorrowChat() {
-  const [status, setStatus] = useState<BridgeStatus>({ kind: "booting" });
+export function MorrowChat(props: { status: BridgeStatus }) {
   const [items, setItems] = useState<TranscriptItem[]>([]);
   const [composerError, setComposerError] = useState<string | undefined>();
   const streaming = useRef(false);
@@ -51,10 +50,17 @@ export function MorrowChat() {
   useEffect(() => {
     let unsub: (() => void) | undefined;
     void (async () => {
-      const next = await readStatus();
-      setStatus(next);
       unsub = await subscribe((event) => {
         const rec = event && typeof event === "object" ? (event as Record<string, unknown>) : null;
+        if (rec?.type === "extension_ui_request" && rec.method !== "confirm") {
+          const id = typeof rec.id === "string" ? rec.id : undefined;
+          if (id) {
+            send({ type: "extension_ui_response", id, cancelled: true }).catch((err) =>
+              setComposerError(String(err)),
+            );
+          }
+          return;
+        }
         if (rec?.type === "response" && rec.command === "prompt" && rec.success === false) {
           setComposerError(typeof rec.error === "string" ? rec.error : "prompt rejected");
           return;
@@ -72,25 +78,23 @@ export function MorrowChat() {
     return () => unsub?.();
   }, []);
 
-  if (status.kind === "setup" || status.kind === "dead") {
-    return null;
-  }
-
-  const disabled = status.kind !== "ready";
+  const disabled = props.status.kind !== "ready";
 
   return (
-    <section aria-label="Morrow">
-      <h1>Morrow</h1>
-      <Transcript
-        items={items}
-        onApprove={(id, confirmed) => {
-          void send(
-            confirmed
-              ? { type: "extension_ui_response", id, confirmed: true }
-              : { type: "extension_ui_response", id, cancelled: true },
-          );
-        }}
-      />
+    <section aria-label="Morrow" className="flex min-h-0 flex-1 flex-col gap-4">
+      <h1 className="text-lg font-semibold">Morrow</h1>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Transcript
+          items={items}
+          onApprove={(id, confirmed) => {
+            send(
+              confirmed
+                ? { type: "extension_ui_response", id, confirmed: true }
+                : { type: "extension_ui_response", id, cancelled: true },
+            ).catch((err) => setComposerError(String(err)));
+          }}
+        />
+      </div>
       <PromptBar
         disabled={disabled}
         error={composerError}
@@ -99,9 +103,11 @@ export function MorrowChat() {
           setItems((prev) => [...prev, { id: crypto.randomUUID(), kind: "user", text }]);
           const id = crypto.randomUUID();
           if (streaming.current) {
-            void send({ id, type: "prompt", message: text, streamingBehavior: "steer" });
+            send({ id, type: "prompt", message: text, streamingBehavior: "steer" }).catch((err) =>
+              setComposerError(String(err)),
+            );
           } else {
-            void send({ id, type: "prompt", message: text });
+            send({ id, type: "prompt", message: text }).catch((err) => setComposerError(String(err)));
           }
         }}
       />

@@ -42,3 +42,8 @@ test("extension confirm becomes an approval card", () => {
     { kind: "approval", id: "uuid-2", title: "Clear session?", message: "All messages will be lost." },
   ]);
 });
+
+test("parse_error becomes an error view", () => {
+  const views = mapPiEvent({ type: "parse_error", error: "bad jsonl line" });
+  assert.deepEqual(views, [{ kind: "error", message: "bad jsonl line" }]);
+});
