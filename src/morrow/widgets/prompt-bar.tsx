@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export function PromptBar(props: {
   disabled: boolean;
@@ -16,7 +18,7 @@ export function PromptBar(props: {
         setText("");
       }}
     >
-      <textarea
+      <Textarea
         aria-label="Prompt"
         disabled={props.disabled}
         value={text}
@@ -28,7 +30,9 @@ export function PromptBar(props: {
           }
         }}
       />
-      <button type="submit" disabled={props.disabled}>Send</button>
+      <Button type="submit" disabled={props.disabled}>
+        Send
+      </Button>
       {props.error ? <p role="alert">{props.error}</p> : null}
     </form>
   );
