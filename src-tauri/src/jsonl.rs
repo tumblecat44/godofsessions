@@ -93,4 +93,67 @@ mod tests {
             DecodeResult::Err(e) => panic!("{e}"),
         }
     }
+
+    #[test]
+    fn strips_trailing_cr_before_parse() {
+        let cmd = json!({"id":"req-1","type":"prompt","message":"Hello"});
+        let mut bytes = encode_command(&cmd);
+        bytes.pop();
+        bytes.extend_from_slice(b"\r\n");
+
+        let mut dec = Decoder::new();
+        let out = dec.push(&bytes);
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            DecodeResult::Ok(v) => assert_eq!(v, &cmd),
+            DecodeResult::Err(e) => panic!("parse error: {e}"),
+        }
+    }
+
+    #[test]
+    fn skips_empty_lines() {
+        let cmd = json!({"type":"ping"});
+        let mut bytes = encode_command(&cmd);
+        bytes.extend_from_slice(b"\n");
+        bytes.extend_from_slice(&encode_command(&cmd));
+
+        let mut dec = Decoder::new();
+        let out = dec.push(&bytes);
+        assert_eq!(out.len(), 2);
+        for result in &out {
+            match result {
+                DecodeResult::Ok(v) => assert_eq!(v, &cmd),
+                DecodeResult::Err(e) => panic!("parse error: {e}"),
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_json_returns_err_not_panic() {
+        let mut dec = Decoder::new();
+        let out = dec.push(b"{not json}\n");
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            DecodeResult::Ok(_) => panic!("expected parse error"),
+            DecodeResult::Err(e) => assert!(!e.is_empty()),
+        }
+    }
+
+    #[test]
+    fn chunked_push_across_record_boundary() {
+        let cmd = json!({"id":"req-1","type":"prompt","message":"Hello"});
+        let bytes = encode_command(&cmd);
+        let split = bytes.len() / 2;
+
+        let mut dec = Decoder::new();
+        let first = dec.push(&bytes[..split]);
+        assert!(first.is_empty(), "partial record should not decode yet");
+
+        let second = dec.push(&bytes[split..]);
+        assert_eq!(second.len(), 1);
+        match &second[0] {
+            DecodeResult::Ok(v) => assert_eq!(v, &cmd),
+            DecodeResult::Err(e) => panic!("parse error: {e}"),
+        }
+    }
 }
