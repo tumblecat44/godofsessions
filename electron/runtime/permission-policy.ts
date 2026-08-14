@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 export type ApprovalScope =
   | "write-in-root"
@@ -35,12 +36,27 @@ function stringField(input: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
+function canonicalPath(target: string) {
+  const absolute = resolve(target);
+  let existing = absolute;
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return absolute;
+    existing = parent;
+  }
+  try {
+    return resolve(realpathSync.native(existing), relative(existing, absolute));
+  } catch {
+    return absolute;
+  }
+}
+
 export class PermissionPolicy {
   readonly root: string;
   private readonly remembered = new Map<ApprovalScope, boolean>();
 
   constructor(root: string) {
-    this.root = resolve(root);
+    this.root = canonicalPath(root);
   }
 
   remember(scope: ApprovalScope, allowed: boolean) {
@@ -54,7 +70,7 @@ export class PermissionPolicy {
 
   private isInsideRoot(rawPath: string) {
     if (!rawPath) return true;
-    const target = resolve(this.root, rawPath);
+    const target = canonicalPath(resolve(this.root, rawPath));
     const rel = relative(this.root, target);
     return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
   }

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PermissionPolicy } from "./permission-policy";
 
 describe("PermissionPolicy", () => {
@@ -79,5 +82,33 @@ describe("PermissionPolicy", () => {
   it.each(["ls /etc", "rg secret /private", "find / -name x", "find . -delete", "git diff --output=/tmp/x", "git status --short"])("never offers memory when command arguments could escape or mutate: %s", (command) => {
     const policy = new PermissionPolicy(root);
     expect(policy.evaluate({ toolName: "bash", input: { command } })).toMatchObject({ kind: "ask", rememberable: false });
+  });
+
+  it.each(["read", "grep", "find", "ls"])("blocks %s through a symlink that leaves the root", (toolName) => {
+    const base = mkdtempSync(join(tmpdir(), "morrow-policy-"));
+    const realRoot = join(base, "root");
+    const outside = join(base, "outside");
+    mkdirSync(realRoot);
+    mkdirSync(outside);
+    symlinkSync(outside, join(realRoot, "escape"));
+    const policy = new PermissionPolicy(realRoot);
+
+    expect(policy.evaluate({ toolName, input: { path: "escape/secret.txt" } })).toMatchObject({ kind: "deny" });
+  });
+
+  it("treats a new file below an escaping symlink as outside-root write", () => {
+    const base = mkdtempSync(join(tmpdir(), "morrow-policy-write-"));
+    const realRoot = join(base, "root");
+    const outside = join(base, "outside");
+    mkdirSync(realRoot);
+    mkdirSync(outside);
+    symlinkSync(outside, join(realRoot, "escape"));
+    const policy = new PermissionPolicy(realRoot);
+
+    expect(policy.evaluate({ toolName: "write", input: { path: "escape/new.txt" } })).toMatchObject({
+      kind: "ask",
+      scope: "write-outside-root",
+      rememberable: false,
+    });
   });
 });

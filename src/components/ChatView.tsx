@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronDown, CircleStop, Clock3, FilePenLine, Plus, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, CircleStop, Clock3, FilePenLine, Plus, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.png";
 import type { ApprovalRequest, BootstrapState, ConversationDetail, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
@@ -9,6 +9,9 @@ interface ChatViewProps {
   conversation?: ConversationDetail;
   approval?: ApprovalRequest;
   error?: string;
+  notice?: string;
+  draft?: string;
+  onDraftChange?(value: string): void;
   onNew(): Promise<void>;
   onOpen(path: string): Promise<void>;
   onSend(text: string): Promise<void>;
@@ -16,14 +19,17 @@ interface ChatViewProps {
   onApproval(allowed: boolean, remember: boolean): Promise<void>;
   onModel(provider: string, modelId: string): Promise<void>;
   onThinking(level: ThinkingLevel): Promise<void>;
+  onOpenSettings(): void;
 }
 
 export function ChatView(props: ChatViewProps) {
-  const [draft, setDraft] = useState("");
+  const [localDraft, setLocalDraft] = useState("");
   const [modelOpen, setModelOpen] = useState(false);
   const [remember, setRemember] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const ko = props.state.language === "ko";
+  const draft = props.draft ?? localDraft;
+  const setDraft = props.onDraftChange ?? setLocalDraft;
 
   useEffect(() => {
     const viewport = scrollRef.current;
@@ -32,13 +38,21 @@ export function ChatView(props: ChatViewProps) {
 
   const connectedProviders = useMemo(() => new Set(props.state.providers.filter((item) => item.connected).map((item) => item.id)), [props.state.providers]);
   const availableModels = props.state.models.filter((model) => connectedProviders.has(model.provider));
-  const selectedModel = props.conversation?.model ?? (props.state.selectedModel
+  const canChat = availableModels.length > 0;
+  const conversationModel = props.conversation?.model;
+  const selectedModel = (conversationModel && availableModels.some((model) => model.id === conversationModel.id && model.provider === conversationModel.provider)
+    ? conversationModel
+    : undefined) ?? (props.state.selectedModel
     ? props.state.models.find((model) => model.id === props.state.selectedModel?.id && model.provider === props.state.selectedModel?.provider)
-    : undefined);
+    : undefined) ?? availableModels[0];
+  const selectedModelSummary = selectedModel
+    ? props.state.models.find((model) => model.id === selectedModel.id && model.provider === selectedModel.provider)
+    : availableModels[0];
+  const supportsThinking = Boolean(selectedModelSummary?.reasoning);
 
   const submit = async () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || !canChat) return;
     setDraft("");
     await props.onSend(text);
   };
@@ -63,6 +77,7 @@ export function ChatView(props: ChatViewProps) {
 
         <div className="chat-transcript" ref={scrollRef}>
           {props.error && <FriendlyError message={props.error} ko={ko} />}
+          {props.notice && <div className="chat-notice" role="status"><Sparkles size={15} /><span>{props.notice}</span></div>}
           {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} /> : props.conversation.messages.map((message) => (
             <article className={`morrow-message morrow-message--${message.role}`} key={message.id}>
               <span className="message-author">{message.role === "user" ? (ko ? "나" : "YOU") : message.role === "assistant" ? "MORROW" : "TOOL"}</span>
@@ -85,23 +100,37 @@ export function ChatView(props: ChatViewProps) {
         {props.approval && (
           <section className="approval-card" aria-live="assertive">
             <div className="approval-card__icon"><ShieldCheck size={21} /></div>
-            <div><span className="eyebrow">YOUR SAY, ALWAYS</span><h3>{props.approval.title}</h3><code>{props.approval.detail}</code>{props.approval.rememberable && <label><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />{ko ? "이 대화 동안 같은 종류는 기억" : "Remember this kind of approval for this conversation"}</label>}</div>
+            <div><span className="eyebrow">YOUR SAY, ALWAYS</span><h3>{props.approval.title}</h3><code>{props.approval.detail}</code>{props.approval.rememberable && <label><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />{approvalMemoryLabel(props.approval, ko)}</label>}</div>
             <div className="approval-actions"><button type="button" onClick={() => void props.onApproval(false, false)}><X size={14} />{ko ? "허용 안 함" : "Not now"}</button><button className="primary" type="button" onClick={() => void props.onApproval(true, remember)}><Check size={14} />{ko ? "허용" : "Allow"}</button></div>
+          </section>
+        )}
+
+        {!canChat && (
+          <section className="chat-provider-needed" aria-live="polite">
+            <ShieldCheck size={17} />
+            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{ko ? "설정에서 공급자에 연결하면 이 입력 내용은 그대로 보존돼요." : "Connect a provider in Settings. Anything you typed here will stay put."}</small></span>
+            <button type="button" onClick={props.onOpenSettings}><Settings size={14} />{ko ? "모델 연결" : "Connect model"}</button>
           </section>
         )}
 
         <footer className="chat-composer">
           <textarea value={draft} rows={2} placeholder={ko ? "Morrow에게 무엇이든 말해보세요…" : "Talk to Morrow about anything…"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} />
           <div className="composer-bar">
-            <div className="model-picker"><button type="button" disabled={!availableModels.length} onClick={() => setModelOpen((value) => !value)}><span className="model-dot" />{selectedModel?.name ?? (ko ? "모델 연결 필요" : "Connect a model")}<ChevronDown size={13} /></button>{modelOpen && <div className="model-menu">{availableModels.map((model) => <button type="button" key={`${model.provider}:${model.id}`} onClick={() => { setModelOpen(false); void props.onModel(model.provider, model.id); }}><strong>{model.name}</strong><small>{model.provider}</small></button>)}</div>}</div>
-            <select aria-label="Thinking level" value={props.conversation?.thinkingLevel ?? props.state.thinkingLevel} onChange={(event) => void props.onThinking(event.target.value as ThinkingLevel)}><option value="off">Thinking off</option><option value="low">Thinking low</option><option value="medium">Thinking medium</option><option value="high">Thinking high</option><option value="xhigh">Thinking xhigh</option></select>
+            <div className="model-picker"><button type="button" disabled={!availableModels.length} onClick={() => setModelOpen((value) => !value)}><span className={`model-dot ${canChat ? "" : "is-offline"}`} />{selectedModel?.name ?? (ko ? "모델 연결 필요" : "Connect a model")}<ChevronDown size={13} /></button>{modelOpen && <div className="model-menu">{availableModels.map((model) => <button type="button" key={`${model.provider}:${model.id}`} onClick={() => { setModelOpen(false); void props.onModel(model.provider, model.id); }}><strong>{model.name}</strong><small>{model.provider}</small></button>)}</div>}</div>
+            <select aria-label="Thinking level" disabled={!canChat || !supportsThinking} value={supportsThinking ? (props.conversation?.thinkingLevel ?? props.state.thinkingLevel) : "off"} onChange={(event) => void props.onThinking(event.target.value as ThinkingLevel)}><option value="off">{ko ? "사고 없음" : "Thinking off"}</option><option value="minimal">{ko ? "사고 최소" : "Thinking minimal"}</option><option value="low">{ko ? "사고 낮게" : "Thinking low"}</option><option value="medium">{ko ? "사고 보통" : "Thinking medium"}</option><option value="high">{ko ? "사고 높게" : "Thinking high"}</option><option value="xhigh">{ko ? "사고 매우 높게" : "Thinking xhigh"}</option><option value="max">{ko ? "사고 최대" : "Thinking max"}</option></select>
             <span className="composer-spacer" />
-            {props.conversation?.busy ? <button className="send-button is-stop" aria-label="Stop" type="button" onClick={() => void props.onAbort()}><CircleStop size={17} /></button> : <button className="send-button" aria-label="Send" type="button" disabled={!draft.trim()} onClick={() => void submit()}><ArrowUp size={18} /></button>}
+            {props.conversation?.busy ? <button className="send-button is-stop" aria-label="Stop" type="button" onClick={() => void props.onAbort()}><CircleStop size={17} /></button> : <button className="send-button" aria-label="Send" type="button" disabled={!draft.trim() || !canChat} onClick={() => void submit()}><ArrowUp size={18} /></button>}
           </div>
         </footer>
       </section>
     </main>
   );
+}
+
+function approvalMemoryLabel(approval: ApprovalRequest, ko: boolean) {
+  if (approval.scope === "write-in-root") return ko ? "이 대화 동안 실행 루트 안의 파일 변경 허용" : "Allow file changes inside this root for this conversation";
+  if (approval.scope.startsWith("bash:")) return ko ? "이 대화 동안 이 정확한 명령 기억" : "Remember this exact command for this conversation";
+  return ko ? "이 대화 동안 이 승인 기억" : "Remember this approval for this conversation";
 }
 
 function FriendlyEmpty({ ko }: { ko: boolean }) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ExternalLink, X } from "lucide-react";
 import { ChatView } from "./components/ChatView";
 import { Onboarding } from "./components/Onboarding";
@@ -22,26 +22,33 @@ function App() {
   const [view, setView] = useState<AppView>("chat");
   const [state, setState] = useState<BootstrapState>();
   const [conversation, setConversation] = useState<ConversationDetail>();
-  const [approval, setApproval] = useState<ApprovalRequest>();
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [authPrompt, setAuthPrompt] = useState<AuthPromptRequest>();
   const [authNotice, setAuthNotice] = useState<Record<string, unknown>>();
   const [startupError, setStartupError] = useState<string>();
   const [chatError, setChatError] = useState<string>();
+  const [chatNotice, setChatNotice] = useState<string>();
   const [providerError, setProviderError] = useState<string>();
   const [replayOnboarding, setReplayOnboarding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const conversationRef = useRef<ConversationDetail | undefined>(undefined);
+
+  useEffect(() => { conversationRef.current = conversation; }, [conversation]);
 
   const refresh = useCallback(async () => {
     try {
       const next = await bridge.bootstrap();
       setState(next);
       setStartupError(undefined);
-      if (!conversation && next.onboardingComplete && next.conversations[0]) {
-        setConversation(await bridge.openConversation(next.conversations[0].path));
+      if (!conversationRef.current && next.onboardingComplete && next.conversations[0]) {
+        const opened = await bridge.openConversation(next.conversations[0].path);
+        conversationRef.current = opened;
+        setConversation(opened);
       }
     } catch (reason) {
       setStartupError(reason instanceof Error ? reason.message : "Morrow could not open this room.");
     }
-  }, [conversation]);
+  }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => bridge.onEvent((event: MorrowEvent) => {
@@ -51,9 +58,10 @@ function App() {
         void bridge.bootstrap().then((next) => setState((current) => current ? { ...next, onboardingComplete: current.onboardingComplete } : next));
       }
     }
-    if (event.type === "approval") setApproval(event.request);
+    if (event.type === "approval") setApprovals((current) => current.some((item) => item.id === event.request.id) ? current : [...current, event.request]);
     if (event.type === "auth-prompt") setAuthPrompt(event.request);
     if (event.type === "auth-notice") setAuthNotice(event.event);
+    if (event.type === "notice") setChatNotice(event.message);
     if (event.type === "error") event.sessionId ? setChatError(event.message) : setStartupError(event.message);
   }), []);
 
@@ -80,13 +88,14 @@ function App() {
       <Onboarding
         state={state}
         error={providerError}
+        onLanguageChange={(language) => setState((current) => current ? { ...current, language } : current)}
         onConnect={async (providerId, authType) => {
           setProviderError(undefined);
           try {
             await bridge.connectProvider({ providerId, authType });
             await refresh();
           } catch (reason) {
-            setProviderError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
+            if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
           }
         }}
         onComplete={completeOnboarding}
@@ -103,23 +112,27 @@ function App() {
         <ChatView
           state={state}
           conversation={conversation}
-          approval={approval}
+          approval={approvals[0]}
           error={chatError}
-          onNew={async () => { setApproval(undefined); setConversation(await bridge.startConversation()); }}
-          onOpen={async (path) => { setApproval(undefined); setConversation(await bridge.openConversation(path)); }}
+          notice={chatNotice}
+          draft={draft}
+          onDraftChange={setDraft}
+          onNew={async () => { setApprovals([]); setChatNotice(undefined); setConversation(await bridge.startConversation()); }}
+          onOpen={async (path) => { setApprovals([]); setChatNotice(undefined); setConversation(await bridge.openConversation(path)); }}
           onSend={async (text) => {
             setChatError(undefined);
             try {
               await bridge.sendMessage({ text });
             } catch (reason) {
-              setChatError(reason instanceof Error ? reason.message : "Morrow could not finish that thought.");
+              setChatError(chatFailureMessage(reason, state.language));
             }
           }}
           onAbort={() => bridge.abort()}
           onApproval={async (allowed, remember) => {
+            const approval = approvals[0];
             if (!approval) return;
             await bridge.answerApproval({ id: approval.id, allowed, remember });
-            setApproval(undefined);
+            setApprovals((current) => current.filter((item) => item.id !== approval.id));
           }}
           onModel={async (provider, modelId) => {
             await bridge.setModel({ provider, modelId });
@@ -129,6 +142,7 @@ function App() {
             await bridge.setThinkingLevel(level);
             setState((current) => current ? { ...current, thinkingLevel: level } : current);
           }}
+          onOpenSettings={() => setView("settings")}
         />
       ) : (
         <SettingsView
@@ -140,7 +154,7 @@ function App() {
               await bridge.connectProvider({ providerId, authType });
               await refresh();
             } catch (reason) {
-              setProviderError(reason instanceof Error ? reason.message : "Morrow could not connect that provider.");
+              if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
             }
           }}
           onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}
@@ -155,6 +169,7 @@ function App() {
       {authPrompt && (
         <AuthDialog
           request={authPrompt}
+          language={state.language}
           onAnswer={async (value, cancelled) => {
             await bridge.answerAuthPrompt({ id: authPrompt.id, value, cancelled });
             setAuthPrompt(undefined);
@@ -163,10 +178,10 @@ function App() {
       )}
       {authNotice && (
         <div className="auth-notice" role="status">
-          <button type="button" aria-label="Close" onClick={() => setAuthNotice(undefined)}><X size={15} /></button>
-          <strong>{String(authNotice.message ?? "Continue in your browser")}</strong>
+          <button type="button" aria-label={state.language === "ko" ? "닫기" : "Close"} onClick={() => setAuthNotice(undefined)}><X size={15} /></button>
+          <strong>{String(authNotice.message ?? (state.language === "ko" ? "브라우저에서 연결을 계속해 주세요" : "Continue in your browser"))}</strong>
           {noticeUrl(authNotice) && (
-            <button type="button" onClick={() => void bridge.openExternal(noticeUrl(authNotice)!)}>Open securely <ExternalLink size={14} /></button>
+            <button type="button" onClick={() => void bridge.openExternal(noticeUrl(authNotice)!)}>{state.language === "ko" ? "안전하게 열기" : "Open securely"} <ExternalLink size={14} /></button>
           )}
           {typeof authNotice.userCode === "string" && <code>{authNotice.userCode}</code>}
         </div>
@@ -185,7 +200,8 @@ function noticeUrl(notice: Record<string, unknown>) {
   return undefined;
 }
 
-function AuthDialog({ request, onAnswer }: { request: AuthPromptRequest; onAnswer(value?: string, cancelled?: boolean): Promise<void> }) {
+function AuthDialog({ request, language, onAnswer }: { request: AuthPromptRequest; language: AppLanguage; onAnswer(value?: string, cancelled?: boolean): Promise<void> }) {
+  const ko = language === "ko";
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="auth-dialog" onSubmit={(event) => {
@@ -194,7 +210,7 @@ function AuthDialog({ request, onAnswer }: { request: AuthPromptRequest; onAnswe
         void onAnswer(String(form.get("credential") ?? ""));
         event.currentTarget.reset();
       }}>
-        <span className="eyebrow">SECURE CONNECTION</span>
+        <span className="eyebrow">{ko ? "안전한 연결" : "SECURE CONNECTION"}</span>
         <h2>{request.message}</h2>
         {request.options ? (
           <div className="auth-options">
@@ -204,12 +220,32 @@ function AuthDialog({ request, onAnswer }: { request: AuthPromptRequest; onAnswe
           <input autoFocus name="credential" autoComplete="off" type={request.promptType === "secret" ? "password" : "text"} placeholder={request.placeholder} />
         )}
         <div className="dialog-actions">
-          <button type="button" onClick={() => void onAnswer(undefined, true)}>Cancel</button>
-          {!request.options && <button className="primary" type="submit">Continue</button>}
+          <button type="button" onClick={() => void onAnswer(undefined, true)}>{ko ? "취소" : "Cancel"}</button>
+          {!request.options && <button className="primary" type="submit">{ko ? "계속" : "Continue"}</button>}
         </div>
       </form>
     </div>
   );
+}
+
+function isAuthenticationCancelled(reason: unknown) {
+  return String(reason).toLowerCase().includes("authentication cancelled");
+}
+
+function providerFailureMessage(language: AppLanguage) {
+  return language === "ko"
+    ? "연결을 완료하지 못했어요. 잠시 후 다시 시도하거나 다른 연결 방식을 선택해 주세요."
+    : "The connection did not finish. Try again in a moment or choose another connection method.";
+}
+
+function chatFailureMessage(reason: unknown, language: AppLanguage) {
+  const message = String(reason);
+  if (/no api key|connect a model provider|no model/i.test(message)) {
+    return language === "ko" ? "먼저 설정에서 모델을 연결해 주세요." : "Connect a model in Settings first.";
+  }
+  return language === "ko"
+    ? "이번 답을 마치지 못했어요. 대화는 그대로 남아 있으니 다시 시도해 주세요."
+    : "Morrow could not finish this reply. Your conversation is still here, so you can try again.";
 }
 
 export default App;

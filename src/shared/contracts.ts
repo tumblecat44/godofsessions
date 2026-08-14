@@ -1,6 +1,6 @@
 export type AppView = "chat" | "settings";
 export type AppLanguage = "ko" | "en";
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ProviderSummary {
   id: string;
@@ -82,6 +82,7 @@ export interface AuthPromptRequest {
 
 export type MorrowEvent =
   | { type: "conversation"; sessionId: string; conversation: ConversationDetail }
+  | { type: "notice"; sessionId?: string; message: string }
   | { type: "approval"; request: ApprovalRequest }
   | { type: "auth-prompt"; request: AuthPromptRequest }
   | { type: "auth-notice"; providerId: string; event: Record<string, unknown> }

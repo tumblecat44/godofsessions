@@ -30,6 +30,7 @@ const MORROW_PROMPT = `You are Morrow, a warm and capable conversational operato
 Conversation is your default. Answer normally and do not inspect files, run commands, or edit anything merely because tools are available.
 Use tools only when the user explicitly asks you to inspect or change something in the current execution root.
 Never claim that the user selected a project: this application has one fixed execution root.
+If the user denies a tool action, respect that decision and never retry the same effect through another tool.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
 type SendEvent = (event: MorrowEvent) => void;
@@ -55,7 +56,7 @@ function textFromContent(content: unknown): string {
     .join("\n");
 }
 
-function transcriptParts(content: unknown, completedToolCalls: ReadonlySet<string>): TranscriptPart[] {
+function transcriptParts(content: unknown, completedToolCalls: ReadonlySet<string>, failedToolCalls: ReadonlySet<string>): TranscriptPart[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   if (!Array.isArray(content)) return [];
   return content.flatMap((part): TranscriptPart[] => {
@@ -64,7 +65,8 @@ function transcriptParts(content: unknown, completedToolCalls: ReadonlySet<strin
     if (value.type === "text") return [{ type: "text", text: String(value.text ?? "") }];
     if (value.type === "thinking") return [{ type: "thinking", text: String(value.thinking ?? value.text ?? "") }];
     if (value.type === "toolCall") {
-      return [{ type: "tool", toolName: String(value.name ?? "tool"), text: JSON.stringify(value.arguments ?? {}), state: completedToolCalls.has(String(value.id ?? "")) ? "done" : "running" }];
+      const id = String(value.id ?? "");
+      return [{ type: "tool", toolName: String(value.name ?? "tool"), text: JSON.stringify(value.arguments ?? {}), state: failedToolCalls.has(id) ? "error" : completedToolCalls.has(id) ? "done" : "running" }];
     }
     return [];
   });
@@ -76,12 +78,17 @@ function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
     const value = message as Record<string, unknown>;
     return value.role === "toolResult" && typeof value.toolCallId === "string" ? [value.toolCallId] : [];
   }));
+  const failedToolCalls = new Set(messages.flatMap((message) => {
+    if (!message || typeof message !== "object") return [];
+    const value = message as Record<string, unknown>;
+    return value.role === "toolResult" && value.isError && typeof value.toolCallId === "string" ? [value.toolCallId] : [];
+  }));
   return messages.flatMap((message, index): TranscriptMessage[] => {
     if (!message || typeof message !== "object") return [];
     const value = message as Record<string, unknown>;
     const role = value.role;
     if (role !== "user" && role !== "assistant" && role !== "toolResult") return [];
-    const parts = transcriptParts(value.content, completedToolCalls);
+    const parts = transcriptParts(value.content, completedToolCalls, failedToolCalls);
     if (parts.length === 0) return [];
     return [{
       id: String(value.id ?? `${role}-${index}`),
@@ -104,6 +111,7 @@ export class MorrowService {
   private readonly dataDir: string;
   private readonly sessionsDir: string;
   private readonly sendEvent: SendEvent;
+  private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
   private readonly permissionPolicy: PermissionPolicy;
   private readonly approvalWaiters = new Map<string, { deferred: Deferred<boolean>; scope: ApprovalScope; rememberable: boolean }>();
   private readonly authWaiters = new Map<string, Deferred<string>>();
@@ -116,11 +124,12 @@ export class MorrowService {
   private onboardingComplete = false;
   private initializationError?: Error;
 
-  constructor(options: { root: string; dataDir: string; sendEvent: SendEvent }) {
+  constructor(options: { root: string; dataDir: string; sendEvent: SendEvent; configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void }) {
     this.root = options.root;
     this.dataDir = options.dataDir;
     this.sessionsDir = join(options.dataDir, "conversations");
     this.sendEvent = options.sendEvent;
+    this.configureRuntime = options.configureRuntime;
     this.permissionPolicy = new PermissionPolicy(options.root);
   }
 
@@ -136,6 +145,7 @@ export class MorrowService {
         modelsStorePath: join(this.dataDir, "models.json"),
         refreshOnCreate: false,
       });
+      await this.configureRuntime?.(this.modelRuntime);
       this.initializationError = undefined;
     } catch (reason) {
       this.initializationError = reason instanceof Error ? reason : new Error("Morrow could not initialize the embedded Pi runtime.");
@@ -237,7 +247,13 @@ export class MorrowService {
           };
           this.sendEvent({ type: "approval", request });
           const allowed = await waiter.promise;
-          return allowed ? undefined : { block: true, reason: "The user did not approve this tool call.", terminate: true };
+          return allowed ? undefined : {
+            block: true,
+            reason: this.language === "ko"
+              ? "사용자가 이 작업을 허용하지 않았습니다. 아무것도 바꾸지 않았습니다."
+              : "The user did not approve this action. Nothing was changed.",
+            terminate: true,
+          };
         });
       },
     };
@@ -267,9 +283,11 @@ export class MorrowService {
       extensionFactories: [this.permissionExtension(() => manager.getSessionId())],
     });
     await loader.reload();
-    const restoring = manager.getEntries().length > 0;
-    const selected = !restoring && this.selectedModel ? runtime.getModel(this.selectedModel.provider, this.selectedModel.id) : undefined;
     const available = runtime.getAvailableSnapshot();
+    const restoring = manager.getEntries().length > 0;
+    const selected = !restoring && this.selectedModel
+      ? available.find((model) => model.provider === this.selectedModel?.provider && model.id === this.selectedModel.id)
+      : undefined;
     const model = selected ?? available[0];
     const result = await createAgentSession({
       cwd: this.root,
@@ -284,6 +302,15 @@ export class MorrowService {
     });
     this.session = result.session;
     this.unsubscribe = this.session.subscribe((event) => this.handleSessionEvent(event));
+    if (result.modelFallbackMessage) {
+      this.sendEvent({
+        type: "notice",
+        sessionId: this.session.sessionId,
+        message: this.language === "ko"
+          ? `이 대화의 이전 모델을 사용할 수 없어 ${this.session.model?.name ?? "사용 가능한 모델"}(으)로 이어갑니다.`
+          : `The previous model is unavailable, so this conversation will continue with ${this.session.model?.name ?? "an available model"}.`,
+      });
+    }
     return this.currentConversation();
   }
 
@@ -309,8 +336,24 @@ export class MorrowService {
   }
 
   async sendMessage(text: string) {
+    const available = this.requireRuntime().getAvailableSnapshot();
+    if (available.length === 0) {
+      throw new Error(this.language === "ko"
+        ? "먼저 설정에서 모델 공급자를 연결해 주세요. 작성한 내용은 그대로 둘 수 있어요."
+        : "Connect a model provider in Settings first. You can keep your draft while you do.");
+    }
     if (!this.session) await this.startConversation();
     if (!this.session) return;
+    if (!this.session.model || !available.some((model) => model.provider === this.session?.model?.provider && model.id === this.session.model.id)) {
+      await this.session.setModel(available[0]);
+      this.sendEvent({
+        type: "notice",
+        sessionId: this.session.sessionId,
+        message: this.language === "ko"
+          ? `이전 모델 연결이 없어 ${available[0].name}(으)로 이어갑니다.`
+          : `The previous model connection is unavailable, so Morrow will continue with ${available[0].name}.`,
+      });
+    }
     if (this.session.messages.every((message) => message.role !== "user")) {
       this.session.sessionManager.appendSessionInfo(sessionTitle(text));
     }
@@ -328,7 +371,7 @@ export class MorrowService {
   }
 
   async setModel(provider: string, modelId: string) {
-    const model = this.requireRuntime().getModel(provider, modelId);
+    const model = this.requireRuntime().getAvailableSnapshot().find((candidate) => candidate.provider === provider && candidate.id === modelId);
     if (!model) throw new Error("Model not found.");
     this.selectedModel = { provider, id: modelId };
     await this.savePreferences();
