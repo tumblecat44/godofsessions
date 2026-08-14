@@ -2029,12 +2029,53 @@ summary:focus-visible {
 }
 
 .onboarding-chat-capture {
-  min-height: 346px;
+  height: 100%;
+  min-height: 0;
+  padding: clamp(26px, 5vw, 52px);
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
+  align-content: center;
+  align-items: start;
+  gap: 18px;
   overflow: hidden;
   border-radius: 0 0 9px 9px;
   background: var(--void);
+}
+
+.onboarding-visual--chat {
+  height: min(460px, 58vh);
+  min-height: min(390px, 52vh);
+  padding: 14px;
+}
+
+.onboarding-chat-capture > img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border: 1px solid var(--etched-edge);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(231, 168, 77, 0.1), transparent 68%);
+}
+
+.onboarding-chat-capture > div {
+  min-width: 0;
+}
+
+.onboarding-chat-capture > div > small {
+  color: var(--signal-amber);
+  font-family: "JetBrains Mono Variable", monospace;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+}
+
+.onboarding-chat-capture > div > p {
+  max-width: 430px;
+  margin: 12px 0 0;
+  color: var(--ink-secondary);
+  font-size: 15px;
+  line-height: 1.7;
+  text-wrap: pretty;
 }
 
 .mini-sidebar {
@@ -2144,6 +2185,20 @@ summary:focus-visible {
   color: var(--ink-secondary);
   font-size: 10px;
   font-weight: 560;
+}
+
+.onboarding-safety-list b {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: inherit;
+}
+
+.onboarding-safety-list small {
+  color: var(--ink-muted);
+  font-size: 8px;
+  line-height: 1.45;
 }
 
 .onboarding-safety-list i {

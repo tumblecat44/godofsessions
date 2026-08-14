@@ -83,24 +83,55 @@ function App() {
     setView("chat");
   };
 
+  const authSurfaces = (
+    <>
+      {authPrompt && (
+        <AuthDialog
+          request={authPrompt}
+          language={state.language}
+          onAnswer={async (value, cancelled) => {
+            await bridge.answerAuthPrompt({ id: authPrompt.id, value, cancelled });
+            setAuthPrompt(undefined);
+          }}
+        />
+      )}
+      {authNotice && (
+        <div className="auth-notice" role="status">
+          <button type="button" aria-label={state.language === "ko" ? "닫기" : "Close"} onClick={() => setAuthNotice(undefined)}><X size={15} /></button>
+          <strong>{String(authNotice.message ?? (state.language === "ko" ? "브라우저에서 연결을 계속해 주세요" : "Continue in your browser"))}</strong>
+          {noticeUrl(authNotice) && (
+            <button type="button" onClick={() => void bridge.openExternal(noticeUrl(authNotice)!)}>{state.language === "ko" ? "안전하게 열기" : "Open securely"} <ExternalLink size={14} /></button>
+          )}
+          {typeof authNotice.userCode === "string" && <code>{authNotice.userCode}</code>}
+        </div>
+      )}
+    </>
+  );
+
   if (!state.onboardingComplete || replayOnboarding) {
     return (
-      <Onboarding
-        state={state}
-        error={providerError}
-        onLanguageChange={(language) => setState((current) => current ? { ...current, language } : current)}
-        onConnect={async (providerId, authType) => {
-          setProviderError(undefined);
-          try {
-            await bridge.connectProvider({ providerId, authType });
-            await refresh();
-          } catch (reason) {
-            if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
-          }
-        }}
-        onComplete={completeOnboarding}
-        onClose={state.onboardingComplete ? () => setReplayOnboarding(false) : undefined}
-      />
+      <>
+        <Onboarding
+          state={state}
+          error={providerError}
+          onLanguageChange={(language) => setState((current) => current ? { ...current, language } : current)}
+          onConnect={async (providerId, authType) => {
+            setProviderError(undefined);
+            try {
+              await bridge.connectProvider({ providerId, authType });
+              await refresh();
+            } catch (reason) {
+              if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
+            } finally {
+              setAuthPrompt(undefined);
+              setAuthNotice(undefined);
+            }
+          }}
+          onComplete={completeOnboarding}
+          onClose={state.onboardingComplete ? () => setReplayOnboarding(false) : undefined}
+        />
+        {authSurfaces}
+      </>
     );
   }
 
@@ -155,6 +186,9 @@ function App() {
               await refresh();
             } catch (reason) {
               if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
+            } finally {
+              setAuthPrompt(undefined);
+              setAuthNotice(undefined);
             }
           }}
           onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}
@@ -166,26 +200,7 @@ function App() {
         />
       )}
 
-      {authPrompt && (
-        <AuthDialog
-          request={authPrompt}
-          language={state.language}
-          onAnswer={async (value, cancelled) => {
-            await bridge.answerAuthPrompt({ id: authPrompt.id, value, cancelled });
-            setAuthPrompt(undefined);
-          }}
-        />
-      )}
-      {authNotice && (
-        <div className="auth-notice" role="status">
-          <button type="button" aria-label={state.language === "ko" ? "닫기" : "Close"} onClick={() => setAuthNotice(undefined)}><X size={15} /></button>
-          <strong>{String(authNotice.message ?? (state.language === "ko" ? "브라우저에서 연결을 계속해 주세요" : "Continue in your browser"))}</strong>
-          {noticeUrl(authNotice) && (
-            <button type="button" onClick={() => void bridge.openExternal(noticeUrl(authNotice)!)}>{state.language === "ko" ? "안전하게 열기" : "Open securely"} <ExternalLink size={14} /></button>
-          )}
-          {typeof authNotice.userCode === "string" && <code>{authNotice.userCode}</code>}
-        </div>
-      )}
+      {authSurfaces}
     </div>
   );
 }

@@ -30,6 +30,9 @@ const MORROW_PROMPT = `You are Morrow, a warm and capable conversational operato
 Conversation is your default. Answer normally and do not inspect files, run commands, or edit anything merely because tools are available.
 Use tools only when the user explicitly asks you to inspect or change something in the current execution root.
 Never claim that the user selected a project: this application has one fixed execution root.
+Paths already inside the execution root may stay absolute. Never rewrite an in-root absolute path as a ../ path that escapes the root.
+Prefer read, grep, find, and ls over shell commands. Do not use shell merely to count lines or inspect metadata when file-tool output is sufficient.
+When inspecting agent session stores such as .grok or .claude, focus on primary session and transcript directories. Ignore credentials, auth files, caches, telemetry, and general logs unless the user explicitly requests them.
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
@@ -112,6 +115,7 @@ export class MorrowService {
   private readonly sessionsDir: string;
   private readonly sendEvent: SendEvent;
   private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
+  private readonly initialLanguage: AppLanguage;
   private readonly permissionPolicy: PermissionPolicy;
   private readonly approvalWaiters = new Map<string, { deferred: Deferred<boolean>; scope: ApprovalScope; rememberable: boolean }>();
   private readonly authWaiters = new Map<string, Deferred<string>>();
@@ -124,12 +128,13 @@ export class MorrowService {
   private onboardingComplete = false;
   private initializationError?: Error;
 
-  constructor(options: { root: string; dataDir: string; sendEvent: SendEvent; configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void }) {
+  constructor(options: { root: string; dataDir: string; sendEvent: SendEvent; configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void; initialLanguage?: AppLanguage }) {
     this.root = options.root;
     this.dataDir = options.dataDir;
     this.sessionsDir = join(options.dataDir, "conversations");
     this.sendEvent = options.sendEvent;
     this.configureRuntime = options.configureRuntime;
+    this.initialLanguage = options.initialLanguage ?? "en";
     this.permissionPolicy = new PermissionPolicy(options.root);
   }
 
@@ -162,7 +167,7 @@ export class MorrowService {
     try {
       return JSON.parse(await readFile(join(this.dataDir, "preferences.json"), "utf8"));
     } catch {
-      return { language: "en", onboardingComplete: false, thinkingLevel: "medium" };
+      return { language: this.initialLanguage, onboardingComplete: false, thinkingLevel: "medium" };
     }
   }
 
@@ -386,24 +391,34 @@ export class MorrowService {
 
   async connectProvider(providerId: string, authType: "api_key" | "oauth") {
     const runtime = this.requireRuntime();
-    await runtime.login(providerId, authType, {
-      prompt: async (prompt: AuthPromptShape) => {
-        const id = crypto.randomUUID();
-        const waiter = deferred<string>();
-        this.authWaiters.set(id, waiter);
-        const request: AuthPromptRequest = {
-          id,
-          providerId,
-          promptType: prompt.type,
-          message: prompt.message,
-          placeholder: prompt.placeholder,
-          options: prompt.options ? [...prompt.options] : undefined,
-        };
-        this.sendEvent({ type: "auth-prompt", request });
-        return waiter.promise;
-      },
-      notify: (event: unknown) => this.sendEvent({ type: "auth-notice", providerId, event: event as Record<string, unknown> }),
-    });
+    const promptIds = new Set<string>();
+    try {
+      await runtime.login(providerId, authType, {
+        prompt: async (prompt: AuthPromptShape) => {
+          const id = crypto.randomUUID();
+          const waiter = deferred<string>();
+          promptIds.add(id);
+          this.authWaiters.set(id, waiter);
+          const request: AuthPromptRequest = {
+            id,
+            providerId,
+            promptType: prompt.type,
+            message: prompt.message,
+            placeholder: prompt.placeholder,
+            options: prompt.options ? [...prompt.options] : undefined,
+          };
+          this.sendEvent({ type: "auth-prompt", request });
+          return waiter.promise;
+        },
+        notify: (event: unknown) => this.sendEvent({ type: "auth-notice", providerId, event: event as Record<string, unknown> }),
+      });
+    } finally {
+      for (const id of promptIds) {
+        const waiter = this.authWaiters.get(id);
+        this.authWaiters.delete(id);
+        waiter?.resolve("");
+      }
+    }
   }
 
   answerAuthPrompt(id: string, value?: string, cancelled?: boolean) {

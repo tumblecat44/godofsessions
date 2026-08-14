@@ -157,6 +157,7 @@ app.whenReady().then(async () => {
   morrow = new MorrowService({
     root,
     dataDir: join(app.getPath("userData"), "pi"),
+    initialLanguage: app.getLocale().toLowerCase().startsWith("ko") ? "ko" : "en",
     sendEvent: (event) => {
       recordExternalUrls(event);
       mainWindow?.webContents.send("morrow:event", event);

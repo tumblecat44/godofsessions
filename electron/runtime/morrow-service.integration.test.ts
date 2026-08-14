@@ -51,6 +51,7 @@ describe("Morrow service dogfood", () => {
     service = new MorrowService({
       root,
       dataDir,
+      initialLanguage: "ko",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-dogfood", "test-only");
@@ -63,6 +64,7 @@ describe("Morrow service dogfood", () => {
     });
 
     await service.initialize();
+    expect((await service.bootstrap()).language).toBe("ko");
     await service.finishOnboarding("ko");
     const bootstrap = await service.bootstrap();
     expect(bootstrap.providers.find((provider) => provider.id === "morrow-dogfood")).toMatchObject({ connected: true });
@@ -74,6 +76,8 @@ describe("Morrow service dogfood", () => {
     expect(approvals).toHaveLength(0);
     expect(observedSystemPrompt).toContain("Conversation is your default");
     expect(observedSystemPrompt).toContain("never retry the same effect through another tool");
+    expect(observedSystemPrompt).toContain("Never rewrite an in-root absolute path as a ../ path");
+    expect(observedSystemPrompt).toContain("Ignore credentials, auth files, caches, telemetry, and general logs");
 
     await service.sendMessage("README 제목만 읽어줘");
     expect(JSON.stringify(service.currentConversation().messages)).toContain("Dogfood Room");
