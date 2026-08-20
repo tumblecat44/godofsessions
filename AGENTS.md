@@ -5,11 +5,13 @@ authoritative rule for deciding what may be committed to the public project.
 
 ## Project identity
 
-God of Sessions is an MIT-licensed, local-first Tauri desktop control plane
-for existing AI coding agents. It discovers provider-owned sessions, builds
-provider-neutral evidence, recommends bounded overnight work, and requires
-explicit approval before dispatch. It is not a replacement coding agent or a
-cloud service.
+God of Sessions V2 is an MIT-licensed, local-first Electron home for
+conversations with Morrow. Electron embeds the Pi Agent SDK directly. Morrow is
+conversation-first and uses file or command tools only when the user explicitly
+asks for work that needs them. The app has one fixed launch root and no project
+picker or subagents. Its bounded Overnight runtime freezes one exact plan and
+launches a local non-interactive Codex or Claude worker only after a fresh,
+single-use approval. It is not a cloud service.
 
 ## Public/private decisions
 
@@ -32,9 +34,14 @@ cloud service.
 
 ## Product safety invariants
 
-- Keep provider-owned sessions and receipts authoritative.
-- Preserve the exact, expiring, single-use approval boundary before dispatch.
-- Keep ambiguous starts fail-closed; do not retry an uncertain external start.
+- Keep Pi SessionManager records authoritative for Morrow conversations.
+- Preserve a fail-closed approval boundary before file mutations and commands.
+- Overnight planning is read-only. Its one-time approval freezes the executor,
+  selected daily-session briefs, outcome, verification, and fixed root before a
+  detached local worker starts.
+- Only exact argument-free `pwd` or `git status` may be remembered for the
+  active conversation. In-root file-write
+  approval may also be remembered.
 - Use official provider runtimes for authentication and execution.
 - Keep provider-specific limitations visible instead of presenting an
   unsupported route as ready.
@@ -46,8 +53,8 @@ cloud service.
 - Preserve unrelated user changes in a dirty worktree.
 - Use synthetic fixtures for normal tests; live-provider tests must be ignored
   and must never expose credential values.
-- Run `npm run check` for normal changes. For Rust changes, also run the
-  relevant Cargo tests and formatting/lint checks.
+- Run `npm run check` for normal changes. The active desktop runtime has no
+  Rust or Tauri build step.
 - Do not publish, push, sign, notarize, or change repository visibility unless
   the user explicitly asks for that action.
 - `package.json` has `private: true` intentionally to prevent accidental npm

@@ -34,6 +34,31 @@ weight font distributed by the Fontsource package.
 - License: ISC
 - License text: `licenses/Lucide-ISC.txt`
 
+## Pi Agent SDK
+
+- Source: <https://github.com/earendil-works/pi>
+- Distribution: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-ai` at `0.84.1`
+- License: MIT
+- Integration: bundled directly into the Electron main process
+
+The application uses Pi's SDK API. It does not bundle or invoke the Pi CLI as a
+separate process and does not use Pi RPC mode.
+
+## Electron
+
+- Source: <https://github.com/electron/electron>
+- Distribution: `electron` at `43.4.0`
+- License: MIT (Electron contributors and GitHub Inc.)
+- Integration: bundled desktop shell
+
+Electron distributions also contain Chromium and other components. Their
+notices are included in the generated application bundle.
+
+## Electron Builder and Playwright
+
+- `electron-builder` `26.15.3`: MIT, development and packaging only
+- `@playwright/test` `1.58.2`: Apache-2.0, development and smoke testing only
+
 ## Remotion promotional-video tooling
 
 - Source: <https://github.com/remotion-dev/remotion>
@@ -57,39 +82,6 @@ bundled into the desktop application:
 - [Cloudflare Wrangler CLI](https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler),
   installed at version `4.116.0` by the deployment Action,
   MIT OR Apache License 2.0.
-- [Tauri Action](https://github.com/tauri-apps/tauri-action), pinned to commit
-  `1deb371b0cd8bd54025b384f1cd735e725c4060f` (`v1`), MIT License.
-
-## Hermes Agent external runtime
-
-- Source: <https://github.com/NousResearch/hermes-agent>
-- License for the core runtime: MIT
-- Integration: user-installed external runtime, invoked out of process
-
-God of Sessions does not bundle or copy Hermes Agent source, its Python
-environment, its credentials, or its auxiliary skill catalog. The Morrow
-adapter imports the user's installed runtime and stores Morrow-specific state
-in a separate local application-data directory.
-
-The upstream repository also contains auxiliary material with terms other than
-MIT. Those trees are not redistributed by this project. Any future release
-that bundles Hermes must use an allowlisted source manifest, review every
-nested license, and include the applicable Hermes copyright and license text.
-The review must also inspect skill-level service terms and dynamically
-installed tools; not every restriction is stored in a file named `LICENSE`.
-
-## tempfile Rust crate
-
-- Source: <https://github.com/Stebalien/tempfile>
-- Distribution: `tempfile` (version resolved by `src-tauri/Cargo.lock`)
-- License: MIT OR Apache License 2.0
-- Integration: bundled Rust runtime dependency used to create and remove each
-  turn's isolated Codex home
-- Distributed license choice: MIT
-- License text: `licenses/tempfile-MIT.txt`
-
-The upstream crate package includes `LICENSE-MIT` and `LICENSE-APACHE`. This
-project distributes the MIT text and the release SBOM must retain this entry.
 
 ## Adding a component or asset
 
