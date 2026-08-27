@@ -41,18 +41,23 @@ belong in regular issues unless they create a security impact.
 
 High-value security boundaries include:
 
+- bypass of the packaged app's GitHub identity gate or disclosure of its token;
 - extraction or disclosure of provider credentials;
 - reading outside an explicitly selected workspace or provider-owned store;
 - approval replay, expiry bypass, fingerprint substitution, or reuse;
 - duplicate dispatch after an ambiguous external start;
 - a receipt that claims provider completion without matching provider evidence;
-- command, path, URL, or IPC injection across the Tauri boundary;
+- command, path, URL, or IPC injection across the Electron boundary;
 - release signing, updater, or GitHub Actions credential exposure.
 
 The app intentionally delegates authentication and execution to official
 provider runtimes. A provider's own service outage, account policy, model
 behavior, or credential storage implementation is out of scope unless God of
 Sessions weakens or misrepresents that provider boundary.
+
+GitHub Device Flow is a separate product-identity boundary. The public desktop
+client ID may be committed, but OAuth client secrets and access tokens must not
+be committed, logged, copied into renderer state, or included in reports.
 
 ## Disclosure
 

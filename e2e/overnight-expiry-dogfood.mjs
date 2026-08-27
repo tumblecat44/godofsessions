@@ -37,8 +37,8 @@ try {
   await page.getByRole("button", { name: "Orchestrate" }).click();
 
   const goal = "Keep an exact approval fresh for only five minutes";
-  await page.getByRole("textbox", { name: "One thing to finish tonight" }).fill(goal);
-  await page.getByRole("button", { name: "Prepare plan only" }).click();
+  await page.getByRole("textbox", { name: "What matters tonight (optional)" }).fill(goal);
+  await page.getByRole("button", { name: "Assess this goal" }).click();
   const plan = page.getByRole("article", { name: "Overnight plan to approve" });
   await plan.waitFor();
   await assertVisibleText(plan, [goal, "Reject the expired plan with zero worker launches"]);
@@ -73,10 +73,10 @@ try {
   await page.getByRole("button", { name: "Refresh today" }).click();
   await page.getByText("The previous plan expired, so Morrow will confirm the outcome again.").waitFor();
   assert.equal(await page.getByRole("button", { name: "Run this plan" }).count(), 0);
-  assert.equal(await page.getByRole("textbox", { name: "One thing to finish tonight" }).inputValue(), goal);
+  assert.equal(await page.getByRole("textbox", { name: "What matters tonight (optional)" }).inputValue(), goal);
   await page.screenshot({ path: join(artifacts, "02-expired-plan-recovery.png"), fullPage: true });
 
-  await page.getByRole("button", { name: "Prepare plan only" }).click();
+  await page.getByRole("button", { name: "Assess this goal" }).click();
   await plan.waitFor();
   await assertVisibleText(plan, [goal, "Reject the expired plan with zero worker launches"]);
   const replacement = await readCapture(app);
@@ -130,12 +130,14 @@ async function installServiceBackedIpc(electronApp, paths) {
     globalThis.__morrowExpiryDogfood = fixture;
 
     const channels = [
-      "morrow:bootstrap", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
+      "github:state",
+      "morrow:bootstrap", "morrow:overnight-snapshot", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
       "morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval",
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
       "morrow:refresh-daily-context", "morrow:start-overnight", "morrow:stop-overnight", "morrow:open-external",
     ];
     for (const channel of channels) ipcMain.removeHandler(channel);
+    ipcMain.handle("github:state", () => ({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } }));
     const clone = (value) => JSON.parse(JSON.stringify(value));
     const current = () => globalThis.__morrowExpiryDogfood;
     const conversation = { id: "expiry-conversation", title: "Expiry dogfood", thinkingLevel: "medium", busy: false, messages: [] };
@@ -151,10 +153,11 @@ async function installServiceBackedIpc(electronApp, paths) {
       orchestration: clone(await current().service.snapshot(current().context)),
     });
     ipcMain.handle("morrow:bootstrap", bootstrap);
+    ipcMain.handle("morrow:overnight-snapshot", async () => clone(await current().service.snapshot(current().context)));
     ipcMain.handle("morrow:start-conversation", () => clone(conversation));
     ipcMain.handle("morrow:open-conversation", () => clone(conversation));
     ipcMain.handle("morrow:send-message", async (_event, input) => {
-      const match = String(input.text).match(/Outcome: ([^\n]+)/);
+      const match = String(input.text).match(/User goal: ([^\n]+)/);
       await current().service.prepare({
         title: "Five-minute exact approval",
         outcome: match?.[1] ?? "Keep authority fresh",

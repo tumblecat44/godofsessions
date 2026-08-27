@@ -19,6 +19,7 @@ const demoConversation: ConversationDetail = {
 
 const demoState: BootstrapState = {
   rootName: "godofsessions",
+  rootPath: "/Users/example/godofsessions",
   onboardingComplete: true,
   language: "en",
   thinkingLevel: "medium",
@@ -48,6 +49,7 @@ function previewBridge(): MorrowBridge {
   const listeners = new Set<(event: MorrowEvent) => void>();
   return {
     bootstrap: async () => demoState,
+    overnightSnapshot: async () => demoState.orchestration,
     startConversation: async () => ({ ...demoConversation, id: crypto.randomUUID(), title: "New conversation", messages: [] }),
     openConversation: async () => demoConversation,
     sendMessage: async () => undefined,
@@ -60,6 +62,10 @@ function previewBridge(): MorrowBridge {
     disconnectProvider: async () => undefined,
     finishOnboarding: async () => undefined,
     refreshDailyContext: async () => demoState.orchestration,
+    verifyOvernightProvider: async () => { throw new Error("Overnight provider verification is only available in the desktop app."); },
+    replanOvernightPortfolio: async () => { throw new Error("Overnight portfolio editing is only available in the desktop app."); },
+    startOvernightPortfolio: async () => { throw new Error("Overnight portfolio runs are only available in the desktop app."); },
+    stopOvernightPortfolio: async () => { throw new Error("Overnight portfolio controls are only available in the desktop app."); },
     startOvernight: async () => { throw new Error("Overnight runs are only available in the desktop app."); },
     stopOvernight: async () => undefined,
     openExternal: async (url) => { window.open(url, "_blank", "noopener"); },

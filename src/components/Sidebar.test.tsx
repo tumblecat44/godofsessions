@@ -39,9 +39,56 @@ describe("V2 navigation", () => {
     expect(onOpenConversation).toHaveBeenCalledWith("/tmp/one.json");
   });
 
+  it("searches a longer conversation history without changing the records", () => {
+    const history = [
+      ...conversations,
+      { ...conversations[0], id: "three", path: "/tmp/three.json", title: "Release check" },
+      { ...conversations[0], id: "four", path: "/tmp/four.json", title: "API notes" },
+      { ...conversations[0], id: "five", path: "/tmp/five.json", title: "Morning review" },
+    ];
+    render(<Sidebar view="chat" language="en" conversations={history} {...noop} />);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search conversations" }), { target: { value: "docs" } });
+
+    expect(screen.getByRole("button", { name: /Docs sweep/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Night plan/ })).not.toBeInTheDocument();
+  });
+
   it("shows a friendly empty state before the first conversation", () => {
     render(<Sidebar view="chat" language="en" conversations={[]} {...noop} />);
 
     expect(screen.getByText("Your first conversation will settle here.")).toBeInTheDocument();
+  });
+
+  it("states what stays on-device and what is sent to a provider", () => {
+    render(<Sidebar view="chat" language="en" conversations={[]} {...noop} />);
+
+    expect(screen.queryByText("APP RECORDS STAY ON THIS MAC")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model requests go to the provider you choose.")).not.toBeInTheDocument();
+  });
+
+  it("keeps a running or attention-needed Overnight visible outside its page", () => {
+    const { rerender } = render(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="running" activePortfolioItemCount={3} {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Orchestrate · 3 portfolio items active" })).toHaveTextContent("3 ACTIVE");
+    rerender(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="starting" activePortfolioItemCount={3} {...noop} />);
+    expect(screen.getByRole("button", { name: "Orchestrate · 3 portfolio items starting" })).toHaveTextContent("3 STARTING");
+    rerender(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="stopping" activePortfolioItemCount={2} {...noop} />);
+    expect(screen.getByRole("button", { name: "Orchestrate · 2 portfolio items stopping" })).toHaveTextContent("STOPPING");
+    rerender(<Sidebar view="settings" language="en" conversations={[]} overnightStatus="attention" {...noop} />);
+    expect(screen.getByRole("button", { name: "Orchestrate · attention needed" })).toHaveTextContent("! CHECK");
+  });
+
+  it("uses a generic portfolio status when the active item count is unavailable", () => {
+    render(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="running" {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Orchestrate · portfolio active" })).toHaveTextContent("ACTIVE");
+    expect(screen.queryByText("1 RUNNING")).not.toBeInTheDocument();
+  });
+
+  it("names the Korean destination as Overnight management instead of transliterated jargon", () => {
+    render(<Sidebar view="chat" language="ko" conversations={[]} overnightStatus="running" activePortfolioItemCount={4} {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Overnight 관리 · 포트폴리오 항목 4개 진행 중" })).toHaveTextContent("4 ACTIVE");
   });
 });

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   macos-bundle:
-    name: Unsigned macOS bundle
+    name: Unsigned universal macOS DMG
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -42,12 +42,63 @@ jobs:
         run: node scripts/verify-public-boundary.mjs --tracked --internal-checkout
       - name: Run project checks
         run: npm run check
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - name: Lint Rust targets
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
-      - name: Build unsigned local bundle
-        run: npm run tauri build
+      - name: Build unsigned universal DMG
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npx electron-builder \
+            --mac dmg \
+            --universal \
+            --publish never \
+            --config.mac.identity=null \
+            --config.mac.notarize=false \
+            --config.mac.hardenedRuntime=false \
+            --config.mac.x64ArchFiles='Contents/Resources/app.asar.unpacked/node_modules/{@earendil-works/pi-tui/native/darwin/prebuilds/**,@mariozechner/clipboard-darwin-arm64/**}' \
+            --config.dmg.writeUpdateInfo=false \
+            --config.artifactName='God-of-Sessions_${arch}.${ext}' \
+            --config.directories.output="$RUNNER_TEMP/electron-builder-output"
+      - name: Verify the app, DMG, and checksum
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/electron-builder-output/mac-universal/God of Sessions.app"
+          executable="$app/Contents/MacOS/God of Sessions"
+          dmg="$RUNNER_TEMP/electron-builder-output/God-of-Sessions_universal.dmg"
+
+          test -d "$app"
+          test -s "$executable"
+          test -s "$dmg"
+
+          architectures="$(lipo -archs "$executable")"
+          [[ " $architectures " == *" arm64 "* ]]
+          [[ " $architectures " == *" x86_64 "* ]]
+          if codesign --verify --deep --strict "$app" 2>/dev/null; then
+            echo "::error::Dry-run app was unexpectedly signed."
+            exit 1
+          fi
+          hdiutil verify "$dmg"
+          mount_point="$RUNNER_TEMP/god-of-sessions-dmg"
+          mkdir "$mount_point"
+          hdiutil attach "$dmg" \
+            -nobrowse \
+            -readonly \
+            -mountpoint "$mount_point"
+          trap 'hdiutil detach "$mount_point" || true' EXIT
+          test -d "$mount_point/God of Sessions.app"
+          mounted_architectures="$(
+            lipo -archs \
+              "$mount_point/God of Sessions.app/Contents/MacOS/God of Sessions"
+          )"
+          [[ " $mounted_architectures " == *" arm64 "* ]]
+          [[ " $mounted_architectures " == *" x86_64 "* ]]
+          hdiutil detach "$mount_point"
+          trap - EXIT
+
+          (
+            cd "$RUNNER_TEMP/electron-builder-output"
+            shasum -a 256 "God-of-Sessions_universal.dmg" \
+              > "God-of-Sessions_universal.dmg.sha256"
+            shasum -a 256 --check "God-of-Sessions_universal.dmg.sha256"
+          )
 
       # This workflow deliberately does not sign, notarize, upload, tag, or
       # publish. Release credentials are never available to pull requests.

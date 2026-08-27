@@ -59,6 +59,16 @@ notices are included in the generated application bundle.
 - `electron-builder` `26.15.3`: MIT, development and packaging only
 - `@playwright/test` `1.58.2`: Apache-2.0, development and smoke testing only
 
+## Tailwind CSS build tooling
+
+- Source: <https://github.com/tailwindlabs/tailwindcss>
+- Distribution: `tailwindcss` and `@tailwindcss/vite` at `4.3.3`
+- License: MIT
+- Integration: development-time styling compiler for the React renderer
+
+Tailwind CSS is not a copied UI kit or asset source. It compiles the product's
+own design tokens and utility classes into the renderer stylesheet.
+
 ## Remotion promotional-video tooling
 
 - Source: <https://github.com/remotion-dev/remotion>

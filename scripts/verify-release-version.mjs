@@ -19,26 +19,7 @@ function parseJsonVersion(source, label) {
   return parsed.version;
 }
 
-function parseCargoVersion(source) {
-  const packageSection = source.match(
-    /(?:^|\n)\[package\][ \t]*\n([\s\S]*?)(?=\n\[[^\]]+\]|$)/,
-  );
-  const version = packageSection?.[1].match(
-    /^[ \t]*version[ \t]*=[ \t]*"([^"]+)"/m,
-  )?.[1];
-
-  if (typeof version !== "string" || !SEMVER.test(version)) {
-    throw new Error("src-tauri/Cargo.toml does not contain a valid version.");
-  }
-  return version;
-}
-
-export function verifyReleaseVersion({
-  tag,
-  packageJson,
-  tauriConfig,
-  cargoToml,
-}) {
+export function verifyReleaseVersion({ tag, packageJson }) {
   if (typeof tag !== "string" || !tag.startsWith("v")) {
     throw new Error("Release tags must use vMAJOR.MINOR.PATCH.");
   }
@@ -48,21 +29,11 @@ export function verifyReleaseVersion({
     throw new Error("Release tags must use vMAJOR.MINOR.PATCH.");
   }
 
-  const versions = [
-    ["package.json", parseJsonVersion(packageJson, "package.json")],
-    [
-      "src-tauri/tauri.conf.json",
-      parseJsonVersion(tauriConfig, "src-tauri/tauri.conf.json"),
-    ],
-    ["src-tauri/Cargo.toml", parseCargoVersion(cargoToml)],
-  ];
-
-  for (const [label, candidate] of versions) {
-    if (candidate !== version) {
-      throw new Error(
-        `Release tag ${tag} expects ${version}, but ${label} has ${candidate}.`,
-      );
-    }
+  const packageVersion = parseJsonVersion(packageJson, "package.json");
+  if (packageVersion !== version) {
+    throw new Error(
+      `Release tag ${tag} expects ${version}, but package.json has ${packageVersion}.`,
+    );
   }
 
   return version;
@@ -70,17 +41,11 @@ export function verifyReleaseVersion({
 
 async function main() {
   const root = process.cwd();
-  const [packageJson, tauriConfig, cargoToml] = await Promise.all([
-    readFile(path.join(root, "package.json"), "utf8"),
-    readFile(path.join(root, "src-tauri/tauri.conf.json"), "utf8"),
-    readFile(path.join(root, "src-tauri/Cargo.toml"), "utf8"),
-  ]);
+  const packageJson = await readFile(path.join(root, "package.json"), "utf8");
 
   const version = verifyReleaseVersion({
     tag: process.env.RELEASE_TAG,
     packageJson,
-    tauriConfig,
-    cargoToml,
   });
   process.stdout.write(`Release version verified: ${version}\n`);
 }

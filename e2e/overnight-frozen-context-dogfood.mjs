@@ -37,20 +37,26 @@ try {
   await page.getByRole("button", { name: "Orchestrate" }).click();
 
   const goal = "Run only with the session context I reviewed before refresh";
-  await page.getByRole("textbox", { name: "One thing to finish tonight" }).fill(goal);
-  await page.getByRole("button", { name: "Prepare plan only" }).click();
+  await page.getByRole("textbox", { name: "What matters tonight (optional)" }).fill(goal);
+  await page.getByRole("button", { name: "Assess this goal" }).click();
   const plan = page.getByRole("article", { name: "Overnight plan to approve" });
   await plan.waitFor();
   await assertVisibleText(plan, [goal, "CODEX · Approved source context"]);
 
   await page.getByRole("button", { name: "Refresh today" }).click();
-  await page.getByRole("heading", { name: "2 local AI sessions today" }).waitFor();
+  const refreshedCapture = await readCapture(app);
+  assert.equal(refreshedCapture.currentTotalSessions, 2, "refresh must load the newer daily context behind the reviewed plan");
+  await page.getByRole("heading", { name: "1 local AI sessions when prepared" }).waitFor();
   await assertVisibleText(plan, [goal, "CODEX · Approved source context"]);
   assert.equal(await plan.getByText("CODEX · Changed after review").count(), 0, "refresh must not rewrite the reviewed plan");
+  const contextNotes = page.getByText("1 context note · when prepared", { exact: true });
+  await contextNotes.click();
+  await page.getByText("Codex index could not be read at plan time.", { exact: true }).waitFor();
+  assert.equal(await page.getByText("This warning belongs only to refreshed context.", { exact: true }).count(), 0, "refresh must not replace the frozen collection warning");
   await page.screenshot({ path: join(artifacts, "01-reviewed-plan-after-refresh.png"), fullPage: true });
 
   await page.getByRole("button", { name: "Run this plan" }).click();
-  await page.getByText("starting", { exact: true }).waitFor();
+  await page.locator(".active-run-signal").getByText("Starting", { exact: true }).waitFor();
   const capture = await readCapture(app);
   assert.equal(capture.launches, 1, "one Run click must make one launch request");
   assert.match(capture.prompt, /APPROVED BEFORE REFRESH/);
@@ -85,7 +91,7 @@ async function installServiceBackedIpc(electronApp, paths) {
         totalSessions: 1,
         providerCounts: { codex: 1 },
         sessions: [approvedSummary],
-        warnings: [],
+        warnings: ["Codex index could not be read at plan time."],
         methodology: "synthetic frozen-context Electron fixture",
       },
       sessions: [{ ...approvedSummary, nativeId: "approved", excerpts: [{ role: "user", text: "APPROVED BEFORE REFRESH" }] }],
@@ -99,6 +105,7 @@ async function installServiceBackedIpc(electronApp, paths) {
         totalSessions: 2,
         providerCounts: { codex: 1, claude: 1 },
         sessions: [changedSummary],
+        warnings: ["This warning belongs only to refreshed context."],
       },
       sessions: [{ ...changedSummary, nativeId: "approved", excerpts: [{ role: "user", text: "CHANGED AFTER REVIEW" }] }],
       prompt: "synthetic context B",
@@ -120,12 +127,14 @@ async function installServiceBackedIpc(electronApp, paths) {
     globalThis.__morrowFrozenDogfood = fixture;
 
     const channels = [
-      "morrow:bootstrap", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
+      "github:state",
+      "morrow:bootstrap", "morrow:overnight-snapshot", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
       "morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval",
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
       "morrow:refresh-daily-context", "morrow:start-overnight", "morrow:stop-overnight", "morrow:open-external",
     ];
     for (const channel of channels) ipcMain.removeHandler(channel);
+    ipcMain.handle("github:state", () => ({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } }));
     const clone = (value) => JSON.parse(JSON.stringify(value));
     const current = () => globalThis.__morrowFrozenDogfood;
     const conversation = { id: "frozen-context-conversation", title: "Frozen context dogfood", thinkingLevel: "medium", busy: false, messages: [] };
@@ -141,10 +150,11 @@ async function installServiceBackedIpc(electronApp, paths) {
       orchestration: clone(await current().service.snapshot(current().context)),
     });
     ipcMain.handle("morrow:bootstrap", bootstrap);
+    ipcMain.handle("morrow:overnight-snapshot", async () => clone(await current().service.snapshot(current().context)));
     ipcMain.handle("morrow:start-conversation", () => clone(conversation));
     ipcMain.handle("morrow:open-conversation", () => clone(conversation));
     ipcMain.handle("morrow:send-message", async (_event, input) => {
-      const match = String(input.text).match(/Outcome: ([^\n]+)/);
+      const match = String(input.text).match(/User goal: ([^\n]+)/);
       const outcome = match?.[1] ?? "Freeze the reviewed context";
       await current().service.prepare({
         title: "Freeze the reviewed Overnight input",
@@ -168,7 +178,12 @@ async function installServiceBackedIpc(electronApp, paths) {
 async function readCapture(electronApp) {
   return electronApp.evaluate(() => {
     const fixture = globalThis.__morrowFrozenDogfood;
-    return { launches: fixture.launches, prompt: fixture.prompt, selectedTitles: fixture.selectedTitles };
+    return {
+      launches: fixture.launches,
+      prompt: fixture.prompt,
+      selectedTitles: fixture.selectedTitles,
+      currentTotalSessions: fixture.context.summary.totalSessions,
+    };
   });
 }
 

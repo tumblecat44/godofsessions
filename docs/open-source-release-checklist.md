@@ -85,12 +85,11 @@ node --test scripts/create-cloudflare-config.test.mjs
 node --test scripts/verify-release-version.test.mjs
 node scripts/verify-public-boundary.mjs --tracked
 npm run check
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+npm run package:mac
 ```
 
-Also run dependency review, CodeQL for TypeScript and Rust, `cargo audit` or
-`cargo deny`, and the configured dependency-license policy.
+Also run dependency review, CodeQL for TypeScript, and the configured
+dependency-license policy.
 
 The checked-in workflows distinguish this internal private checkout from the
 clean public repository. In a private repository, `--internal-checkout`
@@ -124,20 +123,24 @@ review and code-owner approval after a second maintainer is established.
 
 ## 7. Configure signing and release automation
 
-- Store Apple certificates, notarization credentials, Windows signing
-  credentials, and the Tauri updater private key only in a protected GitHub
-  release environment.
-- Keep only the updater public key in Tauri configuration.
+- Store Apple certificates, notarization credentials, and Windows signing
+  credentials only in a protected GitHub release environment.
 - Prevent pull-request jobs from accessing release secrets.
 - Build from a protected version tag or validated commit.
 - Create the GitHub release as a draft, upload every platform asset, checksum,
-  updater signature, SBOM, and provenance attestation, then publish it once.
+  SBOM, and provenance attestation, then publish it once.
 - Verify the downloaded assets before marking the release stable.
 - Add Homebrew or other package-manager automation only after the direct
   release path is proven.
 
 The repository's release dry-run workflow deliberately performs no signing,
 notarization, tagging, or publication.
+
+The current desktop workflow produces a macOS DMG and checksum draft only.
+Automated SBOM generation and provenance attestation are **unfinished follow-up
+release gates**. This checklist requirement is not waived: do not treat the
+two-asset draft as ready for an official publish until those artifacts and
+their verification are implemented.
 
 The production workflows remain disabled until a maintainer configures the
 protected GitHub environments and repository enable variables described in

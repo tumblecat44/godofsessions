@@ -79,9 +79,9 @@ deployments one at a time so one deployment cannot interrupt another.
 
 ## macOS desktop releases
 
-The current release workflow publishes a direct DMG and SHA-256 checksum. It
-does not configure an in-app updater and does not publish Windows or Linux
-installers.
+The current release workflow prepares a draft containing a direct DMG and
+SHA-256 checksum. It does not configure an in-app updater, generate updater
+metadata, or publish Windows or Linux installers.
 
 ### 1. Prepare Apple credentials
 
@@ -90,11 +90,11 @@ protected `.p12`, and base64-encode the complete file. Create an App Store
 Connect API key authorized for notarization and retain its issuer ID, key ID,
 and complete `.p8` private-key contents.
 
-Tauri references:
+electron-builder references:
 
-- [macOS code signing](https://v2.tauri.app/distribute/sign/macos/)
-- [GitHub release pipeline](https://v2.tauri.app/distribute/pipelines/github/)
-- [Tauri release action](https://github.com/tauri-apps/tauri-action)
+- [macOS configuration](https://www.electron.build/mac/)
+- [macOS code signing](https://www.electron.build/docs/features/code-signing/code-signing-mac/)
+- [macOS notarization](https://www.electron.build/docs/notarization/)
 
 ### 2. Create the protected release environment
 
@@ -109,19 +109,27 @@ Add these environment secrets:
 | `APPLE_CERTIFICATE` | Base64-encoded Developer ID `.p12` |
 | `APPLE_CERTIFICATE_PASSWORD` | Password used to export the `.p12` |
 | `APPLE_API_ISSUER` | App Store Connect issuer ID |
-| `APPLE_API_KEY` | App Store Connect key ID |
+| `APPLE_API_KEY` | App Store Connect key ID (mapped to `APPLE_API_KEY_ID` for the build) |
 | `APPLE_API_PRIVATE_KEY` | Complete `.p8` private-key contents |
 
 Add these environment variables:
 
 | Variable | Value |
 | --- | --- |
-| `APPLE_SIGNING_IDENTITY` | Full `Developer ID Application: … (TEAMID)` identity |
 | `APPLE_TEAM_ID` | Apple Developer team ID |
 
 GitHub does not expose these environment secrets until the deployment is
-approved. The workflow imports them into an ephemeral keychain and deletes the
-temporary certificate, API key, and keychain when the job ends.
+approved. `electron-builder` accepts the base64 `.p12` through `CSC_LINK` and
+manages its temporary signing keychain. It automatically selects the Developer
+ID Application identity from that isolated signing source; do not configure
+`CSC_NAME` or a separate identity variable. The build uses
+`forceCodeSigning=true`, so it fails closed if the imported certificate cannot
+provide a valid signing identity. The workflow writes
+`APPLE_API_PRIVATE_KEY` to an owner-only temporary `.p8` file because the
+installed `@electron/notarize` runtime requires an absolute path in
+`APPLE_API_KEY`. The stored `APPLE_API_KEY` secret is the key ID and is mapped
+to `APPLE_API_KEY_ID`; `APPLE_API_ISSUER` and `APPLE_TEAM_ID` keep their names.
+The temporary `.p8` file is removed when the job ends.
 
 ### 3. Enable and create a release
 
@@ -130,30 +138,38 @@ Create the repository-level variable `DESKTOP_RELEASE_ENABLED` with the value
 workflow always runs the strict public-boundary scan; use the unsigned
 `release-dry-run.yml` workflow while the repository remains private.
 
-Before tagging, set the same version in:
-
-- `package.json`;
-- `src-tauri/tauri.conf.json`;
-- `src-tauri/Cargo.toml`.
+Before tagging, set the release version in `package.json`.
 
 Then create and push a tag such as `v1.2.3` on a commit already merged to
 `main`. Alternatively, manually run **Release desktop** and select an existing
 tag. The workflow rejects malformed tags, mismatched versions, and tags whose
 commit is not contained in `main`.
 
-After environment approval, it runs the full project checks, builds a universal
-Apple Silicon and Intel DMG, signs and notarizes it, and creates a draft GitHub
-Release containing:
+After environment approval, it runs the full project checks and creates the
+draft GitHub Release before any asset upload. `electron-builder` 26.15.3 then
+builds a universal Apple Silicon and Intel DMG with
+`forceCodeSigning=true`, signs and notarizes the app, and uploads exactly:
 
 - `God-of-Sessions_universal.dmg`;
 - `God-of-Sessions_universal.dmg.sha256`.
+
+The universal merge allowlist is narrowly limited to the packaged Pi TUI and
+clipboard architecture-specific macOS native prebuild directories. Those
+prebuilds ship in each single-architecture app, so `electron-builder` must
+preserve the named files instead of trying to merge each one with itself.
 
 Download and verify the draft assets on a clean Mac before publishing the
 release. Enable GitHub immutable releases so publication locks the tag and
 assets. The stable asset name is what lets the landing page use GitHub's
 `releases/latest/download/...` URL without a source change for every version.
 The workflow verifies that both assets are non-empty and that the release is
-still a draft before it finishes.
+still a draft before it finishes. Publishing remains a separate human action.
+If a signing, notarization, or upload attempt fails after draft creation, a
+rerun reuses that exact tag's draft. It fails closed if the matching release is
+already published or is otherwise not a draft.
+The unsigned **Release dry run** workflow passes `--publish never`, explicitly
+disables signing and notarization, and verifies the universal app, DMG, and
+locally generated checksum without uploading anything.
 
 GitHub references:
 
