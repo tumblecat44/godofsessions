@@ -47,7 +47,7 @@ describe("Morrow onboarding product contract", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Conversation model" }));
     expect(screen.getByRole("heading", { name: "Connect the model Morrow talks with." })).toBeInTheDocument();
-    expect(screen.getByText(/Overnight workers are checked separately in Orchestrate/)).toBeInTheDocument();
+    expect(screen.getByText(/Overnight workers are checked separately in Overnight/)).toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: "Ready" })).not.toBeInTheDocument();
   });
@@ -63,14 +63,15 @@ describe("Morrow onboarding product contract", () => {
     expect(screen.getByRole("button", { name: /Look around without a model/ })).toBeInTheDocument();
   });
 
-  it("names all seven agents without promising that every route is ready", () => {
+  it("names the four supported execution agents without promising that every route is ready", () => {
     renderOnboarding();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
 
-    const portfolioCopy = screen.getByText(/Morrow prepares safe work for Codex/);
-    for (const agent of ["Codex", "Claude Code", "Grok Build", "Cursor", "Pi Agent", "Hermes", "OpenClaw"]) {
+    const portfolioCopy = screen.getByText(/Morrow prepares safe work for Claude Code/);
+    for (const agent of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) {
       expect(portfolioCopy).toHaveTextContent(agent);
     }
+    expect(portfolioCopy).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
     expect(screen.getByText(/shows Ready, Setup, or Blocked/)).toBeInTheDocument();
     expect(screen.getByText(/Morning evidence by item/)).toBeInTheDocument();
   });
@@ -79,7 +80,7 @@ describe("Morrow onboarding product contract", () => {
     renderOnboarding({ ...baseState, language: "ko" });
     fireEvent.click(screen.getByRole("button", { name: "야간 작업" }));
 
-    expect(screen.getByText(/Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes, OpenClaw/)).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code, Codex, Grok Build, Pi Agent/)).toBeInTheDocument();
     expect(screen.getByText(/준비, 설정 필요, 차단/)).toBeInTheDocument();
     expect(screen.getByText("항목별 아침 근거")).toBeInTheDocument();
   });

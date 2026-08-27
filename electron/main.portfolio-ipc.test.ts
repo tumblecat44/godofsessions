@@ -97,12 +97,17 @@ beforeAll(async () => {
 });
 
 describe("portfolio IPC boundary", () => {
-  it("accepts one of the seven execution provider IDs for explicit verification", async () => {
+  it("accepts only the four execution provider IDs for explicit verification", async () => {
     const invoke = testState.handlers.get("morrow:verify-overnight-provider")!;
-    await invoke(trustedEvent(), "codex");
-    expect(testState.morrow?.verifyOvernightProvider).toHaveBeenCalledTimes(1);
-    expect(testState.morrow?.verifyOvernightProvider).toHaveBeenCalledWith("codex");
+    for (const provider of ["claude", "codex", "grok", "pi"]) {
+      await invoke(trustedEvent(), provider);
+      expect(testState.morrow?.verifyOvernightProvider).toHaveBeenCalledWith(provider);
+    }
+    expect(testState.morrow?.verifyOvernightProvider).toHaveBeenCalledTimes(4);
     await expect(invoke(trustedEvent(), "auto")).rejects.toThrow(/provider/);
+    for (const provider of ["cursor", "hermes", "openclaw"]) {
+      await expect(invoke(trustedEvent(), provider)).rejects.toThrow(/provider/);
+    }
   });
   it("preserves the complete selection and forwards only exact supported providers", async () => {
     const includedItemIds = Array.from({ length: 30 }, (_, index) => `item-${index}`);
@@ -131,7 +136,7 @@ describe("portfolio IPC boundary", () => {
       includedItemIds: ["one"],
       providerByItem: { one: provider },
     });
-    for (const provider of ["cursor", "hermes", "openclaw"]) {
+    for (const provider of ["claude", "codex", "grok", "pi"]) {
       await expect(invoke(provider)).resolves.toMatchObject({ id: "replanned" });
     }
   });
@@ -141,6 +146,9 @@ describe("portfolio IPC boundary", () => {
 
     await expect(invoke({ planId: "plan-1", includedItemIds: ["one", "one"] })).rejects.toThrow(/Duplicate/);
     await expect(invoke({ planId: "plan-1", includedItemIds: ["one"], providerByItem: { one: "auto" } })).rejects.toThrow(/provider/);
+    for (const provider of ["cursor", "hermes", "openclaw"]) {
+      await expect(invoke({ planId: "plan-1", includedItemIds: ["one"], providerByItem: { one: provider } })).rejects.toThrow(/provider/);
+    }
     await expect(invoke({ planId: "plan-1", includedItemIds: ["one"], providerByItem: { two: "codex" } })).rejects.toThrow(/excluded/);
   });
 

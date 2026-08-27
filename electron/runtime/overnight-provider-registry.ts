@@ -47,14 +47,6 @@ const ROUTES = {
     launchMode: "grok agent stdio",
     receiptProtocol: "acp-jsonrpc",
   },
-  cursor: {
-    provider: "cursor",
-    label: "Cursor",
-    adapterKind: "acp",
-    executableNames: ["agent"],
-    launchMode: "agent acp",
-    receiptProtocol: "acp-jsonrpc",
-  },
   pi: {
     provider: "pi",
     label: "Pi Agent",
@@ -62,22 +54,6 @@ const ROUTES = {
     executableNames: [],
     launchMode: "@earendil-works/pi-coding-agent createAgentSession",
     receiptProtocol: "sdk-events",
-  },
-  hermes: {
-    provider: "hermes",
-    label: "Hermes",
-    adapterKind: "acp",
-    executableNames: ["hermes"],
-    launchMode: "hermes acp",
-    receiptProtocol: "acp-jsonrpc",
-  },
-  openclaw: {
-    provider: "openclaw",
-    label: "OpenClaw",
-    adapterKind: "acp",
-    executableNames: ["openclaw"],
-    launchMode: "openclaw acp",
-    receiptProtocol: "acp-jsonrpc",
   },
 } as const satisfies Record<OvernightExecutionProvider, Omit<OvernightProviderRoute, "capacityPool" | "isolation" | "sessionHandoff">>;
 

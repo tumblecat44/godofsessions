@@ -6,10 +6,7 @@ export const OVERNIGHT_EXECUTION_PROVIDERS = [
   "claude",
   "codex",
   "grok",
-  "cursor",
   "pi",
-  "hermes",
-  "openclaw",
 ] as const;
 export type OvernightExecutionProvider = typeof OVERNIGHT_EXECUTION_PROVIDERS[number];
 /**

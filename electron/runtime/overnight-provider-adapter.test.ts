@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import { overnightExecutorInvocation } from "./overnight-executor-contract";
 import {
   overnightProviderAdapterIdentity,
@@ -9,7 +9,7 @@ import {
   overnightProviderLaunchCapabilitySha256,
 } from "./overnight-provider-adapter";
 
-const PROVIDERS = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"] satisfies LocalSessionProvider[];
+const PROVIDERS = ["codex", "claude", "grok", "pi"] satisfies OvernightExecutionProvider[];
 
 describe("Overnight provider adapter invocation", () => {
   it("defines a prompt-private invocation for every advertised provider", () => {
@@ -23,8 +23,8 @@ describe("Overnight provider adapter invocation", () => {
     }
   });
 
-  it("routes Grok, Cursor, Hermes, and OpenClaw through ACP without bypass-permission flags", () => {
-    for (const provider of ["grok", "cursor", "hermes", "openclaw"] as const) {
+  it("routes Grok Build through ACP without bypass-permission flags", () => {
+    for (const provider of ["grok"] as const) {
       const invocation = overnightProviderAdapterInvocation(provider, "/work/item", "/private/runtime");
       expect(invocation.adapterKind).toBe("acp");
       expect(invocation.promptTransport).toBe("acp-jsonrpc");
@@ -99,7 +99,7 @@ describe("Overnight provider adapter invocation", () => {
   });
 
   it("fails closed when outer mode is requested for a route without an outer executor contract", () => {
-    for (const provider of ["grok", "cursor", "pi", "hermes", "openclaw"] as const) {
+    for (const provider of ["grok", "pi"] as const) {
       expect(() => overnightProviderAdapterInvocation(
         provider,
         "/work/item",
@@ -142,21 +142,6 @@ describe("Overnight provider adapter invocation", () => {
     });
   });
 
-  it("air-gaps Hermes tool execution inside a non-persistent Docker workspace", () => {
-    const invocation = overnightProviderAdapterInvocation("hermes", "/work/item", "/private/runtime");
-    expect(invocation.environment).toEqual({});
-    expect(overnightProviderEffectiveEnvironment(invocation, "/private/runtime")).toMatchObject({
-      TERMINAL_ENV: "docker",
-      TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE: "true",
-      TERMINAL_DOCKER_NETWORK: "false",
-      TERMINAL_CONTAINER_PERSISTENT: "false",
-      TERMINAL_DOCKER_FORWARD_ENV: "[]",
-      TERMINAL_SANDBOX_DIR: "/private/runtime/hermes-sandbox",
-    });
-    expect(invocation.args).toEqual(["--ignore-rules", "--toolsets", "terminal", "acp"]);
-    expect(invocation.args.join(" ")).not.toMatch(/file|code_execution/u);
-  });
-
   it("keeps Pi embedded in the already-authoritative SDK runtime", () => {
     const invocation = overnightProviderAdapterInvocation("pi", "/work/item", "/private/runtime");
     expect(invocation).toMatchObject({
@@ -168,12 +153,12 @@ describe("Overnight provider adapter invocation", () => {
   });
 
   it("binds argv, environment, cwd, executable, and prompt transport into one path-free digest", () => {
-    const invocation = overnightProviderAdapterInvocation("hermes", "/work/item", "/private/runtime", "/exact/hermes");
+    const invocation = overnightProviderAdapterInvocation("grok", "/work/item", "/private/runtime", "/exact/grok");
     const identity = overnightProviderAdapterIdentity(invocation);
 
     expect(identity).toMatchObject({
       version: 1,
-      provider: "hermes",
+      provider: "grok",
       adapterKind: "acp",
       promptTransport: "acp-jsonrpc",
       sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -223,14 +208,14 @@ describe("Overnight provider adapter invocation", () => {
   });
 
   it("binds every effective environment value and launch capability field by digest only", () => {
-    const invocation = overnightProviderAdapterInvocation("hermes", "/work/item", "/private/runtime", "/exact/hermes");
+    const invocation = overnightProviderAdapterInvocation("grok", "/work/item", "/private/runtime", "/exact/grok");
     const environment = overnightProviderEffectiveEnvironment(invocation, "/private/runtime");
     const digest = overnightProviderEnvironmentSha256(environment);
     const capability = {
       version: 1 as const,
       runId: "run_one",
       itemId: "item_one",
-      provider: "hermes" as const,
+      provider: "grok" as const,
       proofSha256: "a".repeat(64),
       invocationSha256: "b".repeat(64),
       token: "synthetic-one-time-secret",

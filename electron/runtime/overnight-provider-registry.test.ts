@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import { OVERNIGHT_PROVIDER_ROUTES, overnightProviderRoute } from "./overnight-provider-registry";
 
-const EXPECTED_PROVIDERS = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"] satisfies LocalSessionProvider[];
+const EXPECTED_PROVIDERS = ["codex", "claude", "grok", "pi"] satisfies OvernightExecutionProvider[];
 
 describe("Overnight provider registry", () => {
   it("defines one provider-neutral execution route for every advertised agent", () => {
     expect(OVERNIGHT_PROVIDER_ROUTES.map((route) => route.provider).sort()).toEqual([...EXPECTED_PROVIDERS].sort());
-    expect(new Set(OVERNIGHT_PROVIDER_ROUTES.map((route) => route.provider)).size).toBe(7);
+    expect(new Set(OVERNIGHT_PROVIDER_ROUTES.map((route) => route.provider)).size).toBe(4);
   });
 
   it("requires every route to freeze a brief, use Morrow isolation, and emit a provider-native receipt", () => {
@@ -34,12 +34,16 @@ describe("Overnight provider registry", () => {
     }
   });
 
-  it("uses one permission-aware ACP boundary for the four ACP-capable external agents", () => {
-    for (const provider of ["grok", "cursor", "hermes", "openclaw"] as const) {
-      expect(overnightProviderRoute(provider)).toMatchObject({
-        adapterKind: "acp",
-        receiptProtocol: "acp-jsonrpc",
-      });
+  it("uses the permission-aware ACP boundary for Grok Build", () => {
+    expect(overnightProviderRoute("grok")).toMatchObject({
+      adapterKind: "acp",
+      receiptProtocol: "acp-jsonrpc",
+    });
+  });
+
+  it("rejects historical-only session providers as execution routes", () => {
+    for (const provider of ["cursor", "hermes", "openclaw"] as const) {
+      expect(() => overnightProviderRoute(provider)).toThrow(/No Overnight provider route/);
     }
   });
 });

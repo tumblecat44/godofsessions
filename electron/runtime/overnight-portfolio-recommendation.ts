@@ -67,15 +67,12 @@ interface NormalizedCandidate extends OvernightPortfolioCandidateProposal {
   sourceMembers?: NormalizedCandidate[];
 }
 
-const providerOrder: OvernightProviderId[] = ["claude", "codex", "grok", "cursor", "pi", "hermes", "openclaw"];
+const providerOrder: OvernightProviderId[] = ["claude", "codex", "grok", "pi"];
 const providerNamePatterns: Record<OvernightProviderId, RegExp> = {
   codex: /\bcodex\b/iu,
   claude: /\bclaude(?:\s+code)?\b/iu,
   grok: /\bgrok(?:\s+build)?\b/iu,
-  cursor: /\bcursor\b/iu,
   pi: /\bpi(?:\s+agent)?\b/iu,
-  hermes: /\bhermes\b/iu,
-  openclaw: /\bopenclaw\b/iu,
 };
 const providerFit = /(?:\b(?:repository|repo|code|patch|implementation|debug(?:ging)?|regression|tests?|documentation|docs?|writing|review|synthesis|analysis|audit|investigation|routine|repeatable|command|report)\b|저장소|코드|패치|구현|디버깅|회귀|테스트|문서|작성|검토|종합|분석|감사|조사|루틴|반복|명령|보고서)/iu;
 const taskStopWords = new Set([

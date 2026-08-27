@@ -24,7 +24,7 @@ import {
   type OvernightProviderProcessLauncher,
 } from "./overnight-provider-runner";
 
-const ACP_PROVIDERS = ["grok", "cursor", "hermes", "openclaw"] as const;
+const ACP_PROVIDERS = ["grok"] as const;
 const DEADLINE_AT = "2099-08-26T19:30:00.000Z";
 
 function syntheticContainment(invocation: OvernightProviderAdapterInvocation): {
@@ -265,7 +265,7 @@ describe("Overnight provider runner", () => {
     expect(JSON.stringify(launch.mock.calls)).not.toContain("PRIVATE PROMPT");
   });
 
-  it("negotiates ACP v1 and returns the native ACP session receipt for all four ACP routes", async () => {
+  it("negotiates ACP v1 and returns the native ACP session receipt for Grok Build", async () => {
     const launch = vi.fn<OvernightProviderProcessLauncher>(async (invocation) => acpProcess(invocation.provider));
     const runner = new OvernightProviderRunner({ dataDir: "/private", launchProcess: launch, now: () => new Date("2099-08-26T12:00:00.000Z") });
 

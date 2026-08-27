@@ -3,35 +3,35 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
-const localizedCopy = await readFile(new URL("./src/main.ts", import.meta.url), "utf8");
-const agents = ["Codex", "Claude Code", "Grok Build", "Cursor", "Pi Agent", "Hermes", "OpenClaw"];
+const agents = ["Claude Code", "Codex", "Grok Build", "Pi Agent"];
 
-test("presents all seven agents as one editable, approval-gated night portfolio", () => {
-  for (const agent of agents) {
-    assert.match(html, new RegExp(agent));
-    assert.match(localizedCopy, new RegExp(agent));
-  }
-
-  assert.match(html, /one portfolio you can edit/i);
-  assert.match(html, /approve the exact portfolio once/i);
-  assert.match(html, /review evidence item by item/i);
-  assert.match(localizedCopy, /편집 가능한 하나의 포트폴리오/);
-  assert.match(localizedCopy, /항목별 결과/);
+test("centers the public slogan and the two conversion destinations", () => {
+  assert.match(html, /THE AI AGENT/);
+  assert.match(html, /THAT SAVES YOU/);
+  assert.match(html, /\$500/);
+  assert.match(html, /EVERY NIGHT/);
+  assert.match(html, /Download for macOS/);
+  assert.match(html, /github\.com\/tumblecat44\/godofsessions/);
 });
 
-test("keeps local readiness honest instead of declaring every agent runnable", () => {
-  const supportTable = html.match(/<div class="support-table"[\s\S]*?<\/div>\s*<p class="support-footnote"/)?.[0] ?? "";
-  const providerRows = [...supportTable.matchAll(/<strong role="cell">([^<]+)<\/strong>/g)].map((match) => match[1]);
-
-  assert.deepEqual(providerRows, agents);
-  assert.equal((supportTable.match(/Ready · Setup · Blocked/g) ?? []).length, agents.length);
-  assert.match(html, /Ready requires a local\s+installation, sign-in, and proven safe task access/);
-  assert.match(localizedCopy, /로컬 설치, 로그인, 안전한 작업 접근/);
-  assert.doesNotMatch(html, /Via Hermes|Codex app-server|Claude Code, and Hermes still own execution/);
-  assert.doesNotMatch(localizedCopy, /Hermes 경유|Codex 또는 Claude의 공식 로그인/);
+test("puts a product surface directly inside the hero", () => {
+  const hero = html.match(/<section class="hero"[\s\S]*?<div class="provider-strip"/)?.[0] ?? "";
+  assert.match(hero, /app-window/);
+  assert.match(hero, /NIGHT PORTFOLIO/);
+  assert.match(hero, /MORNING REVIEW/);
+  assert.match(hero, /PRODUCT UI · SYNTHETIC DATA/);
 });
 
-test("separates Morrow conversation access from Overnight agent preparation", () => {
-  assert.match(html, /Connecting Morrow's conversation model is separate from preparing\s+Overnight agents/);
-  assert.match(localizedCopy, /Morrow의 대화 모델 연결과 야간 에이전트 준비는 서로 별개/);
+test("names the four official execution routes without declaring universal readiness", () => {
+  for (const agent of agents) assert.match(html, new RegExp(agent, "i"));
+  assert.doesNotMatch(html, /Cursor|Hermes|OpenClaw/i);
+  assert.match(html, /ready agents only/i);
+  assert.match(html, /Nothing starts until you approve/i);
+});
+
+test("uses only the requested open-source trust line and explains the reference value below it", () => {
+  assert.match(html, /OPEN SOURCE · MIT LICENSED/);
+  assert.match(html, /A reference value, not a guarantee/);
+  assert.ok(html.indexOf("WHY $500?") > html.indexOf("OPEN SOURCE."));
+  assert.doesNotMatch(html, /local[- ]first/i);
 });

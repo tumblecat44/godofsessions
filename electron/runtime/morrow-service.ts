@@ -82,7 +82,7 @@ When inspecting agent session stores such as .grok or .claude, focus on primary 
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
 Today's local-agent inventory is available to a private exact-coverage Overnight evaluator. It is background context, not proof that you opened another app live.
 When the user asks for overnight work, call prepare_overnight with only requestKind and a concise userGoal. Do not read files, run commands, inspect the repository, or synthesize candidate arrays merely to prepare this read-only recommendation. The evaluator, not this conversation, must account for every discovered session and preserve every independent task.
-The returned Overnight set may contain runnable, clarify, and no-run purposes across seven official execution routes: Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw. Provider readiness and containment evidence, not the source session's provider, determine whether a route can run. Preserve every independent candidate. Include every runnable purpose that fits the proven 450-minute schedule; when the complete runnable set does not fit, keep every candidate in an editable selection instead of choosing an arbitrary item count or silently discarding work. A portfolio with no runnable candidate is valid and must create no execution authority.
+The returned Overnight set may contain runnable, clarify, and no-run purposes across four official execution routes: Claude Code, Codex, Grok Build, and Pi Agent. Cursor, Hermes, and OpenClaw sessions may remain read-only evidence but are never execution routes. Provider readiness and containment evidence, not the source session's provider, determine whether a route can run. Preserve every independent candidate. Include every runnable purpose that fits the proven 450-minute schedule; when the complete runnable set does not fit, keep every candidate in an editable selection instead of choosing an arbitrary item count or silently discarding work. A portfolio with no runnable candidate is valid and must create no execution authority.
 Show the returned recommendation and direct the user to Overnight to include or exclude purposes, choose only prepared alternative providers, review the recomputed schedule, and approve that exact set once. Never start it from chat; a chat message such as “돌리기” is not execution approval and chat has no execution tool.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
@@ -167,8 +167,8 @@ function specialToolResult(content: unknown, getOvernightPlan: (planId: string) 
         type: "tool",
         toolName: "prepare_overnight",
         text: count > 0
-          ? `${count}개 Overnight 후보의 포트폴리오 추천을 준비했습니다. Orchestrate에서 항목과 실행기를 편집한 뒤 정확한 포트폴리오를 승인하세요.`
-          : "오늘 밤 실행할 Overnight 후보가 없습니다. 판단 근거는 Orchestrate에서 확인할 수 있습니다.",
+          ? `${count}개 Overnight 후보의 포트폴리오 추천을 준비했습니다. Overnight에서 항목과 실행기를 편집한 뒤 정확한 포트폴리오를 승인하세요.`
+          : "오늘 밤 실행할 Overnight 후보가 없습니다. 판단 근거는 Overnight에서 확인할 수 있습니다.",
         state: "done",
       };
     }
@@ -681,7 +681,7 @@ export class MorrowService {
             planId: recommendation.plan?.id,
             editRequired: recommendation.editRequired,
             candidates: recommendation.assessment.candidates.map(publicPortfolioCandidate),
-            next: "Review and edit this exact portfolio in Orchestrate before approving it once.",
+            next: "Review and edit this exact portfolio in Overnight before approving it once.",
           }) }],
           details: {
             disposition: recommendation.assessment.disposition,
@@ -1043,8 +1043,8 @@ export class MorrowService {
           this.sendEvent({
             type: "error",
             message: this.language === "ko"
-              ? "재시작 중 Overnight 포트폴리오를 안전하게 복구하거나 종료하지 못했습니다. Orchestrate에서 상태를 확인해 주세요."
-              : "Morrow could not safely recover or close an Overnight portfolio after restart. Check its state in Orchestrate.",
+              ? "재시작 중 Overnight 포트폴리오를 안전하게 복구하거나 종료하지 못했습니다. Overnight에서 상태를 확인해 주세요."
+              : "Morrow could not safely recover or close an Overnight portfolio after restart. Check its state in Overnight.",
           });
         }
       });

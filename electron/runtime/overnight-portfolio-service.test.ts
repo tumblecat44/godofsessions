@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { LocalSessionProvider, OvernightExecutionProvider } from "../../src/shared/contracts";
 import type { DailyContextSession, DailyContextSnapshot } from "./daily-context";
 import { OvernightPortfolioLedger } from "./overnight-portfolio-ledger";
 import type { OvernightPortfolioCandidateProposal, OvernightPortfolioProposal } from "./overnight-portfolio-recommendation";
@@ -29,7 +29,7 @@ import { containmentWriteScopesSha256 } from "./overnight-provider-containment";
 import { overnightWorkspaceResultMetadata, type OvernightWorkspaceSnapshot } from "./overnight-worktree";
 
 const temporaryDirectories: string[] = [];
-const PROVIDERS = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"] satisfies LocalSessionProvider[];
+const PROVIDERS = ["codex", "claude", "grok", "pi"] satisfies OvernightExecutionProvider[];
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -127,7 +127,7 @@ function context(sessions: DailyContextSession[]): DailyContextSnapshot {
   };
 }
 
-function candidate(id: string, provider: LocalSessionProvider, sessionIds: string[]): OvernightPortfolioCandidateProposal {
+function candidate(id: string, provider: OvernightExecutionProvider, sessionIds: string[]): OvernightPortfolioCandidateProposal {
   return {
     stableKey: id,
     origin: "continuation",
@@ -152,7 +152,7 @@ function candidate(id: string, provider: LocalSessionProvider, sessionIds: strin
 }
 
 function syntheticContainment(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   root: string,
   runtimeDirectory: string,
   executable?: string,
@@ -502,7 +502,7 @@ describe("Overnight portfolio service", () => {
       candidates: [
         candidate("first", "codex", firstSessions.map((item) => item.id)),
         candidate("second", "grok", ["grok:second"]),
-        candidate("third", "hermes", ["hermes:third"]),
+        candidate("third", "pi", ["hermes:third"]),
       ],
     };
     const { service, workspace, dataDir } = await setupService();
@@ -510,7 +510,7 @@ describe("Overnight portfolio service", () => {
     const result = await service.recommend(proposal, context(sessions));
     expect(result.assessment.candidates.filter((item) => item.disposition === "recommend")).toHaveLength(3);
     expect(result.plan).toMatchObject({ id: "plan_20260826", peakParallelism: 3 });
-    expect(result.plan?.items.map((item) => item.provider)).toEqual(["codex", "grok", "hermes"]);
+    expect(result.plan?.items.map((item) => item.provider)).toEqual(["codex", "grok", "pi"]);
     expect(result.plan?.items[0].selectedSessions).toHaveLength(30);
     expect(workspace.allocate).not.toHaveBeenCalled();
     expect((await service.snapshotAssessments())[0]).toMatchObject({
@@ -913,7 +913,7 @@ describe("Overnight portfolio service", () => {
     const first = candidate("first", "codex", ["codex:first"]);
     const second = candidate("second", "grok", ["grok:second"]);
     second.dependencyKeys = ["first"];
-    const third = candidate("third", "hermes", ["hermes:third"]);
+    const third = candidate("third", "pi", ["hermes:third"]);
     const daily = context(sessions);
     daily.prompt = rawMarker;
     const setup = await setupService();
@@ -956,7 +956,7 @@ describe("Overnight portfolio service", () => {
       candidates: [
         candidate("first", "codex", ["codex:first"]),
         candidate("second", "grok", ["grok:second"]),
-        candidate("third", "hermes", ["hermes:third"]),
+        candidate("third", "pi", ["hermes:third"]),
       ],
     };
     const setup = await setupService();
@@ -975,7 +975,7 @@ describe("Overnight portfolio service", () => {
     expect(run.items.map((item) => item.providerReceiptId)).toEqual([
       "codex:native:first",
       "grok:native:second",
-      "hermes:native:third",
+      "pi:native:third",
     ]);
     expect(run.items[0].resultMetadata).toEqual({
       executionRoot: "/private/worktrees/plan_20260826/first",
@@ -1012,7 +1012,7 @@ describe("Overnight portfolio service", () => {
       candidates: [
         candidate("first", "codex", ["codex:first"]),
         candidate("second", "grok", ["grok:second"]),
-        candidate("third", "hermes", ["hermes:third"]),
+        candidate("third", "pi", ["hermes:third"]),
       ],
     };
     const setup = await setupService();
@@ -1032,7 +1032,7 @@ describe("Overnight portfolio service", () => {
     expect(edited.plan?.expiresAt).toBe("2026-08-26T18:06:00.000Z");
     expect(edited.plan?.items.map((item) => [item.id, item.provider])).toEqual([
       ["first", "claude"],
-      ["third", "hermes"],
+      ["third", "pi"],
     ]);
     expect(await readFile(originalPath, "utf8")).toBe(originalBefore);
 
@@ -1051,7 +1051,7 @@ describe("Overnight portfolio service", () => {
     const restarted = new OvernightPortfolioService({ ...setup.options, ledger: replacementLedger });
     await expect(restarted.start(prepared.plan!.id)).rejects.toThrow(/교체/u);
     const run = await restarted.start(edited.plan!.id);
-    expect(run.items.map((item) => item.provider)).toEqual(["claude", "hermes"]);
+    expect(run.items.map((item) => item.provider)).toEqual(["claude", "pi"]);
     expect(await restarted.snapshotPlans()).toEqual([]);
   });
 
@@ -1223,7 +1223,7 @@ describe("Overnight portfolio service", () => {
       candidates: [
         candidate("first", "codex", ["codex:first"]),
         second,
-        candidate("third", "hermes", ["hermes:third"]),
+        candidate("third", "pi", ["hermes:third"]),
       ],
     };
     const setup = await setupService();
@@ -1246,7 +1246,7 @@ describe("Overnight portfolio service", () => {
     await expect(setup.service.replan(prepared.selectionId!, { includedItemIds: ["second"] }))
       .rejects.toThrow(/의존 작업/u);
 
-    const readiness = readyProviders().map((item) => item.provider === "openclaw"
+    const readiness = readyProviders().map((item) => item.provider === "pi"
       ? { ...item, status: "blocked" as const, reason: "containment unavailable" }
       : item);
     const blockedService = new OvernightPortfolioService({
@@ -1258,7 +1258,7 @@ describe("Overnight portfolio service", () => {
     });
     await expect(blockedService.replan(prepared.selectionId!, {
       includedItemIds: ["first", "second"],
-      providerByItemId: { first: "openclaw" },
+      providerByItemId: { first: "pi" },
     })).rejects.toThrow(/준비되지|containment/u);
     expect((await setup.options.ledger.readEditableDraft(prepared.selectionId!))?.items.map((entry) => entry.item.id))
       .toEqual(["first", "second"]);
@@ -1331,8 +1331,8 @@ describe("Overnight portfolio service", () => {
       candidates: [
         candidate("first", "codex", ["codex:first"]),
         candidate("second", "grok", ["grok:second"]),
-        candidate("third", "hermes", ["hermes:third"]),
-        candidate("fourth", "openclaw", ["openclaw:fourth"]),
+        candidate("third", "pi", ["hermes:third"]),
+        candidate("fourth", "claude", ["openclaw:fourth"]),
       ],
     };
     const setup = await setupService();
@@ -1380,8 +1380,8 @@ describe("Overnight portfolio service", () => {
     expect(run.items).toEqual([
       expect.objectContaining({ itemId: "first", status: "completed", providerReceiptId: "codex:old:first" }),
       expect.objectContaining({ itemId: "second", status: "failed", error: expect.stringMatching(/다시 시작/u) }),
-      expect.objectContaining({ itemId: "third", status: "completed", providerReceiptId: "hermes:native:third" }),
-      expect.objectContaining({ itemId: "fourth", status: "completed", providerReceiptId: "openclaw:native:fourth" }),
+      expect.objectContaining({ itemId: "third", status: "completed", providerReceiptId: "pi:native:third" }),
+      expect.objectContaining({ itemId: "fourth", status: "completed", providerReceiptId: "claude:native:fourth" }),
     ]);
   });
 

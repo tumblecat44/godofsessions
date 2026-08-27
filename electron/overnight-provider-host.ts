@@ -9,7 +9,7 @@ const PARENT_CHECK_INTERVAL_MS = 1_000;
 const PROVIDER_GROUP_CHECK_INTERVAL_MS = 50;
 const DEADLINE_EXIT_CODE = 124;
 const GUARD_FAILURE_EXIT_CODE = 125;
-const PROVIDERS = new Set(["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"]);
+const PROVIDERS = new Set(["codex", "claude", "grok", "pi"]);
 
 const [runId, parentPidText, expectedWorkerPath, expectedRequestPath, deadlineAt, root, providerId, executable, ...providerArguments] = process.argv.slice(2);
 const parentPid = Number(parentPidText);

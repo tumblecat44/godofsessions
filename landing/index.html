@@ -1,409 +1,102 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Morrow turns today's work across seven local AI agents into one editable, approval-gated overnight portfolio with itemized evidence by morning."
-    />
-    <meta name="theme-color" content="#0a101b" />
-    <meta property="og:title" content="God of Sessions — Stop being the queue." />
-    <meta
-      property="og:description"
-      content="Seven AI agents. One editable night portfolio. One exact approval, itemized evidence by morning."
-    />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://morrow.vibejason.com/" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="God of Sessions — Stop being the queue." />
-    <meta
-      name="twitter:description"
-      content="Seven AI agents. One editable night portfolio. One exact approval, itemized evidence by morning."
-    />
-    <link rel="canonical" href="https://morrow.vibejason.com/" />
-    <link
-      rel="preload"
-      href="/instrument-sans.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link rel="icon" href="/app-icon.svg" type="image/svg+xml" />
-    <title>God of Sessions — Stop being the queue</title>
-  </head>
-  <body>
-    <a class="skip-link" href="#main">Skip to content</a>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="The AI agent that saves you $500 every night. Open source and MIT licensed." />
+  <meta name="theme-color" content="#08090b" />
+  <meta property="og:title" content="God of Sessions — $500 every night" />
+  <meta property="og:description" content="The AI agent that saves you $500 every night. Open source and MIT licensed." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://morrow.vibejason.com/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://morrow.vibejason.com/" />
+  <link rel="preload" href="/instrument-sans.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="icon" href="/app-icon.svg" type="image/svg+xml" />
+  <title>God of Sessions — $500 every night</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="#main" aria-label="God of Sessions home"><img src="/app-icon.svg" alt="" width="30" height="30" /><strong>GOD OF SESSIONS</strong></a>
+    <nav aria-label="Primary navigation"><a href="#night">The night</a><a href="#open-source">Open source</a><a href="https://github.com/tumblecat44/godofsessions" target="_blank" rel="noreferrer">GitHub ↗</a></nav>
+    <a class="header-download" href="/download/mac" download data-download-link data-artifact-href="/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg">Download for macOS <span>↓</span></a>
+  </header>
 
-    <header class="site-header">
-      <a class="brand" href="#" aria-label="God of Sessions home">
-        <img src="/app-icon.svg" alt="" width="32" height="32" />
-        <span>
-          <strong>God of Sessions</strong>
-          <small>Morrow · night control</small>
-        </span>
-      </a>
-      <nav aria-label="Primary">
-        <a href="#proof" data-copy="navProof">Proof</a>
-        <a href="#system" data-copy="navSystem">How it works</a>
-        <a href="#support" data-copy="navSupport">Support</a>
-      </nav>
-      <div class="header-actions">
-        <button class="language-toggle" type="button" aria-label="한국어로 보기">
-          <span class="is-active" data-language-label="en">EN</span>
-          <span aria-hidden="true">/</span>
-          <span data-language-label="ko">한국어</span>
-        </button>
-        <a class="header-cta" href="#install" data-copy="headerCta">
-          Download for Mac <span aria-hidden="true">↘</span>
-        </a>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title"><span>THE AI AGENT</span><span>THAT SAVES YOU</span><strong>$500</strong><span>EVERY NIGHT</span></h1>
+        <div class="hero-actions">
+          <a class="button button--primary" href="/download/mac" download data-download-link data-artifact-href="/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg">Download for macOS <span>↓</span></a>
+          <a class="button button--secondary" href="https://github.com/tumblecat44/godofsessions" target="_blank" rel="noreferrer">View on GitHub <span>↗</span></a>
+        </div>
+        <p class="open-note">OPEN SOURCE · MIT LICENSED</p>
       </div>
-    </header>
 
-    <main id="main">
-      <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <p class="eyebrow" data-copy="heroEyebrow">
-            THE NIGHT WATCH FOR YOUR AI SESSIONS
-          </p>
-          <h1 id="hero-title" data-copy="heroTitle">
-            STOP BEING<br />
-            <em>THE QUEUE.</em>
-          </h1>
-          <p class="hero-promise" data-copy="heroPromise">
-            Today's agent work. <strong>One approved overnight portfolio.</strong>
-          </p>
-          <p class="hero-support" data-copy="heroSupport">
-            Morrow brings work from Codex, Claude Code, Grok Build, Cursor,
-            Pi Agent, Hermes, and OpenClaw into one portfolio you can edit,
-            approve once, and review item by item in the morning.
-          </p>
-          <div class="hero-actions">
-            <a class="button button--primary" href="#install" data-copy="primaryCta">
-              Download for Mac
-            </a>
-            <a class="button button--line" href="#proof" data-copy="secondaryCta">
-              Watch the 22-second proof
-            </a>
-          </div>
-          <p class="hero-trust" data-copy="heroTrust">
-            Edit every item · approve the exact portfolio once · wake to evidence for each result
-          </p>
-        </div>
-
-        <div class="hero-demo" id="proof" aria-labelledby="proof-title">
-          <div class="proof-stage">
-            <div class="proof-stage__chrome" aria-hidden="true">
-              <div><span></span><span></span><span></span></div>
-              <p>God of Sessions · Morrow Watch</p>
-              <i>REAL APP UI · DEMO DATA</i>
+      <div class="app-window" aria-label="God of Sessions product preview">
+        <div class="app-titlebar"><div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div><span>God of Sessions</span><span class="fixture-label">PRODUCT UI · SYNTHETIC DATA</span></div>
+        <div class="app-shell">
+          <aside class="app-sidebar">
+            <div class="app-brand"><img src="/app-icon.svg" alt="" width="26" height="26" /><strong>Morrow</strong></div>
+            <button class="new-conversation" type="button">＋ New conversation</button><p>TONIGHT</p>
+            <button class="conversation is-active" type="button"><span>Overnight launch prep</span><small>now</small></button>
+            <button class="conversation" type="button"><span>Release readiness</span><small>18m</small></button>
+            <button class="conversation" type="button"><span>Onboarding polish</span><small>1h</small></button>
+            <div class="sidebar-footer"><span class="status-dot"></span> 4 routes checked</div>
+          </aside>
+          <section class="morrow-panel" aria-label="Morrow conversation">
+            <header><div><small>CONVERSATION</small><strong>Overnight launch prep</strong></div><button type="button">•••</button></header>
+            <div class="message message--user">Make tonight useful. Finish the release blockers and leave me a review for the morning.</div>
+            <div class="message message--morrow"><span class="morrow-mark">M</span><div><strong>Morrow</strong><p>I found three independent outcomes that fit tonight's window. I kept anything requiring your judgment out.</p></div></div>
+            <div class="portfolio-card">
+              <div class="portfolio-head"><div><small>NIGHT PORTFOLIO</small><strong>3 outcomes · ready for approval</strong></div><span>07:30 deadline</span></div>
+              <article><i class="route route--codex">C</i><div><strong>Fix the release packaging regression</strong><small>Codex · verify packaged app launch</small></div><em>READY</em></article>
+              <article><i class="route route--claude">A</i><div><strong>Repair first-run onboarding copy</strong><small>Claude Code · run component tests</small></div><em>READY</em></article>
+              <article><i class="route route--pi">P</i><div><strong>Audit installer and release notes</strong><small>Pi Agent · report remaining risks</small></div><em>READY</em></article>
+              <div class="portfolio-footer"><span>Exact items, routes, scope, and deadline will be frozen.</span><button type="button">Approve tonight →</button></div>
             </div>
-            <div class="proof-media">
-              <div class="demo-fallback is-visible">
-                <img src="/app-icon.svg" alt="God of Sessions operator mark" width="256" height="256" />
-                <p data-copy="videoFallback">Synthetic product demonstration media is being prepared for the public release.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="proof-controls">
-            <p data-copy="proofControlLabel">JUMP TO THE DECISION</p>
-            <div role="group" aria-label="Product demo chapters">
-              <button type="button" data-video-time="2" aria-pressed="true">
-                <span>01</span><strong data-copy="chapterOne">Gather today's unfinished work</strong>
-              </button>
-              <button type="button" data-video-time="5">
-                <span>02</span><strong data-copy="chapterTwo">Edit the agent portfolio</strong>
-              </button>
-              <button type="button" data-video-time="11.9">
-                <span>03</span><strong data-copy="chapterThree">Approve the exact portfolio once</strong>
-              </button>
-              <button type="button" data-video-time="14.6">
-                <span>04</span><strong data-copy="chapterFour">Review evidence item by item</strong>
-              </button>
-            </div>
-          </div>
-
-          <div class="demo-caption">
-            <p class="eyebrow" id="proof-title" data-copy="proofEyebrow">
-              THE ACTUAL PRODUCT · 22 SECONDS
-            </p>
-            <p data-copy="proofNote">
-              No concept UI. This cut uses the real English product surface and
-              clearly marks bundled fixture data.
-            </p>
-          </div>
+          </section>
+          <aside class="review-panel">
+            <header><small>MORNING REVIEW</small><strong>Wednesday, 07:30</strong></header><div class="review-score"><span>3/3</span><small>outcomes verified</small></div>
+            <article><span class="check">✓</span><div><strong>Packaging fixed</strong><small>12 checks passed · receipt attached</small></div></article>
+            <article><span class="check">✓</span><div><strong>Onboarding repaired</strong><small>8 tests passed · diff ready</small></div></article>
+            <article><span class="check">✓</span><div><strong>Release audited</strong><small>2 risks documented · no blocker</small></div></article>
+            <button class="review-button" type="button">Open full review</button>
+          </aside>
         </div>
-
-        <div class="provider-rail" aria-label="AI agents checked for local Overnight readiness">
-          <span>CODEX</span>
-          <i></i>
-          <span>CLAUDE CODE</span>
-          <i></i>
-          <span>GROK BUILD</span>
-          <i></i>
-          <span>CURSOR</span>
-          <i></i>
-          <span>PI AGENT</span>
-          <i></i>
-          <span>HERMES</span>
-          <i></i>
-          <span>OPENCLAW</span>
-        </div>
-      </section>
-
-      <section class="thesis" aria-labelledby="thesis-title">
-        <p class="eyebrow" data-copy="thesisEyebrow">THE REAL BOTTLENECK</p>
-        <h2 id="thesis-title" data-copy="thesisTitle">
-          Your agents did not stop.<br />
-          <em>Your attention fragmented.</em>
-        </h2>
-        <div class="thesis-grid">
-          <p data-copy="thesisBody">
-            The hard part is no longer starting another agent. It is remembering
-            which project matters, which subscription still has room, which run
-            is safe, and which decision only you can make.
-          </p>
-          <blockquote data-copy="thesisQuote">
-            Morrow turns that operator tax into one bedtime portfolio you choose.
-          </blockquote>
-        </div>
-      </section>
-
-      <section class="decision-system" id="system" aria-labelledby="system-title">
-        <header class="section-heading">
-          <p class="eyebrow" data-copy="systemEyebrow">RECOMMEND → EDIT → APPROVE → REVIEW</p>
-          <h2 id="system-title" data-copy="systemTitle">
-            One portfolio.<br />
-            Every item accounted for.
-          </h2>
-        </header>
-
-        <div class="decision-list">
-          <article class="decision decision--amber">
-            <div class="decision-number">01</div>
-            <div>
-              <span data-copy="decisionOneEyebrow">CHOOSE THE PORTFOLIO</span>
-              <h3 data-copy="decisionOneTitle">Keep, remove, or question every recommendation.</h3>
-              <p data-copy="decisionOneBody">
-                Morrow gathers today's unfinished work, keeps related sessions
-                together, and shows why each item can run, needs an answer, or stays out.
-              </p>
-            </div>
-            <code>EDIT FIRST</code>
-          </article>
-          <article class="decision decision--teal">
-            <div class="decision-number">02</div>
-            <div>
-              <span data-copy="decisionTwoEyebrow">APPROVE ONCE</span>
-              <h3 data-copy="decisionTwoTitle">Exact items, agents, and boundaries become one approval.</h3>
-              <p data-copy="decisionTwoBody">
-                Only ready agents and the work you kept enter the night portfolio.
-                The approved set, project boundaries, and morning deadline stay fixed.
-              </p>
-            </div>
-            <code>ONE EXACT APPROVAL</code>
-          </article>
-          <article class="decision decision--paper">
-            <div class="decision-number">03</div>
-            <div>
-              <span data-copy="decisionThreeEyebrow">MORNING REVIEW</span>
-              <h3 data-copy="decisionThreeTitle">Wake up to evidence for every item.</h3>
-              <p data-copy="decisionThreeBody">
-                Morning Review keeps each result, verification, failure, and
-                remaining question separate so you can decide what is truly done.
-              </p>
-            </div>
-            <code>RECEIPT + DIFF</code>
-          </article>
-        </div>
-      </section>
-
-      <section class="boundary" aria-labelledby="boundary-title">
-        <div class="boundary-copy">
-          <p class="eyebrow" data-copy="boundaryEyebrow">YOUR NIGHT, EXACTLY AS APPROVED</p>
-          <h2 id="boundary-title" data-copy="boundaryTitle">
-            Edit the portfolio.<br />
-            <em>Approve it once.</em>
-          </h2>
-          <p data-copy="boundaryBody">
-            Choose which recommendations stay, see which agents are Ready,
-            Setup, or Blocked, then approve the exact items, project boundaries,
-            and time window. Any change creates a new approval.
-          </p>
-        </div>
-        <div class="approval-spec" aria-label="Exact approval boundary">
-          <div class="approval-spec__top">
-            <span>EXACT PORTFOLIO · ONE APPROVAL</span>
-            <i>EDITED BY YOU</i>
-          </div>
-          <dl>
-            <div><dt data-copy="specRoute">Items</dt><dd>3 selected tasks</dd></div>
-            <div><dt data-copy="specWorkspace">Agents</dt><dd>ready agents only</dd></div>
-            <div><dt data-copy="specPermission">Project boundaries</dt><dd>3 approved roots</dd></div>
-            <div><dt data-copy="specNetwork">Allowed changes</dt><dd>approved scope only</dd></div>
-            <div><dt data-copy="specBudget">Maximum window</dt><dd>7h 30m</dd></div>
-            <div><dt data-copy="specDeadline">Morning deadline</dt><dd>07:30</dd></div>
-          </dl>
-          <p data-copy="specFooter">Change one field → approve again.</p>
-        </div>
-      </section>
-
-      <section class="support" id="support" aria-labelledby="support-title">
-        <header class="section-heading">
-          <p class="eyebrow" data-copy="supportEyebrow">LOCAL READINESS, SHOWN HONESTLY</p>
-          <h2 id="support-title" data-copy="supportTitle">
-            Seven agents.<br />
-            Each gets a local status.
-          </h2>
-          <p data-copy="supportIntro">
-            Orchestrate checks each agent on this Mac before it can enter a
-            runnable portfolio, and shows the reason behind its status.
-          </p>
-        </header>
-        <div class="support-table" role="table" aria-label="Provider support">
-          <div class="support-row support-row--head" role="row">
-            <span role="columnheader" data-copy="providerColumn">Agent</span>
-            <span role="columnheader" data-copy="discoverColumn">Portfolio</span>
-            <span role="columnheader" data-copy="capacityColumn">Status in Orchestrate</span>
-            <span role="columnheader" data-copy="runColumn">Morning evidence</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">Codex</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">Claude Code</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">Grok Build</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">Cursor</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">Pi Agent</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">Hermes</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-          <div class="support-row" role="row">
-            <strong role="cell">OpenClaw</strong><span class="route" role="cell" data-copy="byRoute">When ready</span><span class="route" role="cell" data-copy="metadata">Ready · Setup · Blocked</span><span class="yes" role="cell" data-copy="yes">Per item</span>
-          </div>
-        </div>
-        <p class="support-footnote" data-copy="supportFootnote">
-          A listed agent is not automatically runnable. Ready requires a local
-          installation, sign-in, and proven safe task access. Setup or Blocked
-          always includes the reason in Orchestrate.
-        </p>
-      </section>
-
-      <section class="install" id="install" aria-labelledby="install-title">
-        <div class="install-visual">
-          <span class="install-orbit install-orbit--one"></span>
-          <span class="install-orbit install-orbit--two"></span>
-          <img src="/app-icon.svg" alt="" width="256" height="256" loading="lazy" />
-        </div>
-        <div class="install-copy">
-          <p class="eyebrow" data-copy="installEyebrow">MACOS · APPLE SILICON + INTEL</p>
-          <h2 id="install-title" data-copy="installTitle">
-            Put Morrow on<br />
-            <em>the night shift.</em>
-          </h2>
-          <p data-copy="installBody">
-            Download the Apple-notarized Universal DMG, drag God of Sessions to
-            Applications, then connect Morrow for conversation and check each
-            Overnight agent separately in Orchestrate.
-          </p>
-          <div class="install-actions">
-            <a
-              class="button button--paper"
-              href="/download/mac"
-              download
-              data-download-link
-              data-artifact-href="/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg"
-              data-copy="downloadCta"
-            >
-              Download for Mac
-            </a>
-            <a class="text-link" href="#install-notes" data-copy="installNotesCta">
-              Read install notes ↓
-            </a>
-          </div>
-          <p class="artifact-state" data-artifact-state data-copy="artifactPending">
-            Local artifact pending final verification.
-          </p>
-        </div>
-      </section>
-
-      <section class="install-notes" id="install-notes" aria-labelledby="notes-title">
-        <div>
-          <p class="eyebrow">INSTALL BOUNDARY</p>
-          <h2 id="notes-title" data-copy="notesTitle">Before you install</h2>
-        </div>
-        <ol>
-          <li data-copy="noteOne">
-            The Universal DMG is Developer ID signed, Apple notarized, ticket
-            stapled, and verified with Gatekeeper.
-          </li>
-          <li data-copy="noteTwo">
-            Connecting Morrow's conversation model is separate from preparing
-            Overnight agents. Orchestrate checks every agent on this Mac.
-          </li>
-          <li data-copy="noteThree">
-            You can edit the recommended portfolio first. Only its exact items
-            and agents can start after one expiring approval.
-          </li>
-        </ol>
-      </section>
-
-      <section class="faq" aria-labelledby="faq-title">
-        <header class="section-heading">
-          <p class="eyebrow">FAQ</p>
-          <h2 id="faq-title" data-copy="faqTitle">Short answers before bedtime.</h2>
-        </header>
-        <div class="faq-list">
-          <details>
-            <summary data-copy="faqOneQuestion">Is this another coding agent?</summary>
-            <p data-copy="faqOneAnswer">
-              No. Morrow coordinates Codex, Claude Code, Grok Build, Cursor,
-              Pi Agent, Hermes, and OpenClaw as one night portfolio. Each selected
-              agent still provides its own run receipt.
-            </p>
-          </details>
-          <details>
-            <summary data-copy="faqTwoQuestion">Does it act without asking?</summary>
-            <p data-copy="faqTwoAnswer">
-              You edit the recommended items first. Only the exact portfolio you
-              approve once can run, and that approval expires.
-            </p>
-          </details>
-          <details>
-            <summary data-copy="faqThreeQuestion">Does all data stay local?</summary>
-            <p data-copy="faqThreeAnswer">
-              The control plane stays local. Prompts and execution still use the
-              provider route you choose, under that provider's data terms.
-            </p>
-          </details>
-          <details>
-            <summary data-copy="faqFourQuestion">Does Morning Review prove the code is correct?</summary>
-            <p data-copy="faqFourAnswer">
-              Morning Review separates each agent's receipt, verification,
-              remaining risk, and failed or unfinished work. You review correctness.
-            </p>
-          </details>
-        </div>
-      </section>
-    </main>
-
-    <footer>
-      <div class="brand">
-        <img src="/app-icon.svg" alt="" width="28" height="28" />
-        <span><strong>God of Sessions</strong><small>Morrow · night control</small></span>
       </div>
-      <p data-copy="footerCopy">Tonight's agent work. One approved portfolio. Evidence by morning.</p>
-      <p>© 2026 Vibe Jason</p>
-    </footer>
+    </section>
 
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+    <div class="provider-strip" aria-label="Supported agents"><span>CLAUDE CODE</span><i></i><span>CODEX</span><i></i><span>GROK BUILD</span><i></i><span>PI AGENT</span></div>
+
+    <section class="night" id="night" aria-labelledby="night-title">
+      <header class="section-intro"><p>ONE NIGHT · FOUR MOMENTS</p><h2 id="night-title">Tell it tonight.<br />Review it tomorrow.</h2></header>
+      <div class="timeline">
+        <article><time>10:42 PM</time><span>01</span><h3>Tell Morrow what needs to be done.</h3><p>Talk normally. Morrow finds the work that can become a useful morning outcome.</p></article>
+        <article><time>10:47 PM</time><span>02</span><h3>Approve the exact night portfolio.</h3><p>Edit every item and route. Nothing starts until you approve the frozen portfolio.</p></article>
+        <article><time>02:18 AM</time><span>03</span><h3>Agents execute and verify the work.</h3><p>Independent items run in parallel. Conflicting work stays ordered and contained.</p></article>
+        <article><time>07:30 AM</time><span>04</span><h3>Review every outcome and its evidence.</h3><p>Results, verification, failures, and remaining risks stay separate and visible.</p></article>
+      </div>
+    </section>
+
+    <section class="outcomes" aria-labelledby="outcomes-title">
+      <div class="outcome-copy"><p>ONE NIGHT</p><h2 id="outcomes-title">Four finished outcomes.<br />Zero mystery.</h2></div>
+      <div class="outcome-list"><article><span>01</span><strong>Checkout regression fixed</strong><small>Codex · verified</small></article><article><span>02</span><strong>Onboarding flow redesigned</strong><small>Claude Code · verified</small></article><article><span>03</span><strong>Integration tests added</strong><small>Grok Build · verified</small></article><article><span>04</span><strong>Provider failure audited</strong><small>Pi Agent · reviewed</small></article></div>
+    </section>
+
+    <section class="approval" aria-labelledby="approval-title">
+      <div><p>THE LINE YOU CONTROL</p><h2 id="approval-title">Nothing runs<br />until you say so.</h2><span>Change one item → approve again.</span></div>
+      <div class="approval-receipt"><header><span>EXACT PORTFOLIO</span><em>WAITING FOR YOU</em></header><dl><div><dt>Outcomes</dt><dd>3 selected</dd></div><div><dt>Routes</dt><dd>ready agents only</dd></div><div><dt>Scope</dt><dd>approved boundaries</dd></div><div><dt>Deadline</dt><dd>07:30</dd></div></dl><button type="button">Approve tonight →</button></div>
+    </section>
+
+    <section class="open-source" id="open-source" aria-labelledby="open-title"><p>BUILT IN PUBLIC</p><h2 id="open-title">OPEN SOURCE.<br />MIT LICENSED.</h2><a href="https://github.com/tumblecat44/godofsessions" target="_blank" rel="noreferrer">Explore the source on GitHub <span>↗</span></a></section>
+
+    <section class="method" aria-labelledby="method-title"><div><p>WHY $500?</p><h2 id="method-title">Five useful hours.<br />One reference rate.</h2></div><div class="equation"><span>5 hours</span><i>×</i><span>$100/hour</span><i>=</i><strong>$500</strong></div><p class="method-note">A reference value, not a guarantee. Actual value depends on the work completed, the agents used, and your verification.</p></section>
+
+    <section class="final-cta" id="install" aria-labelledby="install-title"><p>PUT TONIGHT TO WORK.</p><h2 id="install-title">Wake up<br />$500 ahead.</h2><div class="hero-actions"><a class="button button--primary" href="/download/mac" download data-download-link data-artifact-href="/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg">Download for macOS <span>↓</span></a><a class="button button--secondary" href="https://github.com/tumblecat44/godofsessions" target="_blank" rel="noreferrer">View on GitHub <span>↗</span></a></div><p class="artifact-state" data-artifact-state>Open Source · MIT Licensed</p></section>
+  </main>
+  <footer><a class="brand" href="#main"><img src="/app-icon.svg" alt="" width="26" height="26" /><strong>GOD OF SESSIONS</strong></a><p>Open Source · MIT Licensed</p><p>© 2026 Vibe Jason</p></footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>

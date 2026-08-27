@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { LocalSessionProvider, OvernightExecutionProvider } from "../../src/shared/contracts";
 import {
   overnightProviderAdapterIdentity,
   overnightProviderAdapterInvocation,
@@ -17,7 +17,7 @@ import {
   type OvernightReadinessCommandRunner,
 } from "./overnight-provider-readiness";
 
-const PROVIDERS = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"] satisfies LocalSessionProvider[];
+const PROVIDERS = ["codex", "claude", "grok", "pi"] satisfies OvernightExecutionProvider[];
 
 function harness(overrides: {
   installed?: Partial<Record<LocalSessionProvider, string>>;
@@ -164,7 +164,7 @@ describe("Overnight provider readiness", () => {
     expect(command).not.toHaveBeenCalled();
   });
 
-  it("retains all seven routes while using stored containment evidence", async () => {
+  it("retains all four execution routes while using stored containment evidence", async () => {
     const { service, command, verifyContainment } = harness();
     const results = await service.inspectAll();
 
@@ -174,7 +174,7 @@ describe("Overnight provider readiness", () => {
     expect(results.find((result) => result.provider === "pi")).toMatchObject({ status: "blocked" });
     expect(results.find((result) => result.provider === "codex")?.executable).toBe("/exact/codex");
     expect(results.find((result) => result.provider === "pi")?.executable).toBeUndefined();
-    expect(verifyContainment).toHaveBeenCalledTimes(6);
+    expect(verifyContainment).toHaveBeenCalledTimes(3);
     expect(command).not.toHaveBeenCalled();
     expect(overnightReadyProviderRecord(results)).toEqual(Object.fromEntries(PROVIDERS.map((provider) => [provider, provider === "codex" || provider === "claude"])));
   });
@@ -184,7 +184,7 @@ describe("Overnight provider readiness", () => {
     const { service, verifyContainment } = harness({ installed: { codex: "/exact/codex" }, command });
     const results = await service.inspectAll();
 
-    expect(results.find((result) => result.provider === "cursor")).toMatchObject({ status: "setup_required", executable: undefined });
+    expect(results.find((result) => result.provider === "grok")).toMatchObject({ status: "setup_required", executable: undefined });
     expect(results.find((result) => result.provider === "pi")).toMatchObject({ status: "blocked" });
     expect(verifyContainment).toHaveBeenCalledTimes(1);
     expect(command).not.toHaveBeenCalled();
@@ -218,7 +218,7 @@ describe("Overnight provider readiness", () => {
   it("keeps ACP routes blocked until the app-owned allow-once policy is proven", async () => {
     const { service, command, verifyContainment } = harness({ acpPolicy: false });
 
-    for (const provider of ["grok", "cursor", "hermes", "openclaw"] as const) {
+    for (const provider of ["grok"] as const) {
       await expect(service.inspect(provider)).resolves.toMatchObject({ status: "blocked", checks: { containment: "blocked" } });
     }
     expect(verifyContainment).not.toHaveBeenCalled();

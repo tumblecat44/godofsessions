@@ -26,7 +26,9 @@ The V2 alpha includes:
 - an ephemeral brief of useful user/final-assistant text from local Claude,
   Codex, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw sessions for one
   absolute calendar date
-- a provider-neutral Overnight portfolio across those seven routes: Morrow
+- a provider-neutral Overnight portfolio with four execution routes—Claude
+  Code, Codex, Grok Build, and Pi Agent—while Cursor, Hermes, and OpenClaw
+  sessions remain read-only evidence: Morrow
   recommends work, the user edits the included items and ready providers, one
   exact single-use approval starts conflict- and capacity-aware scheduling, and
   Morning Review preserves itemized results and provider receipts
@@ -80,8 +82,9 @@ deadline. Every detached provider worker is prohibited from spawning its own
 subagents. Restart recovery preserves completed item receipts and resumes or
 honestly terminates only the unfinished work.
 
-The seven advertised execution routes are Codex, Claude Code, Grok Build,
-Cursor, Pi Agent, Hermes, and OpenClaw. A route is shown as Ready only when its
+The four advertised execution routes are Claude Code, Codex, Grok Build, and
+Pi Agent. Cursor, Hermes, and OpenClaw may still appear in historical session
+evidence, but cannot be selected for a new Overnight. A route is shown as Ready only when its
 local installation, authentication, and every OS containment and capability
 canary required by that route have been verified. Missing proof is shown as
 Setup or Blocked with its reason; an installed command or successful help probe

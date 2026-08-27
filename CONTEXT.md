@@ -57,8 +57,9 @@ _Avoid_: permanent blanket access, hidden confirmation
 **Overnight**
 A provider-neutral portfolio prepared by Morrow from memory-only, redacted
 briefs for every discovered local AI session on one absolute local calendar
-date. Its seven advertised routes are Codex, Claude Code, Grok Build, Cursor,
-Pi Agent, Hermes, and OpenClaw.
+date. Its four advertised execution routes are Claude Code, Codex, Grok Build,
+and Pi Agent. Cursor, Hermes, and OpenClaw sessions may remain read-only
+evidence, but they are not selectable execution routes.
 
 Morrow returns every candidate as `recommend`, `clarify`, or `no_run` and keeps
 independent work as separate items. The user can include or exclude recommended
@@ -88,7 +89,7 @@ is prohibited from spawning its own subagents.
 A route is `Ready` only when its local installation, authentication, and every
 OS containment and capability canary required by that route are verified. A
 missing or failed proof is `Setup` or `Blocked` with the reason visible in
-Orchestrate. A successful executable lookup, help command, or authentication
+Overnight. A successful executable lookup, help command, or authentication
 probe alone is not execution readiness. Unsupported provider limitations stay
 visible and fail closed.
 

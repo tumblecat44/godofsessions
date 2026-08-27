@@ -9,8 +9,10 @@ God of Sessions V2 is an MIT-licensed, local-first Electron home for
 conversations with Morrow. Electron embeds the Pi Agent SDK directly. Morrow is
 conversation-first and uses file or command tools only when the user explicitly
 asks for work that needs them. The app has one fixed launch root and no project
-picker. Overnight is a provider-neutral portfolio across seven official local
-routes: Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw.
+picker. Overnight is a provider-neutral portfolio across four official local
+execution routes: Claude Code, Codex, Grok Build, and Pi Agent. Cursor, Hermes,
+and OpenClaw may contribute read-only historical session evidence, but cannot
+be selected for new Overnight execution.
 Morrow recommends work, the user edits the portfolio, and one exact single-use
 approval freezes its items before conflict- and capacity-aware scheduling.
 Morning Review preserves evidence for every item. Each provider worker is

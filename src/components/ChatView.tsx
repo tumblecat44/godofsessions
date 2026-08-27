@@ -213,7 +213,7 @@ function OvernightPlanCard({ plan, ko, authoritySuspended, onReview, onReprepare
       <header><span><i />OVERNIGHT PLAN</span><em role="status">{runnable ? (ko ? "승인 대기" : "AWAITING YOUR SAY") : expired && plan.status === "draft" ? (ko ? "만료됨" : "EXPIRED") : plan.status.toUpperCase()}</em></header>
       <div className="overnight-plan-card__body">
         <h3>{plan.title}</h3>
-        <p className="overnight-plan-card__summary">{ko ? "정확한 실행 계약이 준비됐어요. 세부 내용은 관리 화면에서 한 번에 검토합니다." : "The exact execution contract is ready. Review its full details together in Orchestrate."}</p>
+        <p className="overnight-plan-card__summary">{ko ? "정확한 실행 계약이 준비됐어요. 세부 내용은 Overnight에서 한 번에 검토합니다." : "The exact execution contract is ready. Review its full details together in Overnight."}</p>
         <div className="overnight-plan-brief">
           <div><span>{ko ? "작업자" : "Worker"}</span><strong>{plan.executorLabel}</strong></div>
           <div><span>{ko ? "시간" : "Window"}</span><strong>{duration}</strong></div>

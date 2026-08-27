@@ -10,6 +10,7 @@ import type {
   DailySessionSummary,
   LocalSessionProvider,
   MorrowEvent,
+  OvernightExecutionProvider,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
 } from "../../src/shared/contracts";
@@ -137,7 +138,7 @@ function portfolioFixture(options: {
   const stoppedRunIds: string[] = [];
   const resumedRunIds: string[] = [];
   const redispatchedItemIds: string[] = [];
-  const providers: LocalSessionProvider[] = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"];
+  const providers: OvernightExecutionProvider[] = ["codex", "claude", "grok", "pi"];
   const routes = providers.map((provider) => ({
     provider,
     label: provider,
@@ -146,7 +147,7 @@ function portfolioFixture(options: {
   }));
   const readiness = {
     inspectAll: async () => routes.map((route) => ({ ...route, executable: `/synthetic/${route.provider}`, checks: [] })),
-    inspect: async (provider: LocalSessionProvider) => ({
+    inspect: async (provider: OvernightExecutionProvider) => ({
       provider,
       label: provider,
       status: "ready" as const,
@@ -680,7 +681,7 @@ describe("Morrow service dogfood", () => {
     const longSessionId = `codex:${"x".repeat(320)}`;
     const largeCandidates = Array.from({ length: 31 }, (_, index) => portfolioCandidate(`candidate-${index + 1}`, {
       sessionIds: index === 0 ? Array.from({ length: 31 }, (__, sessionIndex) => `codex:session-${sessionIndex + 1}`) : [],
-      preferredProvider: (["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"] as const)[index % 7],
+      preferredProvider: (["codex", "claude", "grok", "pi"] as const)[index % 4],
     }));
     const overnightContextEvaluator = async ({ context, requestKind, userGoal }: EvaluateOvernightContextInput): Promise<OvernightContextEvaluationResult> => {
       let candidates: OvernightPortfolioCandidateProposal[];
@@ -853,7 +854,8 @@ describe("Morrow service dogfood", () => {
     expect(observedSystemPrompt).toContain("A portfolio with no runnable candidate is valid");
     expect(observedSystemPrompt).toContain("Do not read files, run commands, inspect the repository, or synthesize candidate arrays");
     expect(observedSystemPrompt).toContain("preserve every independent task");
-    expect(observedSystemPrompt).toContain("Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw");
+    expect(observedSystemPrompt).toContain("Claude Code, Codex, Grok Build, and Pi Agent");
+    expect(observedSystemPrompt).toContain("Cursor, Hermes, and OpenClaw sessions may remain read-only evidence");
     expect(observedSystemPrompt).toContain("instead of choosing an arbitrary item count or silently discarding work");
     expect(observedSystemPrompt).toContain("direct the user to Overnight");
     expect(observedSystemPrompt).toContain("“돌리기” is not execution approval");
@@ -918,7 +920,7 @@ describe("Morrow service dogfood", () => {
     await expect(readFile(join(root, "preparation-must-stay-read-only.txt"), "utf8")).rejects.toThrow();
 
     await service.sendMessage("Overnight를 준비해줘. 실행은 하지 마.");
-    expect(JSON.stringify(service.currentConversation().messages)).toContain("Orchestrate에서 항목과 실행기를 편집");
+    expect(JSON.stringify(service.currentConversation().messages)).toContain("Overnight에서 항목과 실행기를 편집");
     const overnightSnapshot = (await service.bootstrap()).orchestration;
     expect(overnightSnapshot.portfolioPlans).toHaveLength(1);
     expect(overnightSnapshot.portfolioAssessments?.[0]).toMatchObject({
@@ -926,7 +928,7 @@ describe("Morrow service dogfood", () => {
       candidates: [{ stableKey: "night-check", disposition: "recommend", preferredProvider: "codex" }],
     });
     expect(overnightSnapshot.providerRoutes?.map((route) => route.provider)).toEqual([
-      "codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw",
+      "codex", "claude", "grok", "pi",
     ]);
     expect(verifyProvider).not.toHaveBeenCalled();
     const verifiedSnapshot = await service.verifyOvernightProvider("codex");
@@ -992,7 +994,7 @@ describe("Morrow service dogfood", () => {
     expect(portfolio.getLastProposal()?.candidates).toHaveLength(31);
     expect(portfolio.getLastProposal()?.candidates[0].sessionIds).toHaveLength(31);
     expect(new Set(portfolio.getLastProposal()?.candidates.map((candidate) => candidate.preferredProvider))).toEqual(new Set([
-      "codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw",
+      "codex", "claude", "grok", "pi",
     ]));
     expect((await service.orchestrationSnapshot()).portfolioAssessments?.[0].candidates).toHaveLength(31);
 
@@ -1021,7 +1023,7 @@ describe("Morrow service dogfood", () => {
     expect(resumedBootstrap.conversations.some((item) => item.path === saved.path)).toBe(true);
     const restored = await resumed.openConversation(saved.path!);
     expect(JSON.stringify(restored.messages)).toContain("Dogfood Room");
-    expect(JSON.stringify(restored.messages)).toContain("Orchestrate에서 항목과 실행기를 편집");
+    expect(JSON.stringify(restored.messages)).toContain("Overnight에서 항목과 실행기를 편집");
     expect(restored.thinkingLevel).toBe("high");
     expect(restored.model).toMatchObject({ provider: "morrow-dogfood" });
     expect(resumeEvents.some((event) => event.type === "notice")).toBe(false);
