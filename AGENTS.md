@@ -57,6 +57,16 @@ forbidden from spawning its own subagents. It is not a cloud service.
   more purpose cards, each with one Kanban. Do not add singular legacy or
   stored-history compatibility branches.
 
+## Pull request requirements
+
+- UI changes require visible evidence in the PR body that a stranger can verify
+  without cloning:
+  - **Before still**: Screenshot of the action state before the change.
+  - **After still**: Screenshot of the result state after the change.
+  - **GIF or video**: Short recording showing the interaction flow.
+- Media must be embedded in the PR body, not just referenced as local paths.
+- Gitignored local files do not count as evidence.
+
 ## Working rules
 
 - Read the relevant ADRs and `CONTEXT.md` before changing orchestration or
