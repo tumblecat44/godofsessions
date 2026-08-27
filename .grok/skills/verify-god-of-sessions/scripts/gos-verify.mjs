@@ -13,6 +13,8 @@ const skillRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = process.env.GOS_VERIFY_REPO ?? join(skillRoot, "../../..");
 const verifyHome = process.env.GOS_VERIFY_HOME ?? join(tmpdir(), "godofsessions-verify");
 const currentPath = join(verifyHome, "current");
+// ponytail: durable evidence path inside repo survives cleanup and /tmp wipe
+const durableEvidenceRoot = process.env.GOS_VERIFY_EVIDENCE ?? join(repoRoot, ".verify", "evidence");
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -56,7 +58,8 @@ async function launch() {
   await assertBuilt();
   const runId = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const sandbox = await mkdtemp(join(verifyHome, `${runId}-`));
-  const evidenceDir = join(verifyHome, runId);
+  // ponytail: use durable evidence path inside repo when available
+  const evidenceDir = join(durableEvidenceRoot, runId);
   await mkdir(evidenceDir, { recursive: true });
   const session = {
     runId,
@@ -173,32 +176,90 @@ async function doctor(session) {
 }
 
 async function drive(feature) {
-  if (feature !== "github-identity-gate") {
-    throw new Error(`drive recipes in this helper: github-identity-gate (got ${feature ?? "none"})`);
+  const supported = ["github-identity-gate", "tonight-home"];
+  if (!supported.includes(feature)) {
+    throw new Error(`drive recipes in this helper: ${supported.join(", ")} (got ${feature ?? "none"})`);
   }
   const owned = !(await exists(currentPath));
   if (owned) await launch();
   const session = await loadSession();
   try {
     await doctor(session);
-    await rpc(session, { op: "wait", role: "heading", name: "/GitHub/" });
-    await rpc(session, { op: "wait", role: "button", name: "/GitHub/" });
-    const body = await rpc(session, { op: "text" });
-    if (!/APP IDENTITY · NO REPOSITORY ACCESS|앱 사용자 확인 · 저장소 접근 없음/u.test(body)) {
-      throw new Error("GitHub identity eyebrow is missing");
+    if (feature === "github-identity-gate") {
+      await driveGithubIdentityGate(session);
+    } else if (feature === "tonight-home") {
+      await driveTonightHome(session);
     }
-    if ((await rpc(session, { op: "count", role: "button", name: "Ask Morrow" })) !== 0) {
-      throw new Error("Ask Morrow leaked past the identity gate");
-    }
-    if ((await rpc(session, { op: "count", role: "button", name: "Overnight" })) !== 0) {
-      throw new Error("Overnight leaked past the identity gate");
-    }
-    const shot = await rpc(session, { op: "screenshot", name: "github-identity-gate" });
-    const ariaPath = await rpc(session, { op: "aria", name: "github-identity-gate" });
-    process.stdout.write(`drive github-identity-gate pass\nscreenshot ${shot}\naria ${ariaPath}\n`);
   } finally {
     if (owned) await cleanup(session);
   }
+}
+
+async function driveGithubIdentityGate(session) {
+  await rpc(session, { op: "wait", role: "heading", name: "/GitHub/" });
+  await rpc(session, { op: "wait", role: "button", name: "/GitHub/" });
+  const body = await rpc(session, { op: "text" });
+  if (!/APP IDENTITY · NO REPOSITORY ACCESS|앱 사용자 확인 · 저장소 접근 없음/u.test(body)) {
+    throw new Error("GitHub identity eyebrow is missing");
+  }
+  if ((await rpc(session, { op: "count", role: "button", name: "Ask Morrow" })) !== 0) {
+    throw new Error("Ask Morrow leaked past the identity gate");
+  }
+  if ((await rpc(session, { op: "count", role: "button", name: "Overnight" })) !== 0) {
+    throw new Error("Overnight leaked past the identity gate");
+  }
+  const shot = await rpc(session, { op: "screenshot", name: "github-identity-gate" });
+  const ariaPath = await rpc(session, { op: "aria", name: "github-identity-gate" });
+  process.stdout.write(`drive github-identity-gate pass\nscreenshot ${shot}\naria ${ariaPath}\n`);
+}
+
+async function driveTonightHome(session) {
+  const body = await rpc(session, { op: "text" });
+
+  // Check if we're past the GitHub gate
+  const hasGithubGate = /Start with GitHub|GitHub로 계속/u.test(body);
+  if (hasGithubGate) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-blocked-github" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-blocked-github" });
+    process.stdout.write(`tonight-home INCONCLUSIVE\nprecondition: GitHub identity required\nobserved: GitHub gate is showing\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  // Check for the "Connect a conversation model" state - this is the key failure case
+  const noModelConnected = /Connect a conversation model to see tonight's 3 cards/u.test(body);
+  if (noModelConnected) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-no-model" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-no-model" });
+    process.stdout.write(`tonight-home RED\nprecondition: no conversation model connected\nobserved: "Connect a conversation model to see tonight's 3 cards"\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Check if Ask Morrow is visible (we're past onboarding)
+  const hasAskMorrow = (await rpc(session, { op: "count", role: "button", name: "Ask Morrow" })) > 0;
+  if (!hasAskMorrow) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-onboarding" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-onboarding" });
+    process.stdout.write(`tonight-home INCONCLUSIVE\nprecondition: onboarding not complete\nobserved: Ask Morrow button not visible\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  // Check for tonight cards region
+  const hasTonightRegion = /Tonight's overnights/u.test(body);
+  if (!hasTonightRegion) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-no-cards" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-no-cards" });
+    process.stdout.write(`tonight-home RED\nobserved: Tonight's overnights region not found\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Success: we have tonight cards visible
+  const shot = await rpc(session, { op: "screenshot", name: "tonight-home" });
+  const ariaPath = await rpc(session, { op: "aria", name: "tonight-home" });
+  process.stdout.write(`tonight-home pass\nscreenshot ${shot}\naria ${ariaPath}\n`);
 }
 
 async function screenshot(name) {
