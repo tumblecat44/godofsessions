@@ -80,7 +80,7 @@ export class PermissionPolicy {
       const rawPath = stringField(call.input, ["path", "file_path"]);
       return this.isInsideRoot(rawPath)
         ? { kind: "allow" }
-        : { kind: "deny", reason: "Morrow tools stay inside the fixed execution root." };
+        : { kind: "deny", reason: "Morrow file tools stay inside the file working folder." };
     }
 
     if (WRITE_TOOLS.has(call.toolName)) {
@@ -92,7 +92,7 @@ export class PermissionPolicy {
         kind: "ask",
         scope,
         rememberable: insideRoot,
-        title: insideRoot ? "Morrow가 파일을 바꾸려고 해요" : "실행 루트 밖의 파일이에요",
+        title: insideRoot ? "Morrow가 파일을 바꾸려고 해요" : "파일 작업 폴더 밖의 파일이에요",
         detail: rawPath || "대상 파일",
       };
     }
