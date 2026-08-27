@@ -99,6 +99,23 @@ function App() {
   const canPrepareOvernight = Boolean(state?.models.some((model) => connectedProviderIds.has(model.provider)));
   const hasReadyOvernightWorker = Boolean(state?.orchestration.providerRoutes.some((route) => route.status === "ready"));
 
+  const connectProvider = async (providerId: string, authType: "api_key" | "oauth") => {
+    setProviderError(undefined);
+    try {
+      await bridge.connectProvider({ providerId, authType });
+      await refresh();
+    } catch (reason) {
+      if (!isAuthenticationCancelled(reason)) {
+        setProviderError(providerFailureMessage(stateRef.current?.language ?? interfaceLanguage));
+      }
+    } finally {
+      transitionState(() => {
+        setAuthPrompt(undefined);
+        setAuthNotice(undefined);
+      });
+    }
+  };
+
   const prepareOvernight = useCallback(async () => {
     const current = stateRef.current;
     if (!current || overnightPreparationInFlight.current) return;
@@ -308,20 +325,7 @@ function App() {
           state={state}
           error={providerError}
           onLanguageChange={(language) => updateStateWithoutTransition(() => setState((current) => current ? { ...current, language } : current))}
-          onConnect={async (providerId, authType) => {
-            setProviderError(undefined);
-            try {
-              await bridge.connectProvider({ providerId, authType });
-              await refresh();
-            } catch (reason) {
-              if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
-            } finally {
-              transitionState(() => {
-                setAuthPrompt(undefined);
-                setAuthNotice(undefined);
-              });
-            }
-          }}
+          onConnect={connectProvider}
           onComplete={completeOnboarding}
         />
         {authSurfaces}
@@ -381,7 +385,10 @@ function App() {
         onOpenSettings={() => changeView("settings")}
         tonightPlan={state.orchestration.portfolioPlans.find((plan) => plan.status === "draft" && Date.now() < Date.parse(plan.expiresAt) && !state.orchestration.portfolioRuns.some((run) => run.planId === plan.id))}
         tonightPreparing={overnightPreparing}
+        hasReadyOvernightWorker={hasReadyOvernightWorker}
         onStartTonight={startOvernightPortfolio}
+        onConnect={connectProvider}
+        onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}
       />
       <OvernightView
         hidden={view !== "overnight"}
@@ -395,6 +402,7 @@ function App() {
           await prepareOvernight();
         }}
         onOpenSettings={() => changeView("settings")}
+        onOpenChat={() => changeView("chat")}
         onStartPortfolio={startOvernightPortfolio}
         onStopPortfolio={async (runId) => {
           setOvernightError(undefined);
@@ -408,20 +416,7 @@ function App() {
           githubProfile={githubAuth.profile}
           githubOffline={githubAuth.offline}
           error={providerError}
-          onConnect={async (providerId, authType) => {
-            setProviderError(undefined);
-            try {
-              await bridge.connectProvider({ providerId, authType });
-              await refresh();
-            } catch (reason) {
-              if (!isAuthenticationCancelled(reason)) setProviderError(providerFailureMessage(state.language));
-            } finally {
-              transitionState(() => {
-                setAuthPrompt(undefined);
-                setAuthNotice(undefined);
-              });
-            }
-          }}
+          onConnect={connectProvider}
           onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}
           onVerifyOvernightProvider={async (provider) => {
             const orchestration = await bridge.verifyOvernightProvider(provider);

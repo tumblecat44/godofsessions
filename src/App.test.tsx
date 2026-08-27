@@ -300,8 +300,33 @@ describe("App Overnight integration", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
-    expect(await screen.findByRole("heading", { name: "Finish Overnight setup" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Put an Overnight CLI on this Mac" })).toBeInTheDocument();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
+  });
+
+  it("puts conversation-model setup on Ask Morrow when Overnight CLIs are already installed", async () => {
+    const initial = state({
+      providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready", verification: { state: "verified", canVerify: true } }],
+      }),
+    });
+    const connect = vi.fn(async () => undefined);
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      connectProvider: connect,
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Connect a conversation model to see tonight’s 3 cards" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign in with your Anthropic/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
+    expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
+    expect(screen.getByRole("heading", { name: "Connect a conversation model to see tonight’s 3 cards" })).toBeInTheDocument();
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 

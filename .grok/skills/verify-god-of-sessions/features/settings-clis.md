@@ -6,9 +6,9 @@ Settings reports the four official Overnight CLIs by looking on PATH. Sign-in ha
 
 - `four-cli-cards` lists Claude Code, Codex, Grok Build, and Pi Agent.
 - `path-status` shows Installed or Not installed from PATH, not from a canary.
-- `login-hint` shows the official login command (`claude auth login`, `codex login`, `grok`, bundled Pi).
+- `login-hint` shows the official login command (`claude auth login`, `codex login`, `grok`, bundled Pi) and a `Copy command` button for those commands.
 - `no-safety-check` has no `Safety check` button.
-- `no-overnight-oauth` has no Connect/OAuth control on the Overnight CLI cards. Morrow's separate AI services section may still have provider login.
+- `no-overnight-oauth` has no Connect/OAuth control on the Overnight CLI cards. Morrow's separate conversation-model section may still have provider login.
 
 ## How to get to it (user POV)
 
@@ -23,7 +23,7 @@ Preconditions:
 - Doctor passes.
 - Synthetic routes include all four providers.
 
-- **Open Settings.** Run `node .grok/skills/verify-god-of-sessions/scripts/drive.mjs settings-clis`. Choose Settings. Heading `Overnight CLIs` is visible. Copy says the screen only checks PATH.
+- **Open Settings.** Run `node .grok/skills/verify-god-of-sessions/scripts/drive.mjs settings-clis`. Choose Settings. Heading `Overnight CLIs` is visible. Copy says Installed means the command is on PATH.
 - **Four names.** Body text contains `Claude Code`, `Codex`, `Grok Build`, and `Pi Agent`.
 - **No theater.** `Safety check` count is 0. `OS containment` count is 0. `canary` count is 0.
 - **No Overnight OAuth.** Inside the Overnight CLIs section, there is no `Connect` button.
@@ -31,6 +31,6 @@ Preconditions:
 
 ## Gotchas
 
-- Morrow's `AI services` block is chat login. Do not treat a Claude chat OAuth button as Overnight CLI OAuth.
+- Morrow's `Morrow conversation model` block is chat login. Do not treat a Claude chat OAuth button as Overnight CLI OAuth.
 - `Installed` means the binary resolved. It is not a public security claim.
 - Cursor, Hermes, and OpenClaw must not appear as Overnight CLI cards.

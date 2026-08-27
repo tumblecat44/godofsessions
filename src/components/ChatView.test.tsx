@@ -33,7 +33,7 @@ describe("Morrow first-use conversation", () => {
 
     expect(screen.getByRole("heading", { name: "What shall we untangle together?" })).toBeInTheDocument();
     expect(screen.getByText(/only reach for files or commands when you ask/i)).toBeInTheDocument();
-    expect(screen.getByText(/If tonight's cards are wrong, say so here/i)).toBeInTheDocument();
+    expect(screen.getByText(/You can simply talk/i)).toBeInTheDocument();
     expect(screen.queryByText(/select project/i)).not.toBeInTheDocument();
     // Conversation history now lives in the app sidebar, not in the chat view.
     expect(screen.queryByText("New conversation")).not.toBeInTheDocument();
@@ -221,10 +221,37 @@ describe("Morrow first-use conversation", () => {
     render(<ChatView state={briefingState} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "What shall we untangle together?" })).toBeInTheDocument();
-    expect(screen.getByText(/If tonight's cards are wrong, say so here/)).toBeInTheDocument();
+    expect(screen.getByText(/You can simply talk/)).toBeInTheDocument();
     expect(screen.queryByText("UI repair")).not.toBeInTheDocument();
     expect(screen.queryByText("Research")).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "Tools used today" })).not.toBeInTheDocument();
+  });
+
+  it("puts conversation-model setup in the tonight region when Morrow has no voice", () => {
+    const onConnect = vi.fn(async () => undefined);
+    render(
+      <ChatView
+        state={{
+          ...state,
+          providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
+        }}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        onApproval={vi.fn()}
+        onModel={vi.fn()}
+        onThinking={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onStartTonight={vi.fn(async () => undefined)}
+        onConnect={onConnect}
+        onDisconnect={vi.fn(async () => undefined)}
+        hasReadyOvernightWorker
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Tonight's overnights" })).toHaveTextContent("Connect a conversation model to see tonight’s 3 cards");
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with your Anthropic/ }));
+    expect(onConnect).toHaveBeenCalledWith("anthropic", "oauth");
+    expect(screen.queryByRole("button", { name: /Start / })).not.toBeInTheDocument();
   });
 
   it("does not expose an immediate-send overnight action when no model is connected", () => {

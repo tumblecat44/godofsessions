@@ -7,7 +7,7 @@ import {
   MessageCircle,
   ShieldCheck,
 } from "lucide-react";
-import morrowImage from "../assets/morrow.svg";
+import morrowImage from "../assets/morrow.png";
 import { cn } from "../lib/cn";
 import { transitionState } from "../lib/motion";
 import type { AppLanguage, BootstrapState } from "../shared/contracts";

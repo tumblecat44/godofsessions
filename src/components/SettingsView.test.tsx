@@ -54,7 +54,7 @@ describe("Settings user-facing safety contract", () => {
     expect(screen.getByText(/outside it require separate confirmation every time/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "What leaves this Mac" })).toBeInTheDocument();
     expect(screen.getByText(/sent to the selected AI service/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "AI services" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Morrow conversation model" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Replay welcome" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Confirmation before changes" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/local first|local by default|Pi SDK|Pi runtime/i);
@@ -90,9 +90,37 @@ describe("Settings user-facing safety contract", () => {
       expect(screen.getByText(provider)).toBeInTheDocument();
     }
     expect(document.body).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
-    expect(screen.getAllByText("Not installed")).toHaveLength(4);
+    expect(screen.getAllByText(/Not installed/)).toHaveLength(4);
     expect(screen.getByText("codex login")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy codex login" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Safety check" })).not.toBeInTheDocument();
     expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("keeps the conversation-model list short and does not use the same mark for every provider", () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      id: `provider-${index}`,
+      name: ["Anthropic", "OpenAI", "Google", "xAI", "OpenRouter", "GitHub Copilot", "Mistral", "Groq"][index],
+      connected: false,
+      authTypes: ["api_key" as const],
+    }));
+    render(
+      <SettingsView
+        state={{ ...state, providers: many }}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={vi.fn(async () => undefined)}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByText("Anthropic")).toBeInTheDocument();
+    expect(screen.queryByText("OpenRouter")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show 2 more providers" })).toBeInTheDocument();
+    const marks = [...document.querySelectorAll(".provider-card__mark .state-icon-swap__inactive")].map((node) => node.textContent);
+    expect(new Set(marks).size).toBeGreaterThan(1);
   });
 });

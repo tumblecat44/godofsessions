@@ -79,4 +79,38 @@ describe("TonightPlan", () => {
 
     expect(onStart).toHaveBeenCalledWith("plan-1", ["two"]);
   });
+
+  it("puts conversation-model connect controls in the tonight region when Morrow has no voice", () => {
+    const onConnect = vi.fn(async () => undefined);
+    render(
+      <TonightPlan
+        language="en"
+        onStart={vi.fn(async () => undefined)}
+        needsConversationModel
+        state={{
+          rootName: "synthetic-root",
+          onboardingComplete: true,
+          providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
+          models: [],
+          conversations: [],
+          thinkingLevel: "medium",
+          language: "en",
+          orchestration: {
+            context: { date: "2026-08-27", timeZone: "UTC", generatedAt: "2026-08-27T00:00:00.000Z", totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "test" },
+            providerRoutes: [],
+            portfolioAssessments: [],
+            portfolioPlans: [],
+            portfolioRuns: [],
+          },
+        }}
+        onConnect={onConnect}
+        onDisconnect={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Connect a conversation model to see tonight’s 3 cards" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with your Anthropic/ }));
+    expect(onConnect).toHaveBeenCalledWith("anthropic", "oauth");
+    expect(screen.queryByRole("button", { name: /Start / })).not.toBeInTheDocument();
+  });
 });

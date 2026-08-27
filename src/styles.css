@@ -98,11 +98,10 @@
   .morrow-thinking i { animation: none; }
 }
 
-.morrow-empty { min-height: 100%; width: min(900px,100%); margin: 0 auto; display: grid; grid-template-columns: minmax(260px,.86fr) minmax(320px,1fr); align-items: center; gap: clamp(30px,6vw,80px); }
-.morrow-empty__portrait { aspect-ratio: 1; display: grid; place-items: center; position: relative; border: 1px solid var(--etched-edge-soft); border-radius: 50%; background: radial-gradient(circle, rgba(231,168,77,.08), transparent 65%); }
-.morrow-empty__portrait::before { content:""; width: 82%; height:82%; position:absolute; border:1px dashed rgba(231,168,77,.16); border-radius:50%; }
-.morrow-empty__portrait img { width: 110%; height:110%; z-index:1; object-fit:contain; filter:drop-shadow(0 24px 30px rgba(0,0,0,.34)); }
-.morrow-empty__portrait span { padding: 6px 9px; position:absolute; right:1%; bottom:12%; z-index:2; color:var(--signal-amber); border:1px solid rgba(231,168,77,.24); border-radius:20px; background:rgba(12,15,21,.9); font:650 10px "JetBrains Mono Variable",monospace; letter-spacing:.1em; }
+.morrow-empty { min-height: 100%; width: min(900px,100%); margin: 0 auto; display: grid; grid-template-columns: minmax(220px,.72fr) minmax(320px,1fr); align-items: center; gap: clamp(24px,5vw,64px); }
+.morrow-empty__portrait { display: grid; place-items: center; position: relative; }
+.morrow-empty__portrait img { width: min(100%,360px); height: auto; z-index:1; object-fit:contain; filter:drop-shadow(0 24px 30px rgba(0,0,0,.34)); }
+.morrow-empty__portrait span { padding: 6px 9px; position:absolute; right:4%; bottom:8%; z-index:2; color:var(--signal-amber); border:1px solid rgba(231,168,77,.24); border-radius:20px; background:rgba(12,15,21,.9); font:650 10px "JetBrains Mono Variable",monospace; letter-spacing:.1em; }
 .morrow-empty__portrait i { width:5px;height:5px;margin-right:6px;display:inline-block;border-radius:50%;background:var(--signal-amber); }
 .morrow-empty h1 { margin: 12px 0; font-size: clamp(30px,3vw,48px); font-weight: 490; letter-spacing: -.05em; line-height:1.04; }
 .morrow-empty p { max-width: 500px; margin:0; color:var(--ink-tertiary); font-size:13px; line-height:1.75; }
@@ -9462,12 +9461,7 @@ button:active:not(:disabled) {
 }
 
 .overnight-view[hidden] {
-  display: block;
-  visibility: hidden;
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  view-transition-name: none;
+  display: none;
 }
 
 .overnight-head {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, FilePenLine, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
-import morrowImage from "../assets/morrow.svg";
+import morrowImage from "../assets/morrow.png";
 import { cn } from "../lib/cn";
 import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightPortfolioPlanSummary, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
@@ -25,7 +25,10 @@ interface ChatViewProps {
   onOpenSettings(): void;
   tonightPlan?: OvernightPortfolioPlanSummary;
   tonightPreparing?: boolean;
+  hasReadyOvernightWorker?: boolean;
   onStartTonight?(planId: string, itemIds: string[]): Promise<void>;
+  onConnect?(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
+  onDisconnect?(providerId: string): Promise<void>;
 }
 const FOLLOW_BOTTOM_THRESHOLD = 80;
 
@@ -120,6 +123,12 @@ export function ChatView(props: ChatViewProps) {
               language={props.state.language}
               disabled={Boolean(props.conversation?.busy)}
               onStart={props.onStartTonight}
+              needsConversationModel={!canChat}
+              needsOvernightWorker={props.hasReadyOvernightWorker === false}
+              state={props.state}
+              onConnect={props.onConnect}
+              onDisconnect={props.onDisconnect}
+              onOpenSettings={props.onOpenSettings}
             />
           </div>
         )}
@@ -130,7 +139,7 @@ export function ChatView(props: ChatViewProps) {
         }}>
           {props.error && <FriendlyError message={props.error} ko={ko} />}
           {props.notice && <div className="chat-notice" role="status"><Sparkles size={15} /><span>{props.notice}</span></div>}
-          {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} warnings={props.state.orchestration.context.warnings} /> : props.conversation.messages.map((message) => (
+          {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} warnings={props.state.orchestration.context.warnings} hasTonight={Boolean(props.onStartTonight)} /> : props.conversation.messages.map((message) => (
             <article className={cn(
               `morrow-message morrow-message--${message.role}`,
               "my-3",
@@ -167,7 +176,9 @@ export function ChatView(props: ChatViewProps) {
         {!canChat && (
           <Surface className="chat-provider-needed mx-auto mb-3 grid w-[min(820px,calc(100%-48px))] grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-3 border-teal/20 bg-teal/[0.035] px-4 py-3 shadow-none" aria-live="polite">
             <ShieldCheck size={17} />
-            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{ko ? "설정에서 공급자에 연결하면 이 입력 내용은 그대로 보존돼요." : "Connect a provider in Settings. Anything you typed here will stay put."}</small></span>
+            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{props.onStartTonight
+              ? (ko ? "위 오늘 밤 칸에서 하나를 연결하세요. 입력한 글은 그대로 남아요." : "Connect one in the Tonight section above. Anything you typed here will stay put.")
+              : (ko ? "설정에서 공급자에 연결하면 이 입력 내용은 그대로 보존돼요." : "Connect a provider in Settings. Anything you typed here will stay put.")}</small></span>
             <Button size="sm" onClick={props.onOpenSettings}><Settings size={14} />{ko ? "모델 연결" : "Connect model"}</Button>
           </Surface>
         )}
@@ -192,14 +203,16 @@ function approvalMemoryLabel(approval: ApprovalRequest, ko: boolean) {
   return ko ? "이 대화 동안 이 승인 기억" : "Remember this approval for this conversation";
 }
 
-function FriendlyEmpty({ ko, warnings }: { ko: boolean; warnings: string[] }) {
+function FriendlyEmpty({ ko, warnings, hasTonight }: { ko: boolean; warnings: string[]; hasTonight: boolean }) {
   return (
     <div className="morrow-empty">
       <div className="morrow-empty__portrait"><img src={morrowImage} alt={ko ? "작은 불빛 곁에서 기다리는 Morrow" : "Morrow waiting beside a small light"} /><span><i />MORROW IS HERE</span></div>
       <div>
-        <span className="eyebrow">A QUIET PLACE TO THINK</span>
+        <span className="eyebrow">MORROW</span>
         <h1>{ko ? "무엇부터 같이 풀어볼까요?" : "What shall we untangle together?"}</h1>
-        <p>{ko ? "그냥 이야기해도 좋아요. 위 카드가 별로면 여기서 말해 주세요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. If tonight's cards are wrong, say so here. I only reach for files or commands when you ask, and I pause before changing anything."}</p>
+        <p>{hasTonight
+          ? (ko ? "그냥 이야기해도 좋아요. 오늘 밤 카드가 보이면 읽고 시작을 누르거나, 틀렸으면 여기서 말해 주세요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. When tonight’s cards are visible, read them and press Start, or tell me here if they are wrong. I only reach for files or commands when you ask, and I pause before changing anything.")
+          : (ko ? "그냥 이야기해도 좋아요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. I only reach for files or commands when you ask, and I pause before changing anything.")}</p>
         {warnings.length > 0 && <small className="briefing-warning">{warnings[0]}</small>}
       </div>
     </div>

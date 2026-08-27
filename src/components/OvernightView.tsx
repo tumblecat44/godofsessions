@@ -8,8 +8,10 @@ import type {
   OvernightPortfolioRunSummary,
   OvernightProviderRouteSummary,
 } from "../shared/contracts";
+import { overnightCliLoginCommand } from "../lib/overnight-cli";
 import { overnightTickets } from "../lib/overnight-tickets";
 import { startedRunItems, tonightPlanItems } from "../lib/tonight";
+import { CopyCommandButton } from "./CopyCommandButton";
 import { OvernightCalendarButton, OvernightDateEmptyState, overnightDateKey } from "./OvernightCalendar";
 import { OvernightKanban } from "./OvernightKanban";
 import { Button } from "./ui/Button";
@@ -24,6 +26,7 @@ interface OvernightViewProps {
   error?: string;
   onPrepare(): Promise<void>;
   onOpenSettings(): void;
+  onOpenChat?(): void;
   onStartPortfolio?(planId: string, itemIds?: string[]): Promise<void>;
   onStopPortfolio(runId: string): Promise<void>;
 }
@@ -126,6 +129,7 @@ export function OvernightView(props: OvernightViewProps) {
             routes={props.snapshot.providerRoutes}
             ko={ko}
             onOpenSettings={props.onOpenSettings}
+            onOpenChat={props.onOpenChat}
           />
         )}
       </Surface>
@@ -184,7 +188,7 @@ function ActiveRunBar({ run, ko, onStop }: { run: OvernightPortfolioRunSummary; 
   </div>;
 }
 
-function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSettings }: {
+function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSettings, onOpenChat }: {
   date: string;
   today: boolean;
   preparing: boolean;
@@ -192,34 +196,64 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
   routes: OvernightProviderRouteSummary[];
   ko: boolean;
   onOpenSettings(): void;
+  onOpenChat?(): void;
 }) {
   if (!today) return <OvernightDateEmptyState date={date} ko={ko} />;
   const noReadyWorker = routes.length > 0 && !routes.some((route) => route.status === "ready");
-  const state = preparing
-    ? {
-        tone: "progress" as const,
-        eyebrow: ko ? "자동으로 준비 중" : "PREPARING AUTOMATICALLY",
-        title: ko ? "오늘 밤 보드를 준비하는 중" : "Preparing tonight's board",
-        copy: ko ? "파일은 바꾸지 않아요. 시작은 Morrow 탭의 체크된 카드에서 합니다." : "No files are changing. Start from the checked cards on Morrow.",
-      }
-    : !canPrepare || noReadyWorker
-      ? {
-          tone: "alert" as const,
-          eyebrow: ko ? "한 번만 설정" : "ONE-TIME SETUP",
-          title: ko ? "Overnight 설정을 마쳐 주세요" : "Finish Overnight setup",
-          copy: ko ? "Settings에서 CLI가 설치돼 있는지 확인하세요. 시작은 Morrow 탭에서 합니다." : "Check in Settings that a CLI is installed. Start from the Morrow tab.",
-          action: "settings" as const,
-        }
-      : {
-          tone: "zero" as const,
-          eyebrow: ko ? "오늘은 0개" : "ZERO TONIGHT",
-          title: ko ? "오늘 밤 준비된 Overnight가 없어요" : "No Overnight is ready tonight",
-          copy: ko ? "0개도 정상이에요. Morrow는 분명한 목적이 없으면 일을 만들거나 시작하지 않아요." : "Zero is valid. Morrow does not invent or start work without a clear outcome.",
-        };
-  return <div className="overnight-date-empty" role={preparing ? "status" : undefined}>
-    {state.tone === "alert" ? <TriangleAlert size={20} /> : <MoonStar size={20} />}
-    <div><span>{state.eyebrow}</span><h2>{state.title}</h2><p>{state.copy}</p>
-      {state.action === "settings" && <Button variant="secondary" className="mt-3" onClick={onOpenSettings}>{ko ? "Settings 열기" : "Open Settings"}</Button>}
+  if (preparing) {
+    return <div className="overnight-date-empty" role="status">
+      <MoonStar size={20} />
+      <div>
+        <span>{ko ? "자동으로 준비 중" : "PREPARING AUTOMATICALLY"}</span>
+        <h2>{ko ? "오늘 밤 보드를 준비하는 중" : "Preparing tonight's board"}</h2>
+        <p>{ko ? "파일은 바꾸지 않아요. 시작은 Ask Morrow 탭의 체크된 카드에서 합니다." : "No files are changing. Start from the checked cards on Ask Morrow."}</p>
+      </div>
+    </div>;
+  }
+  if (!canPrepare) {
+    return <div className="overnight-date-empty">
+      <TriangleAlert size={20} />
+      <div>
+        <span>{ko ? "대화 모델 필요" : "CONVERSATION MODEL"}</span>
+        <h2>{ko ? "먼저 대화 모델을 연결하세요" : "Connect a conversation model first"}</h2>
+        <p>{ko ? "오늘 밤 카드 최대 3장은 Ask Morrow 위에 뜹니다. 하나를 연결하면 Morrow가 고르고, 읽고 체크를 뺀 뒤 시작을 누르면 됩니다." : "Tonight’s 3 cards appear on Ask Morrow. Connect one model there, read the cards, uncheck any, press Start."}</p>
+        {onOpenChat
+          ? <Button variant="primary" className="mt-3" onClick={onOpenChat}>{ko ? "Ask Morrow에서 모델 연결" : "Connect a model on Ask Morrow"}</Button>
+          : <Button variant="primary" className="mt-3" onClick={onOpenSettings}>{ko ? "모델 연결" : "Connect a model"}</Button>}
+      </div>
+    </div>;
+  }
+  if (noReadyWorker) {
+    return <div className="overnight-date-empty">
+      <TriangleAlert size={20} />
+      <div>
+        <span>{ko ? "CLI 필요" : "CLI ON PATH"}</span>
+        <h2>{ko ? "Overnight CLI를 이 Mac에 두세요" : "Put an Overnight CLI on this Mac"}</h2>
+        <p>{ko ? "공식 CLI에서 로그인하세요. 이 화면은 PATH만 확인합니다." : "Sign in with the official CLI. This screen only checks PATH."}</p>
+        <ul className="mt-3 grid gap-2">
+          {routes.map((route) => {
+            const command = overnightCliLoginCommand(route.provider);
+            return (
+              <li key={route.provider} className="flex items-center justify-between gap-3 rounded-[10px] border border-line bg-surface/50 px-3 py-2">
+                <span className="min-w-0">
+                  <strong className="block text-[13px]">{route.label}</strong>
+                  <small className="block font-mono text-[10px] text-ink-faint">{command ?? (ko ? "Morrow에 포함됨" : "bundled with Morrow")}</small>
+                </span>
+                {command && <CopyCommandButton command={command} language={ko ? "ko" : "en"} />}
+              </li>
+            );
+          })}
+        </ul>
+        <Button variant="secondary" className="mt-3" onClick={onOpenSettings}>{ko ? "Settings에서 CLI 상태 보기" : "See CLI status in Settings"}</Button>
+      </div>
+    </div>;
+  }
+  return <div className="overnight-date-empty">
+    <MoonStar size={20} />
+    <div>
+      <span>{ko ? "오늘은 0개" : "ZERO TONIGHT"}</span>
+      <h2>{ko ? "오늘 밤 준비된 Overnight가 없어요" : "No Overnight is ready tonight"}</h2>
+      <p>{ko ? "0개도 정상이에요. Morrow는 분명한 목적이 없으면 일을 만들거나 시작하지 않아요. 맡길 일이 있으면 Ask Morrow에서 말하세요." : "Zero is valid. Morrow does not invent or start work without a clear outcome. Tell Morrow on Ask Morrow if you want something left overnight."}</p>
     </div>
   </div>;
 }

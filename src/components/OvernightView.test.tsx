@@ -338,9 +338,20 @@ describe("Overnight one-button workspace", () => {
     ];
     render(<OvernightView {...props({ snapshot: snapshot({ providerRoutes: blockedRoutes, portfolioAssessments: [assessment("no_run")] }) })} />);
 
-    expect(screen.getByRole("heading", { name: "Finish Overnight setup" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Put an Overnight CLI on this Mac" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "See CLI status in Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy claude auth login" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "No Overnight is ready tonight" })).not.toBeInTheDocument();
+  });
+
+  it("sends a missing conversation model to Ask Morrow instead of treating CLIs as unfinished setup", () => {
+    const openChat = vi.fn();
+    render(<OvernightView {...props({ canPrepare: false, onOpenChat: openChat })} />);
+
+    expect(screen.getByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Finish Overnight setup" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
+    expect(openChat).toHaveBeenCalled();
   });
 
   it("does not start overnight from the list", () => {

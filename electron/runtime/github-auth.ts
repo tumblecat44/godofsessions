@@ -65,10 +65,16 @@ export class GitHubAuthService {
     let stored: StoredAuthorization;
     try {
       stored = parseStoredAuthorization(JSON.parse(await readFile(this.authPath, "utf8")));
+    } catch {
+      return this.state();
+    }
+
+    try {
       this.token = this.decryptToken(stored.encryptedToken);
       this.profile = stored.profile;
     } catch {
-      await this.clearStoredAuthorization();
+      this.token = undefined;
+      this.profile = undefined;
       return this.state();
     }
 
@@ -228,12 +234,16 @@ export class GitHubAuthService {
   }
 
   private async persistAuthorization(token: string, profile: GitHubProfile) {
+    const encryptedToken = this.encryptToken(token);
+    if (this.decryptToken(encryptedToken) !== token) {
+      throw new Error("GitHub sign-in could not be saved safely.");
+    }
     const directory = dirname(this.authPath);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.authPath}.tmp`;
     const stored: StoredAuthorization = {
       version: 1,
-      encryptedToken: this.encryptToken(token),
+      encryptedToken,
       profile,
       validatedAt: this.now().toISOString(),
     };

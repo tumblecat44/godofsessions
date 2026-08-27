@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronUp, KeyRound, Link2, LogOut, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, KeyRound, Link2, LogOut } from "lucide-react";
 import { cn } from "../lib/cn";
 import { transitionState } from "../lib/motion";
 import type { AppLanguage, BootstrapState } from "../shared/contracts";
@@ -8,6 +8,21 @@ import { Surface } from "./ui/Surface";
 
 const preferred = ["anthropic", "openai-codex", "openai", "github-copilot", "google", "xai", "openrouter"];
 const compactProviderLimit = 6;
+
+const markTone: Record<string, string> = {
+  anthropic: "bg-[#c4a574]/18 text-[#e4c49a]",
+  openai: "bg-[#7e9cbb]/18 text-[#b9d0e6]",
+  "openai-codex": "bg-[#6fbaa7]/18 text-[#9dd4c4]",
+  "github-copilot": "bg-white/10 text-[#d0d4dc]",
+  google: "bg-[#c9b56a]/18 text-[#e6d48a]",
+  xai: "bg-amber/15 text-amber",
+  openrouter: "bg-[#8b7bb8]/18 text-[#c5b8e6]",
+};
+
+function providerLetter(name: string) {
+  const letter = name.trim().charAt(0);
+  return letter ? letter.toUpperCase() : "?";
+}
 
 export function ProviderConnections({ state, language = state.language, onConnect, onDisconnect, compact = false }: {
   state: BootstrapState;
@@ -22,13 +37,19 @@ export function ProviderConnections({ state, language = state.language, onConnec
     const ai = preferred.indexOf(a.id); const bi = preferred.indexOf(b.id);
     return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || a.name.localeCompare(b.name);
   });
-  const visible = compact && !expanded ? providers.slice(0, compactProviderLimit) : providers;
+  const limited = compact && !expanded;
+  const visible = limited ? providers.slice(0, compactProviderLimit) : providers;
   const hiddenCount = providers.length - visible.length;
   return (
     <div className={cn("provider-connections mt-4 grid grid-cols-2 gap-2 max-[900px]:grid-cols-1", compact && "is-compact mt-0 grid-cols-1 gap-2")}>
       {visible.map((provider) => (
         <Surface className={cn("provider-card grid min-h-[76px] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] bg-white/[0.018] px-3 py-2.5 shadow-none", provider.connected && "is-connected border-teal/20 bg-teal/[0.025]")} key={provider.id}>
-          <div className={cn("provider-card__mark grid size-9 place-items-center rounded-[11px] border border-line text-ink-faint", provider.connected && "border-teal/20 text-teal")}><span className={`state-icon-swap ${provider.connected ? "is-active" : ""}`} aria-hidden="true"><span className="state-icon-swap__active"><Check size={17} /></span><span className="state-icon-swap__inactive"><Sparkles size={17} /></span></span></div>
+          <div className={cn("provider-card__mark grid size-9 place-items-center rounded-[11px] border border-line font-mono text-[13px] font-semibold", markTone[provider.id] ?? "text-ink-faint", provider.connected && "border-teal/20")} aria-hidden="true">
+            <span className={`state-icon-swap ${provider.connected ? "is-active" : ""}`}>
+              <span className="state-icon-swap__active"><Check size={17} /></span>
+              <span className="state-icon-swap__inactive">{providerLetter(provider.name)}</span>
+            </span>
+          </div>
           <div className="flex min-w-0 flex-col gap-0.5"><strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold">{provider.name}</strong><small className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-faint">{provider.connected ? (ko ? "Morrow가 사용할 준비됨" : "Ready for Morrow") : provider.authLabel ?? (ko ? "안전하게 연결" : "Connect securely")}</small></div>
           <div className="provider-card__actions flex items-center gap-1.5">
             {provider.connected ? compact ? <span className="provider-ready font-mono text-[9px] tracking-[0.12em] text-teal">{ko ? "연결됨" : "CONNECTED"}</span> : <Button size="sm" onClick={() => void onDisconnect(provider.id)}><LogOut size={13} />{ko ? "연결 해제" : "Disconnect"}</Button> : provider.authTypes.map((authType) => {

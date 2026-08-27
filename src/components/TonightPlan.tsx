@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { AppLanguage, OvernightPortfolioPlanItemSummary, OvernightPortfolioPlanSummary } from "../shared/contracts";
+import type { AppLanguage, BootstrapState, OvernightPortfolioPlanItemSummary, OvernightPortfolioPlanSummary } from "../shared/contracts";
 import { tonightPlanItems } from "../lib/tonight";
+import { ProviderConnections } from "./ProviderConnections";
 import { Button } from "./ui/Button";
 
 export function TonightPlan({
@@ -9,12 +10,24 @@ export function TonightPlan({
   language,
   disabled,
   onStart,
+  needsConversationModel,
+  needsOvernightWorker,
+  state,
+  onConnect,
+  onDisconnect,
+  onOpenSettings,
 }: {
   plan?: OvernightPortfolioPlanSummary;
   preparing?: boolean;
   language: AppLanguage;
   disabled?: boolean;
   onStart(planId: string, itemIds: string[]): Promise<void>;
+  needsConversationModel?: boolean;
+  needsOvernightWorker?: boolean;
+  state?: BootstrapState;
+  onConnect?(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
+  onDisconnect?(providerId: string): Promise<void>;
+  onOpenSettings?(): void;
 }) {
   const ko = language === "ko";
   const items = tonightPlanItems(plan);
@@ -28,7 +41,6 @@ export function TonightPlan({
   }, [plan?.id, items.map((item) => item.id).join("|")]);
 
   const selectedIds = items.filter((item) => checked[item.id] !== false).map((item) => item.id);
-  if (!preparing && items.length === 0) return null;
 
   const start = async () => {
     if (!plan || working || selectedIds.length === 0) return;
@@ -47,8 +59,8 @@ export function TonightPlan({
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
           <span className="font-mono text-[9px] font-semibold tracking-[0.13em] text-amber">{ko ? "오늘 밤" : "TONIGHT"}</span>
-          <h2 className="mt-1 text-[17px] font-medium tracking-[-0.02em]">{preparing && items.length === 0 ? (ko ? "Morrow가 오늘 밤 일을 고르는 중" : "Morrow is choosing tonight's work") : (ko ? "이 일을 맡길까요?" : "Leave these overnight?")}</h2>
-          <p className="mt-1 text-[12px] leading-5 text-ink-muted">{ko ? "체크된 일만 시작합니다. 빼거나 Morrow에게 다른 걸 부탁해도 됩니다." : "Only checked work starts. Uncheck any, or tell Morrow you want something else."}</p>
+          <h2 className="mt-1 text-[17px] font-medium tracking-[-0.02em]">{tonightHeading({ ko, preparing, items, needsConversationModel, needsOvernightWorker })}</h2>
+          <p className="mt-1 text-[12px] leading-5 text-ink-muted">{tonightCopy({ ko, preparing, items, needsConversationModel, needsOvernightWorker })}</p>
         </div>
         {plan && items.length > 0 && (
           <Button variant="primary" className="min-h-11 shrink-0 px-5 text-sm" disabled={working || disabled || selectedIds.length === 0} onClick={() => void start()}>
@@ -56,14 +68,65 @@ export function TonightPlan({
           </Button>
         )}
       </div>
-      <div className="grid gap-2">
-        {items.map((item, index) => (
-          <TonightCard key={item.id} index={index} item={item} checked={checked[item.id] !== false} ko={ko} onToggle={() => setChecked((current) => ({ ...current, [item.id]: current[item.id] === false }))} />
-        ))}
-      </div>
+      {needsConversationModel && state && onConnect && onDisconnect ? (
+        <ProviderConnections state={state} language={language} compact onConnect={onConnect} onDisconnect={onDisconnect} />
+      ) : needsConversationModel && onOpenSettings ? (
+        <Button variant="primary" className="mt-1" onClick={onOpenSettings}>{ko ? "대화 모델 연결" : "Connect a conversation model"}</Button>
+      ) : needsOvernightWorker ? (
+        <div className="grid gap-2">
+          <p className="text-[12px] leading-5 text-ink-muted">{ko ? "Claude Code, Codex, Grok Build, Pi Agent 중 하나를 이 Mac의 PATH에 두고 공식 CLI로 로그인하세요." : "Put Claude Code, Codex, Grok Build, or Pi Agent on this Mac’s PATH and sign in with that official CLI."}</p>
+          {onOpenSettings && <Button variant="secondary" className="w-fit" onClick={onOpenSettings}>{ko ? "Overnight CLI 명령 보기" : "Show Overnight CLI commands"}</Button>}
+        </div>
+      ) : (
+        <div className="grid gap-2">
+          {items.map((item, index) => (
+            <TonightCard key={item.id} index={index} item={item} checked={checked[item.id] !== false} ko={ko} onToggle={() => setChecked((current) => ({ ...current, [item.id]: current[item.id] === false }))} />
+          ))}
+        </div>
+      )}
       {error && <p className="mt-3 text-[11px] text-danger" role="alert">{error}</p>}
     </section>
   );
+}
+
+function tonightHeading({
+  ko,
+  preparing,
+  items,
+  needsConversationModel,
+  needsOvernightWorker,
+}: {
+  ko: boolean;
+  preparing?: boolean;
+  items: OvernightPortfolioPlanItemSummary[];
+  needsConversationModel?: boolean;
+  needsOvernightWorker?: boolean;
+}) {
+  if (needsConversationModel) return ko ? "대화 모델을 연결하면 오늘 밤 카드 3장이 여기 생깁니다" : "Connect a conversation model to see tonight’s 3 cards";
+  if (needsOvernightWorker) return ko ? "Overnight CLI가 아직 PATH에 없습니다" : "An Overnight CLI is not on PATH yet";
+  if (preparing && items.length === 0) return ko ? "Morrow가 오늘 밤 일을 고르는 중" : "Morrow is choosing tonight's work";
+  if (items.length === 0) return ko ? "오늘 밤 준비된 Overnight가 없어요" : "No Overnight is ready tonight";
+  return ko ? "이 일을 맡길까요?" : "Leave these overnight?";
+}
+
+function tonightCopy({
+  ko,
+  preparing,
+  items,
+  needsConversationModel,
+  needsOvernightWorker,
+}: {
+  ko: boolean;
+  preparing?: boolean;
+  items: OvernightPortfolioPlanItemSummary[];
+  needsConversationModel?: boolean;
+  needsOvernightWorker?: boolean;
+}) {
+  if (needsConversationModel) return ko ? "아래에서 하나를 연결하세요. 연결되면 Morrow가 카드 최대 3장을 고르고, 읽고 체크를 뺀 뒤 시작을 누르면 됩니다." : "Connect one below. Morrow then picks up to 3 cards. Read them, uncheck any, press Start.";
+  if (needsOvernightWorker) return ko ? "대화 모델과는 별개입니다. 공식 CLI에서 로그인하세요. 이 앱 안에서 Overnight 계정에 로그인하지 않습니다." : "This is separate from the conversation model. Sign in with the official CLI. This app does not log into Overnight accounts.";
+  if (preparing && items.length === 0) return ko ? "파일은 바꾸지 않아요. 카드가 뜨면 읽고, 빼거나, 시작을 누르면 됩니다." : "No files are changing. When the cards appear, read them, uncheck any, press Start.";
+  if (items.length === 0) return ko ? "0개도 정상이에요. 맡길 일이 있으면 이 대화에서 Morrow에게 말하면 됩니다." : "Zero is valid. Tell Morrow here if you want something left overnight.";
+  return ko ? "체크된 일만 시작합니다. 빼거나 Morrow에게 다른 걸 부탁해도 됩니다." : "Only checked work starts. Uncheck any, or tell Morrow you want something else.";
 }
 
 function TonightCard({ item, index, checked, ko, onToggle }: {

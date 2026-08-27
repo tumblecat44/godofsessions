@@ -9,6 +9,7 @@ official release.
 | `landing/public/instrument-sans.woff2` | Fontsource package, matching `instrument-sans-latin-wght-normal.woff2` | OFL-1.1; see `THIRD_PARTY_NOTICES.md` | `2ee17598a98d8a59e4df8152d015bec9ab8e4d5672cc0ab42bef806b568e3971` | Approved |
 | `public/favicon.svg`, `landing/public/app-icon.svg` | Original geometric mark authored for this repository | Project MIT license | `f839d56205e05c050c63a56c4f59d90e37ce637ff10eea6a7ddea400668dc265` | Approved |
 | `src/assets/morrow.svg` | Original geometric mark authored for this repository | Project MIT license | `2f08020e88db23e7a8de891b3c314e88373462235ed647644aaff1b1e6518bd2` | Approved |
+| `src/assets/morrow.png` | Original Morrow character previously shipped in this repository (`c92d881`) | Project MIT license | `f0a04452aa95cf56612c12b921386b9e0370f93b97fa949b4f6f3c8abefd0cc8` | Approved |
 
 Product captures, promotional video, installer artifacts, and live launch
 evidence are intentionally excluded. They may be added only after the review
