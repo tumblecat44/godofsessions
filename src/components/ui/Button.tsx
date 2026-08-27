@@ -27,7 +27,7 @@ export function Button({ className, variant = "secondary", size = "md", type = "
   return (
     <button
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-control border font-semibold transition-[color,background-color,border-color,box-shadow,transform] duration-200 ease-morrow active:scale-[0.985] disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex shrink-0 items-center justify-center rounded-control border font-semibold transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-morrow active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40",
         variants[variant],
         sizes[size],
         className,

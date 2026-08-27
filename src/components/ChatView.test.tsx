@@ -33,6 +33,7 @@ describe("Morrow first-use conversation", () => {
 
     expect(screen.getByRole("heading", { name: "What shall we untangle together?" })).toBeInTheDocument();
     expect(screen.getByText(/only reach for files or commands when you ask/i)).toBeInTheDocument();
+    expect(screen.getByText(/If tonight's cards are wrong, say so here/i)).toBeInTheDocument();
     expect(screen.queryByText(/select project/i)).not.toBeInTheDocument();
     // Conversation history now lives in the app sidebar, not in the chat view.
     expect(screen.queryByText("New conversation")).not.toBeInTheDocument();
@@ -220,7 +221,7 @@ describe("Morrow first-use conversation", () => {
     render(<ChatView state={briefingState} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "What shall we untangle together?" })).toBeInTheDocument();
-    expect(screen.getByText(/Open Overnight when you want to prepare work/)).toBeInTheDocument();
+    expect(screen.getByText(/If tonight's cards are wrong, say so here/)).toBeInTheDocument();
     expect(screen.queryByText("UI repair")).not.toBeInTheDocument();
     expect(screen.queryByText("Research")).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "Tools used today" })).not.toBeInTheDocument();

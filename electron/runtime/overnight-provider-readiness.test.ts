@@ -14,14 +14,12 @@ import {
 import {
   OvernightProviderReadinessService,
   overnightReadyProviderRecord,
-  type OvernightReadinessCommandRunner,
 } from "./overnight-provider-readiness";
 
 const PROVIDERS = ["codex", "claude", "grok", "pi"] satisfies OvernightExecutionProvider[];
 
 function harness(overrides: {
   installed?: Partial<Record<LocalSessionProvider, string>>;
-  command?: OvernightReadinessCommandRunner;
   acpPolicy?: boolean;
   containmentBlocked?: readonly LocalSessionProvider[];
   noContainmentResolver?: boolean;
@@ -29,9 +27,6 @@ function harness(overrides: {
   const installed = overrides.installed ?? Object.fromEntries(PROVIDERS
     .filter((provider) => provider !== "pi")
     .map((provider) => [provider, `/exact/${provider}`]));
-  const command = overrides.command ?? vi.fn(async () => {
-    throw new Error("planning must not start a provider CLI child");
-  });
   const verifyContainment = vi.fn(async ({ provider, root, runtimeDirectory, executable }: {
     provider: LocalSessionProvider;
     root: string;
@@ -135,13 +130,11 @@ function harness(overrides: {
     return result;
   });
   return {
-    command,
     verifyContainment,
     service: new OvernightProviderReadinessService({
       root: "/workspace",
       runtimeDirectory: "/private/runtime",
       resolveExecutable: async (provider) => installed[provider],
-      runCommand: command,
       acpPermissionPolicyReady: async () => overrides.acpPolicy ?? true,
       ...(overrides.noContainmentResolver ? {} : { verifyContainment }),
     }),
@@ -149,23 +142,8 @@ function harness(overrides: {
 }
 
 describe("Overnight provider readiness", () => {
-  it("never starts provider CLI children while planning inspects every route repeatedly", async () => {
-    const command = vi.fn<OvernightReadinessCommandRunner>(async () => {
-      throw new Error("planning must not start a provider CLI child");
-    });
-    const { service } = harness({ command });
-
-    await service.inspectAll();
-    for (const provider of PROVIDERS) {
-      await service.inspect(provider);
-      await service.inspect(provider);
-    }
-
-    expect(command).not.toHaveBeenCalled();
-  });
-
   it("retains all four execution routes while using stored containment evidence", async () => {
-    const { service, command, verifyContainment } = harness();
+    const { service, verifyContainment } = harness();
     const results = await service.inspectAll();
 
     expect(results.map((result) => result.provider)).toEqual(PROVIDERS);
@@ -175,34 +153,29 @@ describe("Overnight provider readiness", () => {
     expect(results.find((result) => result.provider === "codex")?.executable).toBe("/exact/codex");
     expect(results.find((result) => result.provider === "pi")?.executable).toBeUndefined();
     expect(verifyContainment).toHaveBeenCalledTimes(3);
-    expect(command).not.toHaveBeenCalled();
     expect(overnightReadyProviderRecord(results)).toEqual(Object.fromEntries(PROVIDERS.map((provider) => [provider, provider === "codex" || provider === "claude"])));
   });
 
   it("marks absent executables as setup required using filesystem observation only", async () => {
-    const command = vi.fn<OvernightReadinessCommandRunner>();
-    const { service, verifyContainment } = harness({ installed: { codex: "/exact/codex" }, command });
+    const { service, verifyContainment } = harness({ installed: { codex: "/exact/codex" } });
     const results = await service.inspectAll();
 
     expect(results.find((result) => result.provider === "grok")).toMatchObject({ status: "setup_required", executable: undefined });
     expect(results.find((result) => result.provider === "pi")).toMatchObject({ status: "blocked" });
     expect(verifyContainment).toHaveBeenCalledTimes(1);
-    expect(command).not.toHaveBeenCalled();
   });
 
   it("keeps every route visible and non-ready when no stored-attestation resolver exists", async () => {
-    const { service, command } = harness({ noContainmentResolver: true });
+    const { service } = harness({ noContainmentResolver: true });
     const results = await service.inspectAll();
 
     expect(results.map((result) => result.provider)).toEqual(PROVIDERS);
     expect(results.every((result) => result.status !== "ready")).toBe(true);
     expect(results.every((result) => result.containmentProof === undefined && result.launchBinding === undefined)).toBe(true);
-    expect(command).not.toHaveBeenCalled();
   });
 
   it("fails closed when stored evidence is missing without falling back to live probes", async () => {
-    const command = vi.fn<OvernightReadinessCommandRunner>(async () => "authenticated and supported");
-    const { service, verifyContainment } = harness({ containmentBlocked: ["codex", "claude", "grok"], command });
+    const { service, verifyContainment } = harness({ containmentBlocked: ["codex", "claude", "grok"] });
 
     for (const provider of ["codex", "claude", "grok"] as const) {
       await expect(service.inspect(provider)).resolves.toMatchObject({
@@ -212,42 +185,19 @@ describe("Overnight provider readiness", () => {
       });
     }
     expect(verifyContainment).toHaveBeenCalledTimes(3);
-    expect(command).not.toHaveBeenCalled();
   });
 
   it("keeps ACP routes blocked until the app-owned allow-once policy is proven", async () => {
-    const { service, command, verifyContainment } = harness({ acpPolicy: false });
+    const { service, verifyContainment } = harness({ acpPolicy: false });
 
     for (const provider of ["grok"] as const) {
       await expect(service.inspect(provider)).resolves.toMatchObject({ status: "blocked", checks: { containment: "blocked" } });
     }
     expect(verifyContainment).not.toHaveBeenCalled();
-    expect(command).not.toHaveBeenCalled();
-  });
-
-  it("never calls legacy Pi readiness probes during planning", async () => {
-    const piReady = vi.fn(async () => { throw new Error("dynamic Pi auth probe forbidden"); });
-    const piCancellationReady = vi.fn(async () => { throw new Error("dynamic Pi capability probe forbidden"); });
-    const command = vi.fn<OvernightReadinessCommandRunner>();
-    const service = new OvernightProviderReadinessService({
-      root: "/workspace",
-      runCommand: command,
-      piReady,
-      piCancellationReady,
-    });
-
-    await expect(service.inspect("pi")).resolves.toMatchObject({
-      provider: "pi",
-      status: "blocked",
-      reason: expect.stringMatching(/저장된 proof-bound 실행 증거/u),
-    });
-    expect(piReady).not.toHaveBeenCalled();
-    expect(piCancellationReady).not.toHaveBeenCalled();
-    expect(command).not.toHaveBeenCalled();
   });
 
   it("binds stored evidence to the exact execution root without probing the provider", async () => {
-    const { service, command, verifyContainment } = harness();
+    const { service, verifyContainment } = harness();
 
     await expect(service.inspect("claude", {
       root: "/workspace/item-1",
@@ -260,6 +210,5 @@ describe("Overnight provider readiness", () => {
       writeScopes: ["*"],
       executable: "/exact/claude",
     });
-    expect(command).not.toHaveBeenCalled();
   });
 });

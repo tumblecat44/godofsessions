@@ -147,6 +147,15 @@ describe("hierarchical Overnight context evaluator", () => {
     expect(calls.map((call) => call.prompt).join("\n")).not.toContain(sensitive.nativeId);
   });
 
+  it("asks the model to leave ordinary provider routing to ready host routes", async () => {
+    const { port, calls } = successfulPort();
+    await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+
+    const prompt = JSON.parse(calls[0].prompt) as { instruction: string };
+    expect(prompt.instruction).toContain("preferredProvider:auto");
+    expect(prompt.instruction).toContain("requires one exact runtime");
+  });
+
   it("returns no candidates when every session is explicitly accounted for as no-run", async () => {
     const completedSessions = [
       session(0, "The requested module 0 repair is completed and all tests pass."),

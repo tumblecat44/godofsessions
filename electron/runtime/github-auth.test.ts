@@ -97,6 +97,19 @@ describe("GitHubAuthService", () => {
     await expect(readFile(join(dataDir, "github-auth.json"), "utf8")).rejects.toThrow();
   });
 
+  it("adopts an unpackaged local verify identity without writing github-auth.json", async () => {
+    const dataDir = await temporaryDirectory();
+    const service = createService({ dataDir, responses: [] });
+    await expect(service.initialize()).resolves.toEqual({ status: "unauthenticated" });
+    expect(service.adoptLocalVerifyIdentity()).toEqual({
+      status: "authenticated",
+      profile: { id: 1, login: "local-verify" },
+      offline: true,
+    });
+    expect(() => service.requireAuthenticated()).not.toThrow();
+    await expect(readFile(join(dataDir, "github-auth.json"), "utf8")).rejects.toThrow();
+  });
+
   it("rejects unexpected verification destinations", async () => {
     const dataDir = await temporaryDirectory();
     const service = createService({

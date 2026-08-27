@@ -1,7 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 import type {
   OvernightActivityKind,
-  OvernightExecutor,
+  OvernightCliExecutor,
   OvernightProviderResult,
   OvernightResultWarning,
   OvernightResultWarningCode,
@@ -22,7 +22,7 @@ export interface OvernightResultCollector {
 }
 
 export function createOvernightResultCollector(
-  executor: OvernightExecutor,
+  executor: OvernightCliExecutor,
   onActivity: (activity: OvernightActivityKind) => void = () => undefined,
   expectedVerification?: string,
 ): OvernightResultCollector {

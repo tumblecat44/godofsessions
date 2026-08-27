@@ -7,6 +7,7 @@ import {
   type MacOsProviderCanaryRequest,
   type MacOsProviderCanaryResult,
   type OvernightProviderContainmentHost,
+  type OvernightProviderContainmentRequest,
 } from "./overnight-provider-containment";
 import { overnightProviderAdapterInvocation } from "./overnight-provider-adapter";
 
@@ -118,32 +119,45 @@ function harness(options: {
     runCanary,
     now: () => options.now ?? new Date("2026-08-26T12:00:00.000Z"),
   };
+  const verifier = createOvernightProviderContainmentVerifier(host);
   return {
     canonicalize,
     inspectExecutable,
     inspectExecutableStatic,
     inspectLaunchArtifacts,
     runCanary,
-    verifier: createOvernightProviderContainmentVerifier(host),
-    verify: createOvernightProviderContainmentVerifier(host).verifyLegacyV2,
+    verifier,
+    verify: async (request: OvernightProviderContainmentRequest) => {
+      const profileAuthoritySha256 = "f".repeat(64);
+      const attested = await verifier.attestDisposableCapability({
+        ...request,
+        disposableScope: "morrow-app-owned-disposable",
+        profileAuthoritySha256,
+      });
+      if (attested.status === "blocked") return attested;
+      return verifier.bindLaunch(
+        { ...request, profileAuthoritySha256, writeScopes: ["*"] },
+        attested.attestation,
+      );
+    },
   };
 }
 
 describe("macOS provider containment proof", () => {
-  it("keeps a legacy V2 proof readable for history but refuses to use it as fresh launch authority", async () => {
+  it("returns only attestation-backed proof as fresh launch authority", async () => {
     const result = await harness().verify(INPUT);
     expect(result.status).toBe("verified");
-    if (result.status !== "verified") throw new Error("legacy fixture did not verify");
+    if (result.status !== "verified") throw new Error("fixture did not verify");
 
     const invocation = overnightProviderAdapterInvocation(
       "codex",
       CANONICAL.fixedRoot,
       CANONICAL.runtimeDirectory,
       CANONICAL.executable,
-      "pre-proof",
+      "macos-outer-verified",
     );
-    expect(result.proof.attestation).toBeUndefined();
-    expect(verifiedOvernightProviderContainmentMatchesInvocation(result.proof, invocation)).toBe(false);
+    expect(result.proof.attestation).toMatchObject({ version: 1, sha256: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+    expect(verifiedOvernightProviderContainmentMatchesInvocation(result.proof, invocation)).toBe(true);
   });
 
   it("returns one identity-bound, path-free proof only after every canary check passes", async () => {
@@ -170,6 +184,8 @@ describe("macOS provider containment proof", () => {
           canonical: true,
           disjoint: true,
           bindingSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          writeScopesSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          mutationAuthority: "direct-provider-root-wide-only",
         },
         executable: {
           realpathVerified: true,
@@ -209,6 +225,11 @@ describe("macOS provider containment proof", () => {
           commandNetwork: "blocked",
           commandExternalEffect: "blocked",
         },
+        attestation: {
+          version: 1,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          expiresAt: "2026-08-27T12:00:00.000Z",
+        },
       },
       launchBinding: {
         version: 1,
@@ -218,6 +239,7 @@ describe("macOS provider containment proof", () => {
         providerHostPath: CANONICAL.providerHostPath,
         sandboxLauncherPath: CANONICAL.sandboxLauncherPath,
         sandboxProfilePath: CANONICAL.sandboxProfilePath,
+        writeScopes: ["*"],
         effectiveEnvironment: {
           CODEX_HOME: "/canonical/runtime/codex-home",
           HOME: "/canonical/runtime/home",
@@ -341,7 +363,11 @@ describe("macOS provider containment proof", () => {
       now: () => new Date("2026-08-26T12:00:00.000Z"),
     });
 
-    await expect(verifier.verifyLegacyV2(INPUT)).resolves
+    await expect(verifier.attestDisposableCapability({
+      ...INPUT,
+      disposableScope: "morrow-app-owned-disposable",
+      profileAuthoritySha256: "f".repeat(64),
+    })).resolves
       .toEqual({ status: "blocked", provider: "codex", reason: "executable_identity_observation_failed" });
     expect(base.runCanary).not.toHaveBeenCalled();
   });
@@ -385,7 +411,11 @@ describe("macOS provider containment proof", () => {
 
     await expect(canaryError.verify(INPUT)).resolves
       .toEqual({ status: "blocked", provider: "codex", reason: "canary_execution_failed" });
-    await expect(verifier.verifyLegacyV2(INPUT)).resolves
+    await expect(verifier.attestDisposableCapability({
+      ...INPUT,
+      disposableScope: "morrow-app-owned-disposable",
+      profileAuthoritySha256: "f".repeat(64),
+    })).resolves
       .toEqual({ status: "blocked", provider: "codex", reason: "clock_observation_failed" });
   });
 

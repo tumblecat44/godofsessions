@@ -10,20 +10,8 @@ import {
   overnightPrivatePathSha256,
   type OvernightPortfolioExecutionAuthority,
   type OvernightPortfolioFrozenBrief,
+  type OvernightPortfolioPathFreeContainmentAuthority,
 } from "./overnight-portfolio-ledger";
-import {
-  overnightProviderAdapterIdentity,
-  overnightProviderAdapterInvocation,
-  overnightProviderEffectiveEnvironment,
-  overnightProviderEnvironmentSha256,
-  overnightProviderLaunchCapabilitySha256,
-  type OvernightProviderAdapterInvocation,
-} from "./overnight-provider-adapter";
-import {
-  containmentWriteScopesSha256,
-  containmentProofIdentitySha256,
-  type VerifiedOvernightProviderContainmentProof,
-} from "./overnight-provider-containment";
 import type { OvernightWorkspaceSnapshot } from "./overnight-worktree";
 
 const temporaryDirectories: string[] = [];
@@ -70,60 +58,20 @@ function brief(id: string, provider: OvernightPortfolioItem["provider"]): Overni
   };
 }
 
-function containmentProof(invocation: OvernightProviderAdapterInvocation): VerifiedOvernightProviderContainmentProof {
-  const identity = overnightProviderAdapterIdentity(invocation);
-  const environment = overnightProviderEffectiveEnvironment(invocation, "/runtime");
-  const proof: VerifiedOvernightProviderContainmentProof = {
-    version: 2,
-    provider: invocation.provider,
-    proofSha256: "",
-    platform: "darwin",
-    verifiedAt: "2026-08-26T17:59:00.000Z",
-    scope: { canonical: true, disjoint: true, bindingSha256: "f".repeat(64) },
-    executable: {
-      realpathVerified: true,
-      sha256: "a".repeat(64),
-      signature: "verified",
-      teamIdentifier: "ABCDEFGHIJ",
-      version: "synthetic 1.0",
-      wrapperInvocationSha256: "b".repeat(64),
-    },
-    invocation: {
-      adapterIdentityVersion: identity.version,
-      sha256: identity.sha256,
-      adapterKind: identity.adapterKind,
-      promptTransport: identity.promptTransport,
-    },
-    environment: {
-      policyId: "morrow-exact-ephemeral-v1",
-      sha256: overnightProviderEnvironmentSha256(environment),
-    },
-    launcher: {
-      providerHostSha256: "c".repeat(64),
-      sandboxLauncherSha256: "d".repeat(64),
-      sandboxProfileId: `synthetic-${invocation.provider}`,
-      sandboxProfileSha256: "e".repeat(64),
-    },
-    policy: {
-      fileRead: "system-fixed-root-runtime-auth-only",
-      fileWrite: "fixed-root-runtime-dev-null-only",
-      network: "provider-only",
-      commandExternalEffect: "denied",
-    },
-    canary: {
-      identityBound: true,
-      processExit: "zero",
-      providerTurn: "completed",
-      commandReceipt: "observed",
-      insideWrite: "verified",
-      adjacentOutsideWrite: "blocked-and-absent",
-      outsideSecretRead: "blocked-and-unobserved",
-      commandNetwork: "blocked",
-      commandExternalEffect: "blocked",
-    },
+function containmentAuthority(item: OvernightPortfolioItem): OvernightPortfolioPathFreeContainmentAuthority {
+  const privateRoot = `/private/overnight/${item.id}`;
+  return {
+    version: 3,
+    provider: item.provider,
+    executableSha256: "a".repeat(64),
+    identitySha256: "b".repeat(64),
+    attestationSha256: "c".repeat(64),
+    expiresAt: "2026-08-27T18:00:00.000Z",
+    executionRootSha256: overnightPrivatePathSha256("execution-root", privateRoot),
+    worktreeKeySha256: overnightPrivatePathSha256("worktree-key", privateRoot),
+    runtimeDirectorySha256: overnightPrivatePathSha256("runtime-directory", `${privateRoot}/runtime`),
+    writeScopes: [...item.writeScopes],
   };
-  proof.proofSha256 = containmentProofIdentitySha256(proof);
-  return proof;
 }
 
 async function setup() {
@@ -144,24 +92,11 @@ async function setup() {
   const authority: OvernightPortfolioExecutionAuthority = {
     plan,
     workspace,
-    items: items.map((item) => {
-      const invocation = {
-        ...overnightProviderAdapterInvocation(item.provider, item.worktreeKey, "/runtime", `/exact/${item.provider}`),
-        commandPreview: item.commandPreview,
-      };
-      return {
-        itemId: item.id,
-        brief: brief(item.id, item.provider),
-        invocation,
-        containmentProof: containmentProof(invocation),
-        allocation: {
-          ...workspace,
-          executionRoot: item.worktreeKey,
-          worktreeKey: item.worktreeKey,
-          branch: `morrow/overnight/${plan.id}/${item.id}`,
-        },
-      };
-    }),
+    items: items.map((item) => ({
+      itemId: item.id,
+      brief: brief(item.id, item.provider),
+      containmentAuthority: containmentAuthority(item),
+    })),
   };
   return { dataDir, authority };
 }
@@ -179,30 +114,15 @@ describe("Overnight portfolio durable ledger", () => {
     ]);
   });
 
-  it("preserves only the bounded attestation reference for new live proofs", async () => {
+  it("persists only bounded path-free containment identities", async () => {
     const { dataDir, authority } = await setup();
-    const proof = authority.items[0].containmentProof;
-    proof.canary.providerCredentialRead = "verified";
-    proof.canary.toolCredentialRead = "blocked-and-unobserved";
-    proof.attestation = {
-      version: 1,
-      sha256: "7".repeat(64),
-      expiresAt: "2026-08-27T17:59:00.000Z",
-    };
-    proof.scope.writeScopesSha256 = containmentWriteScopesSha256(["*"]);
-    proof.scope.mutationAuthority = "direct-provider-root-wide-only";
-    proof.proofSha256 = containmentProofIdentitySha256(proof);
-
     const ledger = new OvernightPortfolioLedger({ dataDir });
     await ledger.saveAuthority(authority);
     const storedText = await readFile(ledger.authorityPath(authority.plan.id), "utf8");
     const restored = await ledger.readAuthority(authority.plan.id);
 
-    expect(restored?.items[0].containmentProof.attestation).toEqual(proof.attestation);
-    expect(restored?.items[0].containmentProof.canary).toMatchObject({
-      providerCredentialRead: "verified",
-      toolCredentialRead: "blocked-and-unobserved",
-    });
+    expect(restored?.items[0].containmentAuthority.attestationSha256).toBe("c".repeat(64));
+    expect(storedText).not.toContain("/private/overnight/one");
     expect(storedText).not.toContain("credentialSentinelPath");
     expect(storedText).not.toContain("providerAuthPath");
   });
@@ -223,7 +143,7 @@ describe("Overnight portfolio durable ledger", () => {
     const { dataDir, authority } = await setup();
     const rawMarker = "PRIVATE_RAW_EXCERPT_MUST_NOT_PERSIST";
     Object.assign(authority.items[0], { prompt: rawMarker, excerpts: [{ text: rawMarker }] });
-    Object.assign(authority.items[0].containmentProof, {
+    Object.assign(authority.items[0].containmentAuthority, {
       canonicalNativeExecutable: `/private/${rawMarker}`,
       sandboxProfilePath: `/private/${rawMarker}.sb`,
     });
@@ -244,15 +164,15 @@ describe("Overnight portfolio durable ledger", () => {
     expect(stored).not.toContain("TERMINAL_SANDBOX_DIR");
   });
 
-  it("rejects a containment proof whose frozen invocation or profile digest is altered", async () => {
-    const invocationDrift = await setup();
-    invocationDrift.authority.items[0].invocation.args = ["--drift"];
-    await expect(new OvernightPortfolioLedger({ dataDir: invocationDrift.dataDir }).saveAuthority(invocationDrift.authority))
+  it("rejects malformed containment identity or write-scope drift", async () => {
+    const identityDrift = await setup();
+    identityDrift.authority.items[0].containmentAuthority.identitySha256 = "not-a-digest";
+    await expect(new OvernightPortfolioLedger({ dataDir: identityDrift.dataDir }).saveAuthority(identityDrift.authority))
       .rejects.toThrow(/fingerprint/u);
 
-    const profileDrift = await setup();
-    profileDrift.authority.items[0].containmentProof.launcher.sandboxProfileSha256 = "9".repeat(64);
-    await expect(new OvernightPortfolioLedger({ dataDir: profileDrift.dataDir }).saveAuthority(profileDrift.authority))
+    const scopeDrift = await setup();
+    scopeDrift.authority.items[0].containmentAuthority.writeScopes = ["src/forged"];
+    await expect(new OvernightPortfolioLedger({ dataDir: scopeDrift.dataDir }).saveAuthority(scopeDrift.authority))
       .rejects.toThrow(/fingerprint/u);
   });
 
@@ -290,7 +210,6 @@ describe("Overnight portfolio durable ledger", () => {
       executionRootSha256: overnightPrivatePathSha256("execution-root", fixedRoot),
       worktreeKeySha256: overnightPrivatePathSha256("worktree-key", worktreeKey),
       runtimeDirectorySha256: overnightPrivatePathSha256("runtime-directory", runtimeDirectory),
-      invocationMode: "macos-outer-verified" as const,
       writeScopes: [...item.writeScopes],
     };
     const v3Authority: OvernightPortfolioExecutionAuthority = {
@@ -374,13 +293,14 @@ describe("Overnight portfolio durable ledger", () => {
       version: 1 as const,
       runId: "run_capability",
       itemId: frozen.itemId,
-      provider: frozen.invocation.provider,
-      proofSha256: frozen.containmentProof.proofSha256,
-      invocationSha256: frozen.containmentProof.invocation.sha256,
+      provider: frozen.containmentAuthority.provider,
+      proofSha256: "d".repeat(64),
+      invocationSha256: "e".repeat(64),
       token: "11111111-1111-4111-8111-111111111111",
     };
+    const lineage = { attestationSha256: frozen.containmentAuthority.attestationSha256 };
 
-    await expect(ledger.issueLaunchCapability(capability, "2026-08-26T18:01:01.000Z"))
+    await expect(ledger.issueLaunchCapability(capability, "2026-08-26T18:01:01.000Z", lineage))
       .rejects.toThrow(/running/u);
     const planItem = authority.plan.items[0];
     await ledger.writeItemState("run_capability", {
@@ -392,14 +312,14 @@ describe("Overnight portfolio durable ledger", () => {
     });
     const differentCapability = { ...capability, token: "22222222-2222-4222-8222-222222222222" };
     const concurrent = await Promise.allSettled([
-      ledger.issueLaunchCapability(capability, "2026-08-26T18:01:02.000Z"),
-      ledger.issueLaunchCapability(differentCapability, "2026-08-26T18:01:02.000Z"),
+      ledger.issueLaunchCapability(capability, "2026-08-26T18:01:02.000Z", lineage),
+      ledger.issueLaunchCapability(differentCapability, "2026-08-26T18:01:02.000Z", lineage),
     ]);
     expect(concurrent.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     expect(concurrent.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
     const winner = concurrent.find((attempt) => attempt.status === "fulfilled") as PromiseFulfilledResult<{ capabilitySha256: string }>;
-    await expect(ledger.issueLaunchCapability(capability, "2026-08-26T18:01:03.000Z")).rejects.toThrow();
-    await expect(ledger.issueLaunchCapability(differentCapability, "2026-08-26T18:01:03.000Z")).rejects.toThrow();
+    await expect(ledger.issueLaunchCapability(capability, "2026-08-26T18:01:03.000Z", lineage)).rejects.toThrow();
+    await expect(ledger.issueLaunchCapability(differentCapability, "2026-08-26T18:01:03.000Z", lineage)).rejects.toThrow();
 
     const capabilityDirectory = join(dataDir, "overnight", "portfolios", "runs", "run_capability", "launch-capabilities");
     const issuedPath = join(capabilityDirectory, `${frozen.itemId}.issued.json`);
@@ -409,15 +329,21 @@ describe("Overnight portfolio durable ledger", () => {
     expect(await readFile(pendingPath, "utf8")).toBe(raw);
     await link(pendingPath, consumedPath);
     await rm(pendingPath);
-    await expect(ledger.issueLaunchCapability(capability, "2026-08-26T18:01:04.000Z")).rejects.toThrow();
-    await expect(ledger.issueLaunchCapability(differentCapability, "2026-08-26T18:01:04.000Z")).rejects.toThrow();
+    await expect(ledger.issueLaunchCapability(capability, "2026-08-26T18:01:04.000Z", lineage)).rejects.toThrow();
+    await expect(ledger.issueLaunchCapability(differentCapability, "2026-08-26T18:01:04.000Z", lineage)).rejects.toThrow();
     expect(raw).not.toContain(capability.token);
     expect(raw).not.toContain(differentCapability.token);
-    expect(raw).not.toContain(frozen.invocation.cwd);
     expect(raw).toContain(winner.value.capabilitySha256);
+    await expect(ledger.readIssuedLaunchCapabilityIdentity("run_capability", frozen.itemId)).resolves.toEqual({
+      provider: capability.provider,
+      proofSha256: capability.proofSha256,
+      invocationSha256: capability.invocationSha256,
+      attestationSha256: lineage.attestationSha256,
+      capabilitySha256: winner.value.capabilitySha256,
+    });
   });
 
-  it("keeps the old authority immutable while durably linking one runnable replacement across restart", async () => {
+  it("keeps the old authority immutable while replacing the current runnable plan", async () => {
     const { dataDir, authority } = await setup();
     const ledger = new OvernightPortfolioLedger({ dataDir });
     await ledger.saveAuthority(authority);
@@ -434,7 +360,11 @@ describe("Overnight portfolio durable ledger", () => {
       items: authority.items,
     };
 
-    await ledger.replaceAuthority(authority.plan.id, replacement, "2026-08-26T18:01:00.000Z");
+    await ledger.replaceCurrentRunnableAuthority(
+      replacement,
+      new Date("2026-08-26T18:01:00.000Z"),
+      "2026-08-26T18:01:00.000Z",
+    );
 
     expect(await readFile(ledger.authorityPath(authority.plan.id), "utf8")).toBe(originalBefore);
     const restarted = new OvernightPortfolioLedger({ dataDir });
@@ -475,7 +405,6 @@ describe("Overnight portfolio durable ledger", () => {
       disposition: "clarify",
       createdAt: "2026-08-26T18:00:00.000Z",
       contextGeneratedAt: "2026-08-26T17:55:00.000Z",
-      editableItemIds: ["candidate_one", "candidate_two"],
       candidates: [candidate, { ...candidate, stableKey: "candidate_two", disposition: "no_run" }],
     });
 
@@ -485,7 +414,6 @@ describe("Overnight portfolio durable ledger", () => {
     expect(stored).not.toContain('"prompt"');
     const restored = (await new OvernightPortfolioLedger({ dataDir }).listAssessments())[0];
     expect(restored.candidates).toHaveLength(2);
-    expect(restored.editableItemIds).toEqual(["candidate_one", "candidate_two"]);
   });
 
   it("recovers itemized partial failure evidence after restart", async () => {
@@ -529,10 +457,8 @@ describe("Overnight portfolio durable ledger", () => {
         status: "completed",
         providerReceiptId: "codex:turn:one",
         resultMetadata: {
-          executionRoot: "/runtime/one",
+          executionRoot: "approved-private-root",
           worktreeKey: "/runtime/one",
-          branch: "morrow/overnight/plan_20260826/one",
-          baseRevision: "a".repeat(40),
           integrationStatus: "not_integrated",
         },
       }),

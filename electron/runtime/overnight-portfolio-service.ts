@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   isOvernightExecutionProvider,
   type LocalSessionProvider,
+  type OvernightActivityKind,
   type OvernightExecutionProvider,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunItemSummary,
@@ -24,7 +25,6 @@ import {
   overnightFrozenBriefSha256,
   overnightPrivatePathSha256,
   type OvernightPortfolioAssessmentRecord,
-  type OvernightPortfolioEditableDraft,
   type OvernightPortfolioExecutionAuthority,
   type OvernightPortfolioExecutionAuthorityItem,
   type OvernightPortfolioFrozenBrief,
@@ -37,7 +37,6 @@ import {
   type OvernightPortfolioProposal,
 } from "./overnight-portfolio-recommendation";
 import {
-  overnightProviderAdapterInvocation,
   type OvernightProviderAdapterInvocation,
   type OvernightProviderLaunchCapability,
 } from "./overnight-provider-adapter";
@@ -66,10 +65,12 @@ import {
 } from "./overnight-worktree";
 
 const MAX_OVERNIGHT_RUN_MS = 450 * 60 * 1_000;
-const EDITABLE_DRAFT_LIFETIME_MS = 5 * 60 * 1_000;
+// A read-only prepared plan should survive a normal evening review. Launch
+// still re-checks its exact single-use authority and provider proof.
+const PREPARED_PLAN_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const DEFAULT_RESUME_CLEANUP_STOP_TIMEOUT_MS = 30_000;
-const DEFAULT_DISCOVER_OUTCOME_COUNT = 3;
 export const OVERNIGHT_PROVIDER_INVOCATION_IDENTITY_VERSION = 1 as const;
+const APPROVED_ROOT_WIDE_WRITE_SCOPES = Object.freeze(["*"] as const);
 
 export interface OvernightPortfolioWorkspaceManager {
   inspect(): Promise<OvernightWorkspaceSnapshot>;
@@ -90,12 +91,14 @@ export interface OvernightPortfolioDispatchInput {
   planId: string;
   runId: string;
   item: Readonly<OvernightPortfolioItem>;
-  authority: Readonly<OvernightPortfolioExecutionAuthorityItem>;
+  invocation: Readonly<OvernightProviderAdapterInvocation>;
+  containmentProof: Readonly<VerifiedOvernightProviderContainmentProof>;
   launchBinding: Readonly<VerifiedOvernightProviderLaunchBinding>;
   launchCapability: Readonly<OvernightProviderLaunchCapability>;
   prompt: string;
   deadlineAt: string;
   signal: AbortSignal;
+  onActivity(activity: OvernightActivityKind): void;
 }
 
 export interface OvernightPortfolioPrivateLaunchBinding {
@@ -128,10 +131,11 @@ export interface OvernightPortfolioResumeCleanupInput {
   runningItems: ReadonlyArray<{
     itemId: string;
     provider: OvernightExecutionProvider;
-    invocation: Readonly<OvernightProviderAdapterInvocation>;
-    containmentProof: Readonly<VerifiedOvernightProviderContainmentProof>;
-    invocationIdentityVersion: typeof OVERNIGHT_PROVIDER_INVOCATION_IDENTITY_VERSION;
+    proofSha256: string;
     invocationSha256: string;
+    attestationSha256: string;
+    capabilitySha256: string;
+    executableSha256: string;
   }>;
 }
 
@@ -150,28 +154,18 @@ interface OvernightPortfolioCleanupProof {
 export interface OvernightPortfolioRecommendationResult {
   assessment: OvernightPortfolioAssessment;
   providerRoutes: OvernightProviderRouteSummary[];
-  selectionId?: string;
-  editRequired?: string;
+  scopeDecisionReason?: string;
   plan?: OvernightPortfolioPlanSummary;
 }
 
 export type OvernightPortfolioAssessmentSnapshot = OvernightPortfolioAssessmentRecord;
-
-export interface OvernightPortfolioReplanInput {
-  includedItemIds: readonly string[];
-  providerByItemId?: Readonly<Partial<Record<string, OvernightExecutionProvider>>>;
-}
-
-export type OvernightPortfolioReplanResult =
-  | { status: "no_execution"; replacedPlanId: string; plan?: undefined }
-  | { status: "draft"; replacedPlanId: string; plan: OvernightPortfolioPlanSummary };
 
 export interface OvernightPortfolioServiceOptions {
   root: string;
   dataDir: string;
   now?: () => Date;
   readiness?: OvernightPortfolioReadiness;
-  containmentControl?: OvernightPortfolioContainmentControl;
+  containmentControl: OvernightPortfolioContainmentControl;
   workspace?: OvernightPortfolioWorkspaceManager;
   ledger?: OvernightPortfolioLedger;
   coordinator?: OvernightPortfolioCoordinator;
@@ -200,7 +194,7 @@ export class OvernightPortfolioService {
   private readonly dataDir: string;
   private readonly now: () => Date;
   private readonly readiness: OvernightPortfolioReadiness;
-  private readonly containmentControl?: OvernightPortfolioContainmentControl;
+  private readonly containmentControl: OvernightPortfolioContainmentControl;
   private readonly workspace: OvernightPortfolioWorkspaceManager;
   private readonly ledger: OvernightPortfolioLedger;
   private readonly coordinator: OvernightPortfolioCoordinator;
@@ -211,6 +205,7 @@ export class OvernightPortfolioService {
   private readonly createRunId: () => string;
   private readonly stopProviderRun?: (runId: string) => void | Promise<void>;
   private readonly activeRuns = new Map<string, OvernightActiveRunState>();
+  private readonly liveActivity = new Map<string, { activity: OvernightActivityKind; activityAt: string }>();
   private readonly resumeCleanupGuard?: OvernightPortfolioResumeCleanupGuard;
   private readonly resumeCleanupStopTimeoutMs: number;
 
@@ -222,21 +217,25 @@ export class OvernightPortfolioService {
     this.containmentControl = options.containmentControl;
     this.workspace = options.workspace ?? new OvernightWorktreeManager({ root: options.root, dataDir: options.dataDir });
     this.ledger = options.ledger ?? new OvernightPortfolioLedger({ dataDir: options.dataDir });
-    this.coordinator = options.coordinator ?? new OvernightPortfolioCoordinator({ now: this.now });
+    this.coordinator = options.coordinator ?? new OvernightPortfolioCoordinator({
+      now: this.now,
+      approvalLifetimeMs: PREPARED_PLAN_LIFETIME_MS,
+    });
     const providerRunner: NonNullable<OvernightPortfolioServiceOptions["providerRunner"]> = options.providerRunner ?? new OvernightProviderRunner({
       dataDir: options.dataDir,
       providerHostPath: options.providerHostPath,
     });
-    this.dispatchItem = options.dispatchItem ?? (({ runId, item, authority, launchBinding, launchCapability, prompt, deadlineAt, signal }) => providerRunner.run({
+    this.dispatchItem = options.dispatchItem ?? (({ runId, item, invocation, containmentProof, launchBinding, launchCapability, prompt, deadlineAt, signal, onActivity }) => providerRunner.run({
       runId,
       item,
-      invocation: requireLegacyAuthority(authority).invocation,
-      containmentProof: requireLegacyAuthority(authority).containmentProof,
+      invocation,
+      containmentProof,
       launchBinding,
       launchCapability,
       prompt,
       deadlineAt,
       signal,
+      onActivity,
     }));
     this.stopProviderRun = providerRunner.stopRun?.bind(providerRunner);
     this.resumeCleanupGuard = options.resumeCleanupGuard;
@@ -277,13 +276,12 @@ export class OvernightPortfolioService {
     const authorityItems: OvernightPortfolioExecutionAuthorityItem[] = [];
     const items: OvernightPortfolioItem[] = [];
     const executionBlocks = new Map<string, string>();
-    const containmentInspections = new Map<string, Promise<ProviderPlanningInspection>>();
-    const inspectContainment = (provider: OvernightExecutionProvider, writeScopes: readonly string[]) => {
-      const key = `${provider}\0${JSON.stringify(writeScopes)}`;
-      let pending = containmentInspections.get(key);
+    const containmentInspections = new Map<OvernightExecutionProvider, Promise<ProviderPlanningInspection>>();
+    const inspectContainment = (provider: OvernightExecutionProvider) => {
+      let pending = containmentInspections.get(provider);
       if (!pending) {
-        pending = this.containmentControl!.inspect(provider, { writeScopes });
-        containmentInspections.set(key, pending);
+        pending = this.containmentControl.inspect(provider, { writeScopes: APPROVED_ROOT_WIDE_WRITE_SCOPES });
+        containmentInspections.set(provider, pending);
       }
       return pending;
     };
@@ -291,100 +289,31 @@ export class OvernightPortfolioService {
       const provider = resolvedProvider(candidate);
       const route = overnightProviderRoute(provider);
       const brief = freezeBrief(candidate, context);
-      if (this.containmentControl) {
-        const inspection = await inspectContainment(provider, candidate.writeScopes);
-        if (inspection.status !== "ready") {
-          executionBlocks.set(candidate.stableKey, executionBlockedReason(route.label));
-          continue;
-        }
-        const plannedAllocation = this.workspace.plannedAllocation(snapshot, planId, candidate.stableKey);
-        const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", planId, candidate.stableKey);
-        const executionRootSha256 = overnightPrivatePathSha256("execution-root", plannedAllocation.executionRoot);
-        const worktreeKeySha256 = overnightPrivatePathSha256("worktree-key", plannedAllocation.worktreeKey);
-        const invocationMode = provider === "codex" || provider === "claude"
-          ? "macos-outer-verified" as const
-          : "pre-proof" as const;
-        const commandPreview = `${route.label} approved local worker`;
-        authorityItems.push({
-          itemId: candidate.stableKey,
-          brief,
-          containmentAuthority: {
-            version: 3,
-            provider,
-            executableSha256: inspection.executableSha256,
-            identitySha256: inspection.identitySha256,
-            attestationSha256: inspection.attestationSha256,
-            expiresAt: inspection.expiresAt,
-            executionRootSha256,
-            worktreeKeySha256,
-            runtimeDirectorySha256: overnightPrivatePathSha256("runtime-directory", runtimeDirectory),
-            invocationMode,
-            writeScopes: [...candidate.writeScopes],
-          },
-        });
-        items.push({
-          id: candidate.stableKey,
-          stableKey: candidate.stableKey,
-          origin: candidate.origin,
-          provider,
-          title: candidate.title,
-          outcome: candidate.outcome,
-          verification: candidate.verification,
-          providerReason: candidate.providerReason,
-          selectedSessionIds: candidate.selectedSessions.map((session) => session.id),
-          risks: candidate.risks,
-          commandPreview,
-          frozenBriefSha256: overnightFrozenBriefSha256(brief),
-          capacityPool: route.capacityPool,
-          workspaceKey: snapshot.workspaceKey,
-          isolation: snapshot.isolation,
-          worktreeKey: `path-free:${worktreeKeySha256}`,
-          conflictKeys: candidate.conflictKeys,
-          writeScopes: candidate.writeScopes,
-          dependencyIds: candidate.dependencyKeys,
-          estimatedMinutes: candidate.estimatedMinutes,
-        });
-        continue;
-      }
-      const allocation = this.workspace.plannedAllocation(snapshot, planId, candidate.stableKey);
-      const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", planId, candidate.stableKey);
-      let providerReadiness: OvernightProviderReadiness | undefined;
-      let invocation: OvernightProviderAdapterInvocation;
-      try {
-        providerReadiness = await this.readiness.inspect(provider, {
-          root: allocation.executionRoot,
-          runtimeDirectory,
-          writeScopes: candidate.writeScopes,
-        });
-        if (!providerReadiness || providerReadiness.status !== "ready"
-          || !providerReadiness.containmentProof
-          || !providerReadiness.launchBinding) {
-          throw new Error("The route has no current identity-bound containment proof for this item.");
-        }
-        invocation = overnightProviderAdapterInvocation(
-          provider,
-          allocation.executionRoot,
-          runtimeDirectory,
-          providerReadiness.executable,
-          providerReadiness.containmentProof.attestation && (provider === "codex" || provider === "claude")
-            ? "macos-outer-verified"
-            : "pre-proof",
-        );
-        if (!verifiedOvernightProviderContainmentMatches(
-          providerReadiness.containmentProof,
-          providerReadiness.launchBinding,
-          invocation,
-        )) throw new Error("The route containment proof does not match the frozen invocation.");
-      } catch {
+      const inspection = await inspectContainment(provider);
+      if (inspection.status !== "ready") {
         executionBlocks.set(candidate.stableKey, executionBlockedReason(route.label));
         continue;
       }
+      const plannedAllocation = this.workspace.plannedAllocation(snapshot, planId, candidate.stableKey);
+      const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", planId, candidate.stableKey);
+      const executionRootSha256 = overnightPrivatePathSha256("execution-root", plannedAllocation.executionRoot);
+      const worktreeKeySha256 = overnightPrivatePathSha256("worktree-key", plannedAllocation.worktreeKey);
+      const commandPreview = `${route.label} approved local worker`;
       authorityItems.push({
         itemId: candidate.stableKey,
         brief,
-        invocation,
-        containmentProof: providerReadiness.containmentProof,
-        allocation,
+        containmentAuthority: {
+          version: 3,
+          provider,
+          executableSha256: inspection.executableSha256,
+          identitySha256: inspection.identitySha256,
+          attestationSha256: inspection.attestationSha256,
+          expiresAt: inspection.expiresAt,
+          executionRootSha256,
+          worktreeKeySha256,
+          runtimeDirectorySha256: overnightPrivatePathSha256("runtime-directory", runtimeDirectory),
+          writeScopes: [...APPROVED_ROOT_WIDE_WRITE_SCOPES],
+        },
       });
       items.push({
         id: candidate.stableKey,
@@ -397,14 +326,16 @@ export class OvernightPortfolioService {
         providerReason: candidate.providerReason,
         selectedSessionIds: candidate.selectedSessions.map((session) => session.id),
         risks: candidate.risks,
-        commandPreview: invocation.commandPreview,
+        commandPreview,
         frozenBriefSha256: overnightFrozenBriefSha256(brief),
         capacityPool: route.capacityPool,
         workspaceKey: snapshot.workspaceKey,
         isolation: snapshot.isolation,
-        worktreeKey: allocation.worktreeKey,
-        conflictKeys: candidate.conflictKeys,
-        writeScopes: candidate.writeScopes,
+        worktreeKey: `path-free:${worktreeKeySha256}`,
+        conflictKeys: snapshot.isolation === "shared"
+          ? [...new Set([...candidate.conflictKeys, "root:*"])]
+          : candidate.conflictKeys,
+        writeScopes: [...APPROVED_ROOT_WIDE_WRITE_SCOPES],
         dependencyIds: candidate.dependencyKeys,
         estimatedMinutes: candidate.estimatedMinutes,
       });
@@ -413,19 +344,16 @@ export class OvernightPortfolioService {
     const authorityById = new Map(authorityItems.map((item) => [item.itemId, item]));
     const executableItemById = new Map(items.map((item) => [item.id, item]));
     const executableIds = new Set(executableItemById.keys());
-    const selectedCandidates = proposal.requestKind === "discover"
-      ? defaultDiscoverNightPlan(allRunnable.filter((candidate) => executableIds.has(candidate.stableKey)))
-      : allRunnable.filter((candidate) => executableIds.has(candidate.stableKey));
+    const selectedCandidates = allRunnable.filter((candidate) => executableIds.has(candidate.stableKey));
     const selectedItems = selectedCandidates.map((candidate) => executableItemById.get(candidate.stableKey)!);
     const lineage = inspectOvernightDependencyLineage(selectedItems);
     const blockedIds = new Set(lineage.blockedItemIds);
     const supportedItems = selectedItems.filter((item) => !blockedIds.has(item.id));
     const supportedAuthorityItems = supportedItems.map((item) => authorityById.get(item.id)!);
     let plan: ReturnType<OvernightPortfolioCoordinator["prepare"]> | undefined;
-    let selectionId: string | undefined;
-    let editRequired: string | undefined;
+    let scopeDecisionReason: string | undefined;
 
-    if (lineage.issues.length > 0) editRequired = new OvernightPortfolioDependencyLineageError(lineage).message;
+    if (lineage.issues.length > 0) scopeDecisionReason = new OvernightPortfolioDependencyLineageError(lineage).message;
     if (supportedItems.length > 0) {
       const supportedCapacityByPool = Object.fromEntries(supportedItems.map((item) => [
         item.capacityPool,
@@ -436,225 +364,44 @@ export class OvernightPortfolioService {
       } catch (reason) {
         const scheduleIssue = message(reason);
         if (!/450분|실행 창/u.test(scheduleIssue)) throw reason;
-        editRequired = [editRequired, scheduleIssue].filter(Boolean).join(" ");
+        scopeDecisionReason = [scopeDecisionReason, scheduleIssue].filter(Boolean).join(" ");
         plan = undefined;
       }
     }
 
-    const draftItems = plan
-      ? selectedItems.filter((item) => blockedIds.has(item.id))
-      : selectedItems;
-    if (draftItems.length > 0 && (blockedIds.size > 0 || !plan)) {
-      selectionId = plan ? this.createPlanId() : planId;
-      const draft: OvernightPortfolioEditableDraft = {
-        id: selectionId,
-        status: "selection_required",
-        createdAt,
-        expiresAt: new Date(Date.parse(createdAt) + EDITABLE_DRAFT_LIFETIME_MS).toISOString(),
-        workspace: snapshot,
-        items: draftItems.map((item) => ({ item, brief: authorityById.get(item.id)!.brief })),
-      };
-      await this.ledger.saveEditableDraft(draft);
-    }
     await this.replaceCurrentNightPlan(
       plan ? { plan, workspace: snapshot, items: supportedAuthorityItems } : undefined,
       createdAt,
     );
-    if (!selectionId && plan) selectionId = plan.id;
     await this.ledger.saveAssessment(assessmentRecord(
       assessmentId,
       proposal,
       effectiveAssessment,
       context.summary.generatedAt,
       createdAt,
-      selectionId,
-      editRequired,
+      scopeDecisionReason,
       plan?.id,
-      draftItems.length > 0 && (blockedIds.size > 0 || !plan) ? draftItems.map((item) => item.id) : undefined,
     ));
     return {
       assessment: effectiveAssessment,
       providerRoutes,
-      ...(selectionId ? { selectionId } : {}),
-      ...(editRequired ? { editRequired } : {}),
-      ...(plan ? { plan: planSummary(plan, effectiveAssessment.candidates) } : {}),
+      ...(scopeDecisionReason ? { scopeDecisionReason } : {}),
+      ...(plan ? {
+        plan: planSummary(
+          plan,
+          (itemId) => effectiveAssessment.candidates.find((candidate) => candidate.stableKey === itemId)?.selectedSessions,
+        ),
+      } : {}),
     };
   }
 
-  async replan(sourceId: string, input: OvernightPortfolioReplanInput): Promise<OvernightPortfolioReplanResult> {
-    const authority = await this.ledger.readAuthority(sourceId);
-    const editableDraft = authority ? undefined : await this.ledger.readEditableDraft(sourceId);
-    if (!authority && !editableDraft) throw new Error("편집할 Overnight 포트폴리오를 찾을 수 없습니다.");
-    const sourceExpiresAt = authority?.plan.expiresAt ?? editableDraft!.expiresAt;
-    if (this.now().getTime() >= Date.parse(sourceExpiresAt)) throw new Error("이 Overnight 포트폴리오 편집 시간이 만료되었습니다.");
-    if (new Set(input.includedItemIds).size !== input.includedItemIds.length) {
-      throw new Error("Overnight 포트폴리오 편집에 중복된 작업이 있습니다.");
-    }
-    const sourceItems = authority?.plan.items ?? editableDraft!.items.map((entry) => entry.item);
-    const sourceWorkspace = authority?.workspace ?? editableDraft!.workspace;
-    const sourceBriefs = new Map(authority
-      ? authority.items.map((item) => [item.itemId, item.brief] as const)
-      : editableDraft!.items.map((entry) => [entry.item.id, entry.brief] as const));
-    const originalById = new Map(sourceItems.map((item) => [item.id, item]));
-    const unknown = input.includedItemIds.filter((itemId) => !originalById.has(itemId));
-    if (unknown.length > 0) throw new Error(`Overnight 포트폴리오에 없는 작업입니다: ${unknown.join(", ")}`);
-    const includedIds = new Set(input.includedItemIds);
-    const providerOverrides = Object.entries(input.providerByItemId ?? {});
-    const invalidOverrides = providerOverrides.filter(([itemId]) => !includedIds.has(itemId));
-    if (invalidOverrides.length > 0) {
-      throw new Error(`포함되지 않은 작업의 실행기는 바꿀 수 없습니다: ${invalidOverrides.map(([itemId]) => itemId).join(", ")}`);
-    }
-    if (input.includedItemIds.length === 0) {
-      await this.ledger.replaceAuthority(sourceId, undefined, this.now().toISOString());
-      return { status: "no_execution", replacedPlanId: sourceId };
-    }
-
-    const selected = sourceItems.filter((item) => includedIds.has(item.id));
-    const missingDependencies = selected.flatMap((item) => item.dependencyIds
-      .filter((dependencyId) => !includedIds.has(dependencyId))
-      .map((dependencyId) => `${item.id} → ${dependencyId}`));
-    if (missingDependencies.length > 0) {
-      throw new Error(`의존 작업을 제외할 수 없습니다: ${missingDependencies.join(", ")}`);
-    }
-
-    await this.readiness.inspectAll();
-    const replacementPlanId = this.createPlanId();
-    const replacementAuthorityItems: OvernightPortfolioExecutionAuthorityItem[] = [];
-    const replacementItems: OvernightPortfolioItem[] = [];
-    const containmentInspections = new Map<string, Promise<ProviderPlanningInspection>>();
-    for (const item of selected) {
-      const provider = requireExecutionProvider(input.providerByItemId?.[item.id] ?? item.provider);
-      const route = overnightProviderRoute(provider);
-      const brief = sourceBriefs.get(item.id);
-      if (!brief) throw new Error("편집할 작업의 동결된 세션 요약을 찾을 수 없습니다.");
-      if (this.containmentControl) {
-        const key = `${provider}\0${JSON.stringify(item.writeScopes)}`;
-        let inspectionPromise = containmentInspections.get(key);
-        if (!inspectionPromise) {
-          inspectionPromise = this.containmentControl.inspect(provider, { writeScopes: item.writeScopes });
-          containmentInspections.set(key, inspectionPromise);
-        }
-        const inspection = await inspectionPromise;
-        if (inspection.status !== "ready") {
-          throw new Error(`${route.label} 실행기는 명시적 검증이 필요합니다.`);
-        }
-        const plannedAllocation = this.workspace.plannedAllocation(sourceWorkspace, replacementPlanId, item.id);
-        const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", replacementPlanId, item.id);
-        const executionRootSha256 = overnightPrivatePathSha256("execution-root", plannedAllocation.executionRoot);
-        const worktreeKeySha256 = overnightPrivatePathSha256("worktree-key", plannedAllocation.worktreeKey);
-        const commandPreview = `${route.label} approved local worker`;
-        replacementAuthorityItems.push({
-          itemId: item.id,
-          brief,
-          containmentAuthority: {
-            version: 3,
-            provider,
-            executableSha256: inspection.executableSha256,
-            identitySha256: inspection.identitySha256,
-            attestationSha256: inspection.attestationSha256,
-            expiresAt: inspection.expiresAt,
-            executionRootSha256,
-            worktreeKeySha256,
-            runtimeDirectorySha256: overnightPrivatePathSha256("runtime-directory", runtimeDirectory),
-            invocationMode: provider === "codex" || provider === "claude" ? "macos-outer-verified" : "pre-proof",
-            writeScopes: [...item.writeScopes],
-          },
-        });
-        replacementItems.push({
-          ...item,
-          provider,
-          providerReason: provider === item.provider
-            ? item.providerReason
-            : `${route.label} was selected during the user's pre-approval portfolio edit.`,
-          commandPreview,
-          capacityPool: route.capacityPool,
-          workspaceKey: sourceWorkspace.workspaceKey,
-          isolation: sourceWorkspace.isolation,
-          worktreeKey: `path-free:${worktreeKeySha256}`,
-        });
-        continue;
-      }
-      const allocation = this.workspace.plannedAllocation(sourceWorkspace, replacementPlanId, item.id);
-      const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", replacementPlanId, item.id);
-      const providerReadiness = await this.readiness.inspect(provider, {
-        root: allocation.executionRoot,
-        runtimeDirectory,
-        writeScopes: item.writeScopes,
-      });
-      if (!providerReadiness || providerReadiness.status !== "ready"
-        || !providerReadiness.containmentProof
-        || !providerReadiness.launchBinding) {
-        throw new Error(`${route.label} 실행기는 identity-bound containment 증거가 없어 이 작업으로 바꿀 수 없습니다.`);
-      }
-      const invocation = overnightProviderAdapterInvocation(
-        provider,
-        allocation.executionRoot,
-        runtimeDirectory,
-        providerReadiness.executable,
-        providerReadiness.containmentProof.attestation && (provider === "codex" || provider === "claude")
-          ? "macos-outer-verified"
-          : "pre-proof",
-      );
-      if (!verifiedOvernightProviderContainmentMatches(
-        providerReadiness.containmentProof,
-        providerReadiness.launchBinding,
-        invocation,
-      )) throw new Error(`${route.label} 실행기의 containment proof가 편집된 invocation과 일치하지 않습니다.`);
-      replacementAuthorityItems.push({
-        itemId: item.id,
-        brief,
-        invocation,
-        containmentProof: providerReadiness.containmentProof,
-        allocation,
-      });
-      replacementItems.push({
-        ...item,
-        provider,
-        providerReason: provider === item.provider
-          ? item.providerReason
-          : `${route.label} was selected during the user's pre-approval portfolio edit.`,
-        commandPreview: invocation.commandPreview,
-        capacityPool: route.capacityPool,
-        workspaceKey: sourceWorkspace.workspaceKey,
-        isolation: sourceWorkspace.isolation,
-        worktreeKey: allocation.worktreeKey,
-      });
-    }
-    const capacityByPool = Object.fromEntries(replacementItems.map((item) => [
-      item.capacityPool,
-      this.capacityByProvider[item.provider] ?? 1,
-    ]));
-    const replacementPlan = this.coordinator.prepare(replacementItems, capacityByPool, { planId: replacementPlanId });
-    const replacementAuthority: OvernightPortfolioExecutionAuthority = {
-      plan: replacementPlan,
-      workspace: sourceWorkspace,
-      items: replacementAuthorityItems,
-    };
-    await this.ledger.replaceAuthority(sourceId, replacementAuthority, this.now().toISOString());
-    return {
-      status: "draft",
-      replacedPlanId: sourceId,
-      plan: planSummaryFromAuthority(replacementPlan, replacementAuthorityItems),
-    };
-  }
-
-  async start(planId: string): Promise<OvernightPortfolioRunSummary> {
-    const prepared = await this.createApprovedRun(planId);
-    const activeRun = this.activateRun(prepared.runId);
-    try {
-      return await this.executeAuthority(prepared.authority, prepared.runId, [], prepared.deadlineAt, activeRun.controller.signal);
-    } finally {
-      this.releaseRun(prepared.runId, activeRun);
-    }
-  }
-
-  async launch(planId: string): Promise<OvernightPortfolioRunSummary> {
-    const prepared = await this.createApprovedRun(planId);
+  async launch(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary> {
+    const prepared = await this.createApprovedRun(planId, itemIds);
     const initial = await this.ledger.readRun(prepared.runId);
     if (!initial) throw new Error("Overnight 실행의 초기 상태를 저장하지 못했습니다.");
     const activeRun = this.activateRun(prepared.runId);
     void Promise.resolve()
-      .then(() => this.executeAuthority(prepared.authority, prepared.runId, [], prepared.deadlineAt, activeRun.controller.signal))
+      .then(() => this.executeAuthority(prepared.authority, prepared.runId, [], prepared.deadlineAt, activeRun.controller.signal, prepared.itemIds))
       .catch((reason) => this.recordBackgroundFailure(prepared.authority, prepared.runId, reason))
       .finally(() => this.releaseRun(prepared.runId, activeRun));
     return initial;
@@ -711,14 +458,12 @@ export class OvernightPortfolioService {
       }));
   }
 
-  private async createApprovedRun(planId: string) {
+  private async createApprovedRun(planId: string, itemIds?: readonly string[]) {
     const authority = await this.ledger.readAuthority(planId);
     if (!authority) throw new Error("이 Overnight 포트폴리오를 찾을 수 없습니다.");
     if (this.now().getTime() >= Date.parse(authority.plan.expiresAt)) throw new Error("이 Overnight 포트폴리오 승인은 만료되었습니다.");
     const containmentInspections = new Map<string, Promise<ProviderPlanningInspection>>();
     for (const item of authority.items) {
-      if (!item.containmentAuthority) continue;
-      if (!this.containmentControl) throw new Error("승인된 containment control을 찾을 수 없습니다.");
       const key = `${item.containmentAuthority.provider}\0${JSON.stringify(item.containmentAuthority.writeScopes)}`;
       let currentPromise = containmentInspections.get(key);
       if (!currentPromise) {
@@ -749,7 +494,7 @@ export class OvernightPortfolioService {
       deadlineAt,
       items: authority.plan.items.map((item) => ({ itemId: item.id, provider: item.provider })),
     });
-    return { authority, runId, deadlineAt };
+    return { authority, runId, deadlineAt, itemIds };
   }
 
   async resume(runId: string): Promise<OvernightPortfolioRunSummary> {
@@ -786,23 +531,29 @@ export class OvernightPortfolioService {
       };
       if (interruptedItems.length > 0 && this.resumeCleanupGuard) {
         const pendingCleanup = Promise.resolve()
-          .then(() => this.resumeCleanupGuard!.verifyCleanup({
+          .then(async () => this.resumeCleanupGuard!.verifyCleanup({
             runId,
             planId: observed.planId,
             deadlineAt,
-            runningItems: interruptedItems.map((item) => {
+            runningItems: await Promise.all(interruptedItems.map(async (item) => {
               const frozen = authorityByItem.get(item.itemId);
-              if (!frozen) throw new Error("정리 증거를 확인할 작업의 동결된 invocation을 찾을 수 없습니다.");
-              const legacy = requireLegacyAuthority(frozen);
+              if (!frozen) throw new Error("정리 증거를 확인할 작업의 동결된 authority를 찾을 수 없습니다.");
+              const issued = await this.ledger.readIssuedLaunchCapabilityIdentity(runId, item.itemId);
+              if (!issued
+                || issued.provider !== item.provider
+                || issued.attestationSha256 !== frozen.containmentAuthority.attestationSha256) {
+                throw new Error("정리 증거를 확인할 one-shot launch identity가 동결된 authority와 일치하지 않습니다.");
+              }
               return {
                 itemId: item.itemId,
                 provider: item.provider,
-                invocation: legacy.invocation,
-                containmentProof: legacy.containmentProof,
-                invocationIdentityVersion: OVERNIGHT_PROVIDER_INVOCATION_IDENTITY_VERSION,
-                invocationSha256: overnightProviderInvocationSha256(legacy.invocation),
+                proofSha256: issued.proofSha256,
+                invocationSha256: issued.invocationSha256,
+                attestationSha256: issued.attestationSha256,
+                capabilitySha256: issued.capabilitySha256,
+                executableSha256: frozen.containmentAuthority.executableSha256,
               };
-            }),
+            })),
           }))
           .catch((reason): OvernightPortfolioCleanupProof => ({ safeToResume: false, reason: message(reason) }));
         activeRun.pendingResumeCleanup = pendingCleanup;
@@ -854,30 +605,34 @@ export class OvernightPortfolioService {
     initialReceipts: readonly OvernightItemReceipt[],
     deadlineAt: string,
     signal: AbortSignal,
+    itemIds?: readonly string[],
   ) {
     const planId = authority.plan.id;
     const authorityByItem = new Map(authority.items.map((item) => [item.itemId, item]));
     const itemStartedAt = new Map<string, string>();
     const resultMetadataByItem = new Map<string, OvernightWorkspaceResultMetadata>();
+    const selected = itemIds && itemIds.length > 0 ? new Set(itemIds) : undefined;
     const coordinated = await this.coordinator.start(planId, async (item) => {
       const frozen = authorityByItem.get(item.id);
       if (!frozen) throw new Error("이 작업의 동결된 실행 계약을 찾을 수 없습니다.");
+      if (selected && !selected.has(item.id)) {
+        return { status: "skipped" as const, error: "Not selected for tonight." };
+      }
       if (signal.aborted) return { status: "failed", error: "사용자가 Overnight 실행을 중단했습니다." };
       const itemStart = this.now().toISOString();
       itemStartedAt.set(item.id, itemStart);
-      let resultMetadata = frozen.allocation
-        ? this.workspace.resultMetadata(frozen.allocation)
-        : {
-            executionRoot: "approved-private-root",
-            worktreeKey: item.worktreeKey,
-            integrationStatus: item.isolation === "shared" ? "shared_workspace" as const : "not_integrated" as const,
-          };
+      let resultMetadata: OvernightWorkspaceResultMetadata = {
+        executionRoot: "approved-private-root",
+        worktreeKey: item.worktreeKey,
+        integrationStatus: item.isolation === "shared" ? "shared_workspace" : "not_integrated",
+      };
       resultMetadataByItem.set(item.id, resultMetadata);
       const transitioned = await this.ledger.writeItemState(
         runId,
         itemState(item, "running", { startedAt: itemStart, resultMetadata }),
       );
       if (transitioned.status !== "running") return coordinatorReceiptFromTerminal(transitioned);
+      this.recordLiveActivity(runId, item.id, "starting");
       try {
         if (signal.aborted) {
           await this.ledger.writeItemState(runId, itemState(item, "stopped", {
@@ -891,152 +646,73 @@ export class OvernightPortfolioService {
         if (this.now().getTime() >= Date.parse(deadlineAt)) {
           throw new Error("승인된 Overnight 전체 실행 마감시각이 지나 작업을 시작하지 않았습니다.");
         }
-        if (frozen.containmentAuthority) {
-          if (!this.containmentControl) throw new Error("승인된 containment control을 찾을 수 없습니다.");
-          const allocation = await this.workspace.allocate(
-            { ...authority.workspace, root: this.root }, authority.plan.id, item.id,
-          );
-          resultMetadata = this.workspace.resultMetadata(allocation);
-          resultMetadataByItem.set(item.id, resultMetadata);
-          const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", authority.plan.id, item.id);
-          if (!privateAllocationMatchesAuthority(
-            frozen.containmentAuthority,
-            allocation,
-            runtimeDirectory,
-          )) {
-            throw new Error("실제 Overnight 실행 루트 또는 worktree가 승인된 path-free authority와 일치하지 않습니다.");
-          }
-          const approved = await this.containmentControl.prepareApprovedLaunch({
-            planId,
-            runId,
-            itemId: item.id,
-            provider: item.provider,
-            approvalClaimSha256: launchClaimSha256(
-              authority,
-              runId,
-              item.id,
-              frozen.containmentAuthority,
-            ),
-            fixedRoot: allocation.executionRoot,
-            worktreeKey: allocation.worktreeKey,
-            runtimeDirectory,
-            writeScopes: item.writeScopes,
-          });
-          if (approved.status !== "verified") throw new Error(`승인된 실행 경로를 준비하지 못했습니다: ${approved.reason}`);
-          try {
-            const prompt = buildProviderPrompt(item, frozen.brief, this.root);
-            assertOvernightPromptSize(Buffer.byteLength(prompt, "utf8"));
-            return await approved.withPrivateBinding(async (privateBinding) => {
-              if (!privateBindingMatchesAuthority(
-                privateBinding,
-                frozen.containmentAuthority!,
-                allocation,
-                runtimeDirectory,
-                item,
-              )) {
-                throw new Error("실행 직전 private binding이 승인된 path-free authority와 일치하지 않습니다.");
-              }
-              const launchCapability: OvernightProviderLaunchCapability = Object.freeze({
-                version: 1,
-                runId,
-                itemId: item.id,
-                provider: item.provider,
-                // The provider host and runner consume the concrete binding
-                // proof, while the ledger separately verifies its frozen
-                // attestation lineage below.
-                proofSha256: privateBinding.containmentProof.proofSha256,
-                invocationSha256: overnightProviderInvocationSha256(privateBinding.invocation),
-                token: randomUUID(),
-              });
-              await this.ledger.issueLaunchCapability(launchCapability, this.now().toISOString(), {
-                attestationSha256: frozen.containmentAuthority!.attestationSha256,
-              });
-              const receipt = await this.dispatchItem({
-                planId,
-                runId,
-                item,
-                authority: {
-                  itemId: frozen.itemId,
-                  brief: frozen.brief,
-                  invocation: privateBinding.invocation,
-                  containmentProof: privateBinding.containmentProof,
-                  allocation,
-                },
-                launchBinding: privateBinding.launchBinding,
-                launchCapability,
-                prompt,
-                deadlineAt,
-                signal,
-              });
-              if (signal.aborted) return { status: "failed" as const, error: "사용자가 Overnight 실행을 중단했습니다." };
-              await this.ledger.writeItemState(runId, itemState(item, receipt.status, {
-                startedAt: itemStart,
-                completedAt: this.now().toISOString(),
-                providerReceiptId: receipt.providerReceiptId,
-                report: receipt.report,
-                error: receipt.error,
-                resultMetadata,
-              }));
-              return receipt;
-            });
-          } finally {
-            await approved.cleanup();
-          }
+        const allocation = await this.workspace.allocate(
+          { ...authority.workspace, root: this.root }, authority.plan.id, item.id,
+        );
+        resultMetadata = this.workspace.resultMetadata(allocation);
+        resultMetadataByItem.set(item.id, resultMetadata);
+        const runtimeDirectory = join(this.dataDir, "overnight", "provider-runtime", authority.plan.id, item.id);
+        if (!privateAllocationMatchesAuthority(frozen.containmentAuthority, allocation, runtimeDirectory)) {
+          throw new Error("실제 Overnight 실행 루트 또는 worktree가 승인된 path-free authority와 일치하지 않습니다.");
         }
-        const legacy = requireLegacyAuthority(frozen);
-        const current = await this.readiness.inspect(requireExecutionProvider(item.provider), {
-          root: legacy.invocation.cwd,
-          runtimeDirectory: join(this.dataDir, "overnight", "provider-runtime", authority.plan.id, item.id),
-          writeScopes: item.writeScopes,
-        });
-        if (current.status !== "ready"
-          || !current.containmentProof
-          || !current.launchBinding
-          || current.executable !== legacy.invocation.executableName
-          || !sameContainmentAuthority(current.containmentProof, legacy.containmentProof)
-          || !verifiedOvernightProviderContainmentMatches(
-            current.containmentProof,
-            current.launchBinding,
-            legacy.invocation,
-          )) {
-          throw new Error(`${legacy.invocation.label} 실행 경로가 승인 이후 변경되었거나 더 이상 준비되지 않았습니다.`);
-        }
-        const allocation = await this.workspace.allocate(authority.workspace, authority.plan.id, item.id);
-        if (!sameAllocation(allocation, legacy.allocation)) throw new Error("실제 Overnight worktree가 승인된 경로와 일치하지 않습니다.");
-        const prompt = buildProviderPrompt(item, frozen.brief, authority.workspace.root);
-        assertOvernightPromptSize(Buffer.byteLength(prompt, "utf8"));
-        const launchCapability: OvernightProviderLaunchCapability = Object.freeze({
-          version: 1,
+        const approved = await this.containmentControl.prepareApprovedLaunch({
+          planId,
           runId,
           itemId: item.id,
           provider: item.provider,
-          proofSha256: legacy.containmentProof.proofSha256,
-          invocationSha256: legacy.containmentProof.invocation.sha256,
-          token: randomUUID(),
+          approvalClaimSha256: launchClaimSha256(authority, runId, item.id, frozen.containmentAuthority),
+          fixedRoot: allocation.executionRoot,
+          worktreeKey: allocation.worktreeKey,
+          runtimeDirectory,
+          writeScopes: item.writeScopes,
         });
-        await this.ledger.issueLaunchCapability(launchCapability, this.now().toISOString());
-        const receipt = await this.dispatchItem({
-          planId,
-          runId,
-          item,
-          authority: frozen,
-          launchBinding: current.launchBinding,
-          launchCapability,
-          prompt,
-          deadlineAt,
-          signal,
-        });
-        if (signal.aborted) return { status: "failed", error: "사용자가 Overnight 실행을 중단했습니다." };
-        const terminal = itemState(item, receipt.status, {
-          startedAt: itemStart,
-          completedAt: this.now().toISOString(),
-          providerReceiptId: receipt.providerReceiptId,
-          report: receipt.report,
-          error: receipt.error,
-          resultMetadata,
-        });
-        await this.ledger.writeItemState(runId, terminal);
-        return receipt;
+        if (approved.status !== "verified") throw new Error(`승인된 실행 경로를 준비하지 못했습니다: ${approved.reason}`);
+        try {
+          const prompt = buildProviderPrompt(item, frozen.brief, this.root);
+          assertOvernightPromptSize(Buffer.byteLength(prompt, "utf8"));
+          return await approved.withPrivateBinding(async (privateBinding) => {
+            if (!privateBindingMatchesAuthority(privateBinding, frozen.containmentAuthority, allocation, runtimeDirectory, item)) {
+              throw new Error("실행 직전 private binding이 승인된 path-free authority와 일치하지 않습니다.");
+            }
+            const launchCapability: OvernightProviderLaunchCapability = Object.freeze({
+              version: 1,
+              runId,
+              itemId: item.id,
+              provider: item.provider,
+              proofSha256: privateBinding.containmentProof.proofSha256,
+              invocationSha256: overnightProviderInvocationSha256(privateBinding.invocation),
+              token: randomUUID(),
+            });
+            await this.ledger.issueLaunchCapability(launchCapability, this.now().toISOString(), {
+              attestationSha256: frozen.containmentAuthority.attestationSha256,
+            });
+            const receipt = await this.dispatchItem({
+              planId,
+              runId,
+              item,
+              invocation: privateBinding.invocation,
+              containmentProof: privateBinding.containmentProof,
+              launchBinding: privateBinding.launchBinding,
+              launchCapability,
+              prompt,
+              deadlineAt,
+              signal,
+              onActivity: (activity) => this.recordLiveActivity(runId, item.id, activity),
+            });
+            if (signal.aborted) return { status: "failed" as const, error: "사용자가 Overnight 실행을 중단했습니다." };
+            await this.ledger.writeItemState(runId, itemState(item, receipt.status, {
+              startedAt: itemStart,
+              completedAt: this.now().toISOString(),
+              providerReceiptId: receipt.providerReceiptId,
+              report: receipt.report,
+              error: receipt.error,
+              resultMetadata,
+            }));
+            return receipt;
+          });
+        } finally {
+          await approved.cleanup();
+        }
       } catch (reason) {
         const error = message(reason);
         if (signal.aborted) return { status: "failed", error: "사용자가 Overnight 실행을 중단했습니다." };
@@ -1103,10 +779,27 @@ export class OvernightPortfolioService {
 
   private releaseRun(runId: string, state: OvernightActiveRunState) {
     if (this.activeRuns.get(runId) === state) this.activeRuns.delete(runId);
+    for (const key of this.liveActivity.keys()) {
+      if (key.startsWith(`${runId}:`)) this.liveActivity.delete(key);
+    }
   }
 
-  snapshotRuns() {
-    return this.ledger.listRuns();
+  async snapshotRuns() {
+    const runs = await this.ledger.listRuns();
+    return runs.map((run) => {
+      let updatedAt = run.updatedAt;
+      const items = run.items.map((item) => {
+        const live = this.liveActivity.get(`${run.id}:${item.itemId}`);
+        if (!live || item.status !== "running") return item;
+        if (live.activityAt > updatedAt) updatedAt = live.activityAt;
+        return { ...item, ...live };
+      });
+      return { ...run, items, updatedAt };
+    });
+  }
+
+  private recordLiveActivity(runId: string, itemId: string, activity: OvernightActivityKind) {
+    this.liveActivity.set(`${runId}:${itemId}`, { activity, activityAt: this.now().toISOString() });
   }
 
   snapshotAssessments() {
@@ -1115,7 +808,10 @@ export class OvernightPortfolioService {
 
   async snapshotPlans() {
     const authorities = await this.ledger.listRunnableAuthorities(this.now());
-    return authorities.map((authority) => planSummaryFromAuthority(authority.plan, authority.items));
+    return authorities.map((authority) => planSummary(
+      authority.plan,
+      (itemId) => authority.items.find((item) => item.itemId === itemId)?.brief.sessions,
+    ));
   }
 
   private async replaceCurrentNightPlan(
@@ -1272,62 +968,19 @@ function coordinatorReceiptFromTerminal(
 
 function planSummary(
   plan: ReturnType<OvernightPortfolioCoordinator["prepare"]>,
-  candidates: readonly OvernightPortfolioCandidateAssessment[],
+  sessionsFor: (
+    itemId: string,
+  ) => readonly OvernightPortfolioPlanSummary["items"][number]["selectedSessions"][number][] | undefined,
 ): OvernightPortfolioPlanSummary {
-  const candidatesById = new Map(candidates.map((candidate) => [candidate.stableKey, candidate]));
   const scheduleById = new Map(plan.schedule.entries.map((entry) => [entry.id, entry]));
   return {
     id: plan.id,
     status: plan.status,
     title: portfolioTitle(plan.items),
     items: plan.items.map((item) => {
-      const candidate = candidatesById.get(item.id)!;
-      const schedule = scheduleById.get(item.id)!;
-      const route = overnightProviderRoute(item.provider);
-      return {
-        id: item.id,
-        stableKey: item.stableKey,
-        origin: item.origin,
-        title: item.title,
-        outcome: item.outcome,
-        verification: item.verification,
-        provider: item.provider,
-        providerLabel: route.label,
-        providerReason: item.providerReason,
-        estimatedMinutes: item.estimatedMinutes,
-        startMinute: schedule.startMinute,
-        endMinute: schedule.endMinute,
-        isolation: item.isolation,
-        dependencyIds: [...item.dependencyIds],
-        conflictKeys: [...item.conflictKeys],
-        writeScopes: [...item.writeScopes],
-        risks: [...item.risks],
-        selectedSessions: candidate.selectedSessions.map((session) => ({ id: session.id, provider: session.provider, title: session.title })),
-        commandPreview: item.commandPreview,
-      };
-    }),
-    totalMinutes: plan.schedule.totalMinutes,
-    peakParallelism: plan.schedule.peakParallelism,
-    approvalFingerprint: plan.approvalFingerprint,
-    createdAt: plan.createdAt,
-    expiresAt: plan.expiresAt,
-  };
-}
-
-function planSummaryFromAuthority(
-  plan: ReturnType<OvernightPortfolioCoordinator["prepare"]>,
-  authorityItems: readonly OvernightPortfolioExecutionAuthorityItem[],
-): OvernightPortfolioPlanSummary {
-  const authorityById = new Map(authorityItems.map((item) => [item.itemId, item]));
-  const scheduleById = new Map(plan.schedule.entries.map((entry) => [entry.id, entry]));
-  return {
-    id: plan.id,
-    status: plan.status,
-    title: portfolioTitle(plan.items),
-    items: plan.items.map((item) => {
-      const authority = authorityById.get(item.id);
+      const selectedSessions = sessionsFor(item.id);
       const schedule = scheduleById.get(item.id);
-      if (!authority || !schedule) throw new Error("편집된 Overnight 계획 요약이 동결된 실행 계약과 일치하지 않습니다.");
+      if (!selectedSessions || !schedule) throw new Error("Overnight 계획 요약이 동결된 실행 계약과 일치하지 않습니다.");
       const route = overnightProviderRoute(item.provider);
       return {
         id: item.id,
@@ -1347,7 +1000,7 @@ function planSummaryFromAuthority(
         conflictKeys: [...item.conflictKeys],
         writeScopes: [...item.writeScopes],
         risks: [...item.risks],
-        selectedSessions: authority.brief.sessions.map((session) => ({
+        selectedSessions: selectedSessions.map((session) => ({
           id: session.id,
           provider: session.provider,
           title: session.title,
@@ -1407,63 +1060,14 @@ function requireExecutionProvider(provider: LocalSessionProvider): OvernightExec
   return provider;
 }
 
-function defaultDiscoverNightPlan(
-  candidates: readonly OvernightPortfolioCandidateAssessment[],
-): OvernightPortfolioCandidateAssessment[] {
-  const originalOrder = new Map(candidates.map((candidate, index) => [candidate.stableKey, index]));
-  const byKey = new Map(candidates.map((candidate) => [candidate.stableKey, candidate]));
-  const ranked = [...candidates].sort((left, right) => {
-    const scoreDifference = discoverValueScore(right) - discoverValueScore(left);
-    if (scoreDifference) return scoreDifference;
-    const recencyDifference = candidateRecency(right) - candidateRecency(left);
-    if (recencyDifference) return recencyDifference;
-    return (originalOrder.get(left.stableKey) ?? 0) - (originalOrder.get(right.stableKey) ?? 0);
-  });
-  const selected = new Set(ranked.slice(0, DEFAULT_DISCOVER_OUTCOME_COUNT).map((candidate) => candidate.stableKey));
-  const includeDependencies = (candidate: OvernightPortfolioCandidateAssessment, visiting = new Set<string>()) => {
-    if (visiting.has(candidate.stableKey)) return;
-    const nextVisiting = new Set(visiting).add(candidate.stableKey);
-    for (const dependencyKey of candidate.dependencyKeys) {
-      const dependency = byKey.get(dependencyKey);
-      if (!dependency) continue;
-      selected.add(dependencyKey);
-      includeDependencies(dependency, nextVisiting);
-    }
-  };
-  ranked.filter((candidate) => selected.has(candidate.stableKey)).forEach((candidate) => includeDependencies(candidate));
-  return ranked.filter((candidate) => selected.has(candidate.stableKey));
-}
-
-function discoverValueScore(candidate: OvernightPortfolioCandidateAssessment) {
-  const originWeight = {
-    continuation: 5,
-    follow_up: 4,
-    batch: 3,
-    routine: 2,
-    proactive: 1,
-  }[candidate.origin];
-  return (candidate.reasonCodes.includes("explicit_priority") ? 100 : 0)
-    + (candidate.evidence.some((entry) => entry.source === "user_goal") ? 50 : 0)
-    + originWeight;
-}
-
-function candidateRecency(candidate: OvernightPortfolioCandidateAssessment) {
-  return candidate.selectedSessions.reduce((latest, session) => {
-    const timestamp = Date.parse(session.updatedAt ?? "");
-    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
-  }, 0);
-}
-
 function assessmentRecord(
   id: string,
   proposal: OvernightPortfolioProposal,
   assessment: OvernightPortfolioAssessment,
   contextGeneratedAt: string,
   createdAt: string,
-  selectionId?: string,
-  editRequiredReason?: string,
+  scopeDecisionReason?: string,
   planId?: string,
-  editableItemIds?: readonly string[],
 ): OvernightPortfolioAssessmentRecord {
   const proposalByKey = new Map(proposal.candidates.map((candidate) => [candidate.stableKey, candidate]));
   return {
@@ -1473,9 +1077,7 @@ function assessmentRecord(
     createdAt,
     contextGeneratedAt,
     ...(planId ? { planId } : {}),
-    ...(selectionId ? { selectionId } : {}),
-    ...(editableItemIds ? { editableItemIds: [...editableItemIds] } : {}),
-    ...(editRequiredReason ? { editRequiredReason } : {}),
+    ...(scopeDecisionReason ? { scopeDecisionReason } : {}),
     candidates: assessment.candidates.map((candidate) => {
       const proposedProvider = proposalByKey.get(candidate.stableKey)?.preferredProvider ?? "auto";
       return {
@@ -1515,30 +1117,6 @@ function portfolioTitle(items: readonly Pick<OvernightPortfolioItem, "title">[])
   return items.length === 1 ? items[0].title : `${items.length}개의 Overnight 작업`;
 }
 
-function sameAllocation(left: OvernightWorkspaceAllocation, right: OvernightWorkspaceAllocation) {
-  return left.root === right.root
-    && left.repositoryRoot === right.repositoryRoot
-    && left.repositoryRevision === right.repositoryRevision
-    && left.repositoryRelativeRoot === right.repositoryRelativeRoot
-    && left.workspaceKey === right.workspaceKey
-    && left.isolation === right.isolation
-    && left.reason === right.reason
-    && left.executionRoot === right.executionRoot
-    && left.worktreeKey === right.worktreeKey
-    && left.branch === right.branch;
-}
-
-function requireLegacyAuthority(item: OvernightPortfolioExecutionAuthorityItem) {
-  if (!item.invocation || !item.containmentProof || !item.allocation || item.containmentAuthority) {
-    throw new Error("Legacy Overnight authority is unavailable for this launch.");
-  }
-  return {
-    invocation: item.invocation,
-    containmentProof: item.containmentProof,
-    allocation: item.allocation,
-  };
-}
-
 function privateBindingMatchesAuthority(
   binding: Readonly<OvernightPortfolioPrivateLaunchBinding>,
   authority: Readonly<OvernightPortfolioPathFreeContainmentAuthority>,
@@ -1550,9 +1128,9 @@ function privateBindingMatchesAuthority(
     && binding.invocation.cwd === allocation.executionRoot
     && binding.containmentProof.provider === authority.provider
     && binding.containmentProof.executable.sha256 === authority.executableSha256
-    && binding.containmentProof.attestation?.sha256 === authority.attestationSha256
+    && binding.containmentProof.attestation.sha256 === authority.attestationSha256
     && binding.containmentProof.attestation.expiresAt === authority.expiresAt
-    && JSON.stringify(binding.launchBinding.writeScopes ?? []) === JSON.stringify(authority.writeScopes)
+    && JSON.stringify(binding.launchBinding.writeScopes) === JSON.stringify(authority.writeScopes)
     && JSON.stringify(item.writeScopes) === JSON.stringify(authority.writeScopes)
     && privateAllocationMatchesAuthority(authority, allocation, runtimeDirectory)
     && verifiedOvernightProviderContainmentMatches(
@@ -1613,22 +1191,4 @@ export function overnightProviderInvocationSha256(invocation: Readonly<Overnight
     promptTransport: invocation.promptTransport,
     commandPreview: invocation.commandPreview,
   })).digest("hex");
-}
-
-function sameContainmentAuthority(
-  current: Readonly<VerifiedOvernightProviderContainmentProof>,
-  frozen: Readonly<VerifiedOvernightProviderContainmentProof>,
-) {
-  return current.provider === frozen.provider
-    && current.proofSha256 === frozen.proofSha256
-    && current.scope.bindingSha256 === frozen.scope.bindingSha256
-    && current.executable.sha256 === frozen.executable.sha256
-    && current.executable.wrapperInvocationSha256 === frozen.executable.wrapperInvocationSha256
-    && current.invocation.sha256 === frozen.invocation.sha256
-    && current.environment.policyId === frozen.environment.policyId
-    && current.environment.sha256 === frozen.environment.sha256
-    && current.launcher.providerHostSha256 === frozen.launcher.providerHostSha256
-    && current.launcher.sandboxLauncherSha256 === frozen.launcher.sandboxLauncherSha256
-    && current.launcher.sandboxProfileId === frozen.launcher.sandboxProfileId
-    && current.launcher.sandboxProfileSha256 === frozen.launcher.sandboxProfileSha256;
 }

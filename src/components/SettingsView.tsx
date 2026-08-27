@@ -1,16 +1,17 @@
-import { ExternalLink, FolderLock, Github, LogOut, Send } from "lucide-react";
-import type { AppLanguage, BootstrapState, GitHubProfile } from "../shared/contracts";
+import { ExternalLink, FolderLock, Github, LogOut, Send, ShieldCheck } from "lucide-react";
+import type { AppLanguage, BootstrapState, GitHubProfile, OvernightExecutionProvider } from "../shared/contracts";
 import { ProviderConnections } from "./ProviderConnections";
 import { Button } from "./ui/Button";
 import { Surface } from "./ui/Surface";
 
-export function SettingsView({ state, error, githubProfile, githubOffline, onConnect, onDisconnect, onLanguage, onManageGitHub, onLogoutGitHub }: {
+export function SettingsView({ state, error, githubProfile, githubOffline, onConnect, onDisconnect, onVerifyOvernightProvider, onLanguage, onManageGitHub, onLogoutGitHub }: {
   state: BootstrapState;
   error?: string;
   githubProfile?: GitHubProfile;
   githubOffline?: boolean;
   onConnect(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
   onDisconnect(providerId: string): Promise<void>;
+  onVerifyOvernightProvider(provider: OvernightExecutionProvider): Promise<void>;
   onLanguage(language: AppLanguage): Promise<void>;
   onManageGitHub(): Promise<void>;
   onLogoutGitHub(): Promise<void>;
@@ -56,6 +57,11 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
           <ProviderConnections state={state} language={state.language} onConnect={onConnect} onDisconnect={onDisconnect} />
         </Surface>
 
+        <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
+          <div className="settings-section__intro"><h2 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck size={18} />{ko ? "Overnight CLI" : "Overnight CLIs"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "이미 이 Mac에 설치하고 로그인해 둔 코딩 에이전트입니다. 공식 앱에서 로그인하세요. 이 화면은 PATH에서 찾을 수만 합니다." : "These are coding agents already installed on this Mac. Sign in with the official CLI. This screen only checks that they are on your PATH."}</p></div>
+          <div className="mt-4 grid gap-2">{state.orchestration.providerRoutes.map((route) => <div key={route.provider} className="flex min-h-12 items-center justify-between gap-4 rounded-[12px] border border-line bg-surface/50 px-4 py-2.5"><span className="min-w-0"><strong className="block text-sm">{route.label}</strong><small className="block truncate text-[11px] text-ink-faint">{route.status === "ready" ? (ko ? "설치됨" : "Installed") : (ko ? "설치되지 않음" : "Not installed")}</small><small className="mt-1 block font-mono text-[10px] text-ink-faint">{loginHint(route.provider)}</small></span></div>)}</div>
+        </Surface>
+
         <Surface className="settings-section settings-grid mt-0 flex items-center justify-between gap-6 rounded-t-none border-t-0 p-5 shadow-none">
           <div><h2 className="text-base font-semibold">{ko ? "대화 언어" : "Conversation language"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "Morrow 화면의 언어만 바꾸며, 사용하는 모델은 바뀌지 않습니다." : "This changes Morrow’s interface language, not the model you use."}</p></div>
           <div className="segmented flex shrink-0 rounded-[13px] border border-line bg-night p-1">
@@ -71,4 +77,11 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
       </div>
     </main>
   );
+}
+
+function loginHint(provider: OvernightExecutionProvider) {
+  if (provider === "claude") return "claude auth login";
+  if (provider === "codex") return "codex login";
+  if (provider === "grok") return "grok";
+  return "bundled with Morrow";
 }

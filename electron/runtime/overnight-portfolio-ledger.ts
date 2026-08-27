@@ -13,24 +13,15 @@ import type {
 import type { FrozenOvernightPortfolio, OvernightPortfolioItem } from "./overnight-portfolio-coordinator";
 import { redactSensitive } from "./daily-context";
 import {
-  overnightProviderAdapterIdentity,
   overnightProviderLaunchCapabilitySha256,
-  type OvernightProviderAdapterInvocation,
   type OvernightProviderLaunchCapability,
 } from "./overnight-provider-adapter";
-import {
-  containmentProofIdentitySha256,
-  verifiedOvernightProviderContainmentMatchesInvocation,
-  type VerifiedOvernightProviderContainmentProof,
-} from "./overnight-provider-containment";
 import type {
   ConsumedApprovedLaunchClaim,
   PrivateApprovedLaunchInput,
 } from "./overnight-provider-containment-control";
 import { overnightProviderRoute } from "./overnight-provider-registry";
 import {
-  overnightWorkspaceResultMetadata,
-  type OvernightWorkspaceAllocation,
   type OvernightWorkspaceResultMetadata,
   type OvernightWorkspaceSnapshot,
 } from "./overnight-worktree";
@@ -41,10 +32,7 @@ const MAX_OVERNIGHT_RUN_MS = 450 * 60 * 1_000;
 export interface OvernightPortfolioExecutionAuthorityItem {
   itemId: string;
   brief: OvernightPortfolioFrozenBrief;
-  invocation?: OvernightProviderAdapterInvocation;
-  containmentProof?: VerifiedOvernightProviderContainmentProof;
-  allocation?: OvernightWorkspaceAllocation;
-  containmentAuthority?: OvernightPortfolioPathFreeContainmentAuthority;
+  containmentAuthority: OvernightPortfolioPathFreeContainmentAuthority;
 }
 
 /** Durable V3 authority. It deliberately contains no executable or sandbox path. */
@@ -58,7 +46,6 @@ export interface OvernightPortfolioPathFreeContainmentAuthority {
   executionRootSha256: string;
   worktreeKeySha256: string;
   runtimeDirectorySha256: string;
-  invocationMode: "macos-outer-verified" | "pre-proof";
   writeScopes: string[];
 }
 
@@ -85,9 +72,7 @@ export interface OvernightPortfolioAssessmentRecord {
   createdAt: string;
   contextGeneratedAt: string;
   planId?: string;
-  selectionId?: string;
-  editableItemIds?: string[];
-  editRequiredReason?: string;
+  scopeDecisionReason?: string;
   candidates: Array<{
     stableKey: string;
     origin: "continuation" | "follow_up" | "proactive" | "batch" | "routine";
@@ -111,24 +96,6 @@ export interface OvernightPortfolioAssessmentRecord {
   }>;
 }
 
-export interface OvernightPortfolioEditableDraft {
-  id: string;
-  status: "selection_required";
-  createdAt: string;
-  expiresAt: string;
-  workspace: OvernightWorkspaceSnapshot;
-  items: Array<{
-    item: OvernightPortfolioItem;
-    brief: OvernightPortfolioFrozenBrief;
-  }>;
-}
-
-interface StoredEditableDraft {
-  version: typeof LEDGER_VERSION;
-  body: OvernightPortfolioEditableDraft;
-  contractSha256: string;
-}
-
 interface StoredAssessment {
   version: typeof LEDGER_VERSION;
   body: OvernightPortfolioAssessmentRecord;
@@ -148,8 +115,6 @@ interface StoredAuthority {
   version: typeof LEDGER_VERSION;
   body: OvernightPortfolioExecutionAuthority;
   contractSha256: string;
-  replacementOf?: string;
-  lineageSha256?: string;
 }
 
 interface StoredClaim {
@@ -163,7 +128,6 @@ interface StoredClaim {
 interface StoredSupersession {
   version: typeof LEDGER_VERSION;
   planId: string;
-  replacementPlanId?: string;
   supersededAt: string;
   approvalFingerprint: string;
 }
@@ -179,9 +143,15 @@ interface StoredLaunchCapability {
   provider: OvernightExecutionProvider;
   proofSha256: string;
   invocationSha256: string;
+  attestationSha256: string;
   capabilitySha256: string;
   issuedAt: string;
 }
+
+export type OvernightIssuedLaunchCapabilityIdentity = Readonly<Pick<
+  StoredLaunchCapability,
+  "provider" | "proofSha256" | "invocationSha256" | "attestationSha256" | "capabilitySha256"
+>>;
 
 interface StoredLaunchPreparationClaim {
   version: typeof LEDGER_VERSION;
@@ -223,37 +193,6 @@ export class OvernightPortfolioLedger {
     }
   }
 
-  async saveEditableDraft(draft: OvernightPortfolioEditableDraft) {
-    const body = normalizeEditableDraft(draft);
-    const stored: StoredEditableDraft = {
-      version: LEDGER_VERSION,
-      body,
-      contractSha256: sha256(JSON.stringify(body)),
-    };
-    try {
-      await writeExclusiveJson(this.editableDraftPath(body.id), stored);
-    } catch (reason) {
-      if (errorCode(reason) === "EEXIST") throw new Error("이 Overnight 편집 초안 ID는 이미 저장되어 있습니다.");
-      throw reason;
-    }
-  }
-
-  async readEditableDraft(id: string): Promise<OvernightPortfolioEditableDraft | undefined> {
-    let stored: StoredEditableDraft;
-    try {
-      stored = JSON.parse(await readFile(this.editableDraftPath(id), "utf8")) as StoredEditableDraft;
-    } catch (reason) {
-      if (errorCode(reason) === "ENOENT") return undefined;
-      throw new Error("Overnight 편집 초안의 무결성을 확인하지 못했습니다.");
-    }
-    if (stored.version !== LEDGER_VERSION
-      || !stored.body
-      || stored.contractSha256 !== sha256(JSON.stringify(stored.body))) {
-      throw new Error("Overnight 편집 초안의 무결성을 확인하지 못했습니다.");
-    }
-    return normalizeEditableDraft(stored.body);
-  }
-
   async listAssessments(): Promise<OvernightPortfolioAssessmentRecord[]> {
     let names: string[];
     try {
@@ -280,36 +219,18 @@ export class OvernightPortfolioLedger {
     await this.writeAuthority(authority);
   }
 
-  async replaceAuthority(
-    replacedPlanId: string,
-    replacement: OvernightPortfolioExecutionAuthority | undefined,
-    supersededAt: string,
-  ) {
+  private async supersedeAuthority(replacedPlanId: string, supersededAt: string) {
     const replaced = await this.readStoredAuthority(replacedPlanId);
-    const replacedDraft = replaced ? undefined : await this.readEditableDraft(replacedPlanId);
-    if (!replaced && !replacedDraft) throw new Error("교체할 Overnight 포트폴리오를 찾을 수 없습니다.");
-    const replacementPlanId = replacement?.plan.id;
-    if (replacementPlanId === replacedPlanId) throw new Error("Overnight 포트폴리오는 자기 자신으로 교체할 수 없습니다.");
-
-    if (replacement) await this.writeAuthority(replacement, replacedPlanId);
+    if (!replaced) throw new Error("교체할 Overnight 포트폴리오를 찾을 수 없습니다.");
     const marker: StoredSupersession = {
       version: LEDGER_VERSION,
       planId: safeId(replacedPlanId, "plan"),
-      ...(replacementPlanId ? { replacementPlanId: safeId(replacementPlanId, "replacement plan") } : {}),
       supersededAt: validTimestamp(supersededAt, "supersession"),
-      approvalFingerprint: replaced?.body.plan.approvalFingerprint ?? editableDraftFingerprint(replacedDraft!),
+      approvalFingerprint: replaced.body.plan.approvalFingerprint,
     };
     try {
       await writeExclusiveJson(this.claimPath(replacedPlanId), marker);
     } catch (reason) {
-      if (replacement) {
-        await writeExclusiveJson(this.claimPath(replacement.plan.id), {
-          version: LEDGER_VERSION,
-          planId: replacement.plan.id,
-          supersededAt: supersededAt,
-          approvalFingerprint: replacement.plan.approvalFingerprint,
-        } satisfies StoredSupersession).catch(() => undefined);
-      }
       if (errorCode(reason) === "EEXIST") throw new Error("이 Overnight 포트폴리오는 이미 실행되었거나 교체되었습니다.");
       throw reason;
     }
@@ -330,26 +251,22 @@ export class OvernightPortfolioLedger {
           return;
         }
 
-        const [latest, ...older] = current;
-        for (const authority of older.reverse()) {
-          await this.replaceAuthority(authority.plan.id, undefined, supersededAt);
-        }
-        await this.replaceAuthority(latest.plan.id, replacement, supersededAt);
+        // Fail closed across a crash: retire every old plan first. If writing
+        // the replacement fails, automatic preparation can retry from zero;
+        // two runnable plans can never survive the transition.
+        for (const authority of current) await this.supersedeAuthority(authority.plan.id, supersededAt);
+        if (replacement) await this.saveAuthority(replacement);
       },
     );
   }
 
-  private async writeAuthority(authority: OvernightPortfolioExecutionAuthority, replacementOf?: string) {
+  private async writeAuthority(authority: OvernightPortfolioExecutionAuthority) {
     validateAuthority(authority);
     const body = normalizeAuthority(authority);
     const stored: StoredAuthority = {
       version: LEDGER_VERSION,
       body,
       contractSha256: sha256(JSON.stringify(body)),
-      ...(replacementOf ? {
-        replacementOf: safeId(replacementOf, "replaced plan"),
-        lineageSha256: authorityLineageSha256(body, replacementOf),
-      } : {}),
     };
     try {
       await writeExclusiveJson(this.authorityPath(body.plan.id), stored);
@@ -377,15 +294,6 @@ export class OvernightPortfolioLedger {
       const stored = await this.readStoredAuthority(planId);
       if (!stored || now.getTime() >= Date.parse(stored.body.plan.expiresAt)) return undefined;
       if (await this.readLifecycle(planId)) return undefined;
-      if (stored.replacementOf) {
-        const predecessorFingerprint = await this.readSourceFingerprint(stored.replacementOf);
-        const lifecycle = await this.readLifecycle(stored.replacementOf);
-        if (!predecessorFingerprint
-          || !lifecycle
-          || !("supersededAt" in lifecycle)
-          || lifecycle.replacementPlanId !== planId
-          || lifecycle.approvalFingerprint !== predecessorFingerprint) return undefined;
-      }
       return stored.body;
     }));
     return runnable
@@ -409,9 +317,7 @@ export class OvernightPortfolioLedger {
     }
     if (stored.version !== LEDGER_VERSION
       || !stored.body
-      || stored.contractSha256 !== sha256(JSON.stringify(stored.body))
-      || (stored.replacementOf !== undefined
-        && stored.lineageSha256 !== authorityLineageSha256(stored.body, stored.replacementOf))) {
+      || stored.contractSha256 !== sha256(JSON.stringify(stored.body))) {
       throw new Error("Overnight 포트폴리오 승인 기록의 무결성을 확인하지 못했습니다.");
     }
     try {
@@ -426,16 +332,6 @@ export class OvernightPortfolioLedger {
     const stored = await this.readStoredAuthority(planId);
     if (!stored) throw new Error("이 Overnight 포트폴리오를 찾을 수 없습니다.");
     const authority = stored.body;
-    if (stored.replacementOf) {
-      const predecessor = await this.readLifecycle(stored.replacementOf);
-      const predecessorFingerprint = await this.readSourceFingerprint(stored.replacementOf);
-      if (!predecessor
-        || !("supersededAt" in predecessor)
-        || predecessor.replacementPlanId !== planId
-        || predecessor.approvalFingerprint !== predecessorFingerprint) {
-        throw new Error("이 편집된 Overnight 포트폴리오의 교체 승인을 확인하지 못했습니다.");
-      }
-    }
     const claim: StoredClaim = {
       version: LEDGER_VERSION,
       planId: safeId(planId, "plan"),
@@ -500,7 +396,7 @@ export class OvernightPortfolioLedger {
       title: approved.title,
       outcome: approved.outcome,
       verification: approved.verification,
-      resultMetadata: item.resultMetadata ?? authorityResultMetadata(approvedAuthority, approved),
+      resultMetadata: item.resultMetadata ?? authorityResultMetadata(approved),
       providerLabel: overnightProviderRoute(item.provider).label,
     };
     const path = this.itemStatePath(runId, item.itemId);
@@ -516,7 +412,7 @@ export class OvernightPortfolioLedger {
           title: approved.title,
           outcome: approved.outcome,
           verification: approved.verification,
-          resultMetadata: stored.resultMetadata ?? authorityResultMetadata(approvedAuthority, approved),
+          resultMetadata: stored.resultMetadata ?? authorityResultMetadata(approved),
           providerLabel: overnightProviderRoute(item.provider).label,
         };
       } catch (reason) {
@@ -626,7 +522,7 @@ export class OvernightPortfolioLedger {
   async issueLaunchCapability(
     capability: Readonly<OvernightProviderLaunchCapability>,
     issuedAt: string,
-    lineage?: Readonly<{ attestationSha256: string }>,
+    lineage: Readonly<{ attestationSha256: string }>,
   ) {
     const runId = safeId(capability.runId, "run");
     const itemId = safeId(capability.itemId, "item");
@@ -642,12 +538,10 @@ export class OvernightPortfolioLedger {
     }
     const authority = await this.readAuthority(manifest.planId);
     const authorityItem = authority?.items.find((item) => item.itemId === itemId);
-    const proofMatches = authorityItem?.containmentAuthority
-      ? /^[a-f0-9]{64}$/u.test(capability.proofSha256)
-        && /^[a-f0-9]{64}$/u.test(capability.invocationSha256)
-        && lineage?.attestationSha256 === authorityItem.containmentAuthority.attestationSha256
-      : authorityItem?.containmentProof?.proofSha256 === capability.proofSha256
-        && authorityItem.containmentProof.invocation.sha256 === capability.invocationSha256;
+    const proofMatches = authorityItem
+      && /^[a-f0-9]{64}$/u.test(capability.proofSha256)
+      && /^[a-f0-9]{64}$/u.test(capability.invocationSha256)
+      && lineage.attestationSha256 === authorityItem.containmentAuthority.attestationSha256;
     if (!authorityItem || !proofMatches) {
       throw new Error("launch capability의 proof identity가 동결된 authority와 일치하지 않습니다.");
     }
@@ -658,6 +552,7 @@ export class OvernightPortfolioLedger {
       provider: capability.provider,
       proofSha256: capability.proofSha256,
       invocationSha256: capability.invocationSha256,
+      attestationSha256: lineage.attestationSha256,
       capabilitySha256: overnightProviderLaunchCapabilitySha256(capability),
       issuedAt: validTimestamp(issuedAt, "launch capability"),
     };
@@ -676,6 +571,40 @@ export class OvernightPortfolioLedger {
     return Object.freeze({ ...stored });
   }
 
+  async readIssuedLaunchCapabilityIdentity(
+    runId: string,
+    itemId: string,
+  ): Promise<OvernightIssuedLaunchCapabilityIdentity | undefined> {
+    let stored: Partial<StoredLaunchCapability>;
+    try {
+      stored = JSON.parse(await readFile(this.launchCapabilityIssuancePath(runId, itemId), "utf8")) as Partial<StoredLaunchCapability>;
+    } catch (reason) {
+      if (errorCode(reason) === "ENOENT") return undefined;
+      throw reason;
+    }
+    const sha = (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+    if (stored.version !== LEDGER_VERSION
+      || stored.runId !== runId
+      || stored.itemId !== itemId
+      || typeof stored.provider !== "string"
+      || !sha(stored.proofSha256)
+      || !sha(stored.invocationSha256)
+      || !sha(stored.attestationSha256)
+      || !sha(stored.capabilitySha256)
+      || !stored.issuedAt
+      || !Number.isFinite(Date.parse(stored.issuedAt))) {
+      throw new Error("저장된 Overnight launch capability identity가 올바르지 않습니다.");
+    }
+    overnightProviderRoute(stored.provider as OvernightExecutionProvider);
+    return Object.freeze({
+      provider: stored.provider as OvernightExecutionProvider,
+      proofSha256: stored.proofSha256!,
+      invocationSha256: stored.invocationSha256!,
+      attestationSha256: stored.attestationSha256!,
+      capabilitySha256: stored.capabilitySha256!,
+    });
+  }
+
   async readRun(runId: string): Promise<OvernightPortfolioRunSummary | undefined> {
     const manifest = await this.readRunManifest(runId);
     if (!manifest) return undefined;
@@ -687,7 +616,7 @@ export class OvernightPortfolioLedger {
       const approved = approvedById.get(entry.itemId);
       const approvedAuthority = authorityById.get(entry.itemId);
       if (!approved || !approvedAuthority) throw new Error("Overnight 실행 작업이 동결된 승인 근거와 일치하지 않습니다.");
-      const resultMetadata = authorityResultMetadata(approvedAuthority, approved);
+      const resultMetadata = authorityResultMetadata(approved);
       try {
         const item = JSON.parse(await readFile(this.itemStatePath(manifest.id, entry.itemId), "utf8")) as OvernightPortfolioRunItemSummary;
         if (item.itemId !== entry.itemId || item.provider !== entry.provider) throw new Error("mismatch");
@@ -764,17 +693,6 @@ export class OvernightPortfolioLedger {
     return join(this.root, "claims", `${safeId(planId, "plan")}.json`);
   }
 
-  private editableDraftPath(id: string) {
-    return join(this.root, "editable", `${safeId(id, "editable draft")}.json`);
-  }
-
-  private async readSourceFingerprint(id: string) {
-    const authority = await this.readStoredAuthority(id);
-    if (authority) return authority.body.plan.approvalFingerprint;
-    const draft = await this.readEditableDraft(id);
-    return draft ? editableDraftFingerprint(draft) : undefined;
-  }
-
   private runManifestPath(runId: string) {
     return join(this.root, "runs", safeId(runId, "run"), "run.json");
   }
@@ -808,7 +726,6 @@ export class OvernightPortfolioLedger {
         safeId(lifecycle.runId, "run");
         validTimestamp(lifecycle.claimedAt, "claim");
       } else {
-        if (lifecycle.replacementPlanId) safeId(lifecycle.replacementPlanId, "replacement plan");
         validTimestamp(lifecycle.supersededAt, "supersession");
       }
       return lifecycle;
@@ -839,12 +756,6 @@ function validateAuthority(authority: OvernightPortfolioExecutionAuthority) {
   for (const item of authority.items) {
     const approved = planItems.get(item.itemId);
     const v3 = item.containmentAuthority;
-    const legacyMatches = item.invocation && item.containmentProof && item.allocation
-      && item.invocation.provider === approved?.provider
-      && item.invocation.commandPreview === approved?.commandPreview
-      && legacyProofMatchesInvocation(item.containmentProof, item.invocation)
-      && item.invocation.cwd === item.allocation.executionRoot
-      && item.allocation.worktreeKey === approved?.worktreeKey;
     const v3Matches = v3
       && v3.version === 3
       && v3.provider === approved?.provider
@@ -856,8 +767,7 @@ function validateAuthority(authority: OvernightPortfolioExecutionAuthority) {
       && /^[a-f0-9]{64}$/u.test(v3.runtimeDirectorySha256)
       && Number.isFinite(Date.parse(v3.expiresAt))
       && JSON.stringify(v3.writeScopes) === JSON.stringify(approved?.writeScopes);
-    if (!approved || (!legacyMatches && !v3Matches)
-      || Boolean(v3) === Boolean(item.invocation || item.containmentProof || item.allocation)
+    if (!approved || !v3Matches
       || overnightFrozenBriefSha256(item.brief) !== approved.frozenBriefSha256) {
       throw new Error("Overnight authority item does not match the approved fingerprint inputs.");
     }
@@ -872,21 +782,6 @@ function validateAuthority(authority: OvernightPortfolioExecutionAuthority) {
       }
     });
   }
-}
-
-function legacyProofMatchesInvocation(
-  proof: Readonly<VerifiedOvernightProviderContainmentProof>,
-  invocation: Readonly<OvernightProviderAdapterInvocation>,
-) {
-  if (verifiedOvernightProviderContainmentMatchesInvocation(proof, invocation)) return true;
-  const identity = overnightProviderAdapterIdentity(invocation);
-  return !proof.attestation
-    && proof.version === 2
-    && proof.provider === invocation.provider
-    && proof.proofSha256 === containmentProofIdentitySha256(proof)
-    && proof.invocation.sha256 === identity.sha256
-    && proof.invocation.adapterKind === identity.adapterKind
-    && proof.invocation.promptTransport === identity.promptTransport;
 }
 
 export function overnightFrozenBriefSha256(brief: OvernightPortfolioFrozenBrief) {
@@ -929,7 +824,7 @@ function normalizeAuthority(authority: OvernightPortfolioExecutionAuthority): Ov
     items: authority.items.map((item) => ({
       itemId: item.itemId,
       brief: normalizeBrief(item.brief),
-      ...(item.containmentAuthority ? { containmentAuthority: {
+      containmentAuthority: {
         version: 3 as const,
         provider: item.containmentAuthority.provider,
         executableSha256: item.containmentAuthority.executableSha256,
@@ -939,97 +834,9 @@ function normalizeAuthority(authority: OvernightPortfolioExecutionAuthority): Ov
         executionRootSha256: item.containmentAuthority.executionRootSha256,
         worktreeKeySha256: item.containmentAuthority.worktreeKeySha256,
         runtimeDirectorySha256: item.containmentAuthority.runtimeDirectorySha256,
-        invocationMode: item.containmentAuthority.invocationMode,
         writeScopes: [...item.containmentAuthority.writeScopes],
-      } } : {}),
-      ...(item.invocation ? { invocation: {
-        provider: item.invocation.provider,
-        label: item.invocation.label,
-        adapterKind: item.invocation.adapterKind,
-        ...(item.invocation.executableName ? { executableName: item.invocation.executableName } : {}),
-        args: [...item.invocation.args],
-        cwd: item.invocation.cwd,
-        environment: { ...item.invocation.environment },
-        promptTransport: item.invocation.promptTransport,
-        commandPreview: item.invocation.commandPreview,
-      } } : {}),
-      ...(item.containmentProof ? { containmentProof: normalizeContainmentProof(item.containmentProof) } : {}),
-      ...(item.allocation ? { allocation: {
-        ...normalizeWorkspace(item.allocation),
-        executionRoot: item.allocation.executionRoot,
-        worktreeKey: item.allocation.worktreeKey,
-        ...(item.allocation.branch ? { branch: item.allocation.branch } : {}),
-      } } : {}),
-    })),
-  };
-}
-
-function normalizeContainmentProof(
-  proof: VerifiedOvernightProviderContainmentProof,
-): VerifiedOvernightProviderContainmentProof {
-  return {
-    version: 2,
-    provider: proof.provider,
-    proofSha256: proof.proofSha256,
-    platform: "darwin",
-    verifiedAt: proof.verifiedAt,
-    scope: {
-      canonical: true,
-      disjoint: true,
-      bindingSha256: proof.scope.bindingSha256,
-      ...(proof.scope.writeScopesSha256 ? { writeScopesSha256: proof.scope.writeScopesSha256 } : {}),
-      ...(proof.scope.mutationAuthority ? { mutationAuthority: proof.scope.mutationAuthority } : {}),
-    },
-    executable: {
-      realpathVerified: true,
-      sha256: proof.executable.sha256,
-      signature: "verified",
-      teamIdentifier: proof.executable.teamIdentifier,
-      version: proof.executable.version,
-      wrapperInvocationSha256: proof.executable.wrapperInvocationSha256,
-    },
-    invocation: {
-      adapterIdentityVersion: 1,
-      sha256: proof.invocation.sha256,
-      adapterKind: proof.invocation.adapterKind,
-      promptTransport: proof.invocation.promptTransport,
-    },
-    environment: {
-      policyId: "morrow-exact-ephemeral-v1",
-      sha256: proof.environment.sha256,
-    },
-    launcher: {
-      providerHostSha256: proof.launcher.providerHostSha256,
-      sandboxLauncherSha256: proof.launcher.sandboxLauncherSha256,
-      sandboxProfileId: proof.launcher.sandboxProfileId,
-      sandboxProfileSha256: proof.launcher.sandboxProfileSha256,
-    },
-    policy: {
-      fileRead: "system-fixed-root-runtime-auth-only",
-      fileWrite: "fixed-root-runtime-dev-null-only",
-      network: "provider-only",
-      commandExternalEffect: "denied",
-    },
-    canary: {
-      identityBound: true,
-      processExit: "zero",
-      providerTurn: "completed",
-      commandReceipt: "observed",
-      insideWrite: "verified",
-      adjacentOutsideWrite: "blocked-and-absent",
-      outsideSecretRead: "blocked-and-unobserved",
-      ...(proof.canary.providerCredentialRead ? { providerCredentialRead: "verified" as const } : {}),
-      ...(proof.canary.toolCredentialRead ? { toolCredentialRead: "blocked-and-unobserved" as const } : {}),
-      commandNetwork: "blocked",
-      commandExternalEffect: "blocked",
-    },
-    ...(proof.attestation ? {
-      attestation: {
-        version: 1 as const,
-        sha256: proof.attestation.sha256,
-        expiresAt: proof.attestation.expiresAt,
       },
-    } : {}),
+    })),
   };
 }
 
@@ -1057,11 +864,7 @@ function normalizeWorkspace(workspace: OvernightWorkspaceSnapshot): OvernightWor
   };
 }
 
-function authorityResultMetadata(
-  authority: OvernightPortfolioExecutionAuthorityItem,
-  approved: OvernightPortfolioItem,
-): OvernightWorkspaceResultMetadata {
-  if (authority.allocation) return overnightWorkspaceResultMetadata(authority.allocation);
+function authorityResultMetadata(approved: OvernightPortfolioItem): OvernightWorkspaceResultMetadata {
   return {
     executionRoot: "approved-private-root",
     worktreeKey: approved.worktreeKey,
@@ -1073,13 +876,6 @@ function normalizeAssessment(assessment: OvernightPortfolioAssessmentRecord): Ov
   safeId(assessment.id, "assessment");
   validTimestamp(assessment.createdAt, "assessment creation");
   validTimestamp(assessment.contextGeneratedAt, "assessment context");
-  const candidateIds = new Set(assessment.candidates.map((candidate) => candidate.stableKey));
-  const editableItemIds = assessment.editableItemIds?.map((itemId) => safeId(itemId, "editable item"));
-  if (editableItemIds && (editableItemIds.length === 0
-    || new Set(editableItemIds).size !== editableItemIds.length
-    || editableItemIds.some((itemId) => !candidateIds.has(itemId)))) {
-    throw new Error("Overnight 추천의 편집 대상 작업 목록이 후보와 일치하지 않습니다.");
-  }
   return {
     id: assessment.id,
     requestKind: assessment.requestKind,
@@ -1087,9 +883,7 @@ function normalizeAssessment(assessment: OvernightPortfolioAssessmentRecord): Ov
     createdAt: assessment.createdAt,
     contextGeneratedAt: assessment.contextGeneratedAt,
     ...(assessment.planId ? { planId: safeId(assessment.planId, "assessment plan") } : {}),
-    ...(assessment.selectionId ? { selectionId: safeId(assessment.selectionId, "selection") } : {}),
-    ...(editableItemIds ? { editableItemIds } : {}),
-    ...(assessment.editRequiredReason ? { editRequiredReason: assessmentText(assessment.editRequiredReason, 1_000) } : {}),
+    ...(assessment.scopeDecisionReason ? { scopeDecisionReason: assessmentText(assessment.scopeDecisionReason, 1_000) } : {}),
     candidates: assessment.candidates.map((candidate) => {
       if (candidate.preferredProvider !== "auto") overnightProviderRoute(candidate.preferredProvider);
       if (candidate.resolvedProvider) overnightProviderRoute(candidate.resolvedProvider);
@@ -1124,54 +918,6 @@ function normalizeAssessment(assessment: OvernightPortfolioAssessmentRecord): Ov
       };
     }),
   };
-}
-
-function normalizeEditableDraft(draft: OvernightPortfolioEditableDraft): OvernightPortfolioEditableDraft {
-  if (draft.status !== "selection_required") throw new Error("Overnight 편집 초안 상태가 올바르지 않습니다.");
-  const id = safeId(draft.id, "editable draft");
-  const createdAt = validTimestamp(draft.createdAt, "editable draft creation");
-  const expiresAt = validTimestamp(draft.expiresAt, "editable draft expiry");
-  if (Date.parse(expiresAt) <= Date.parse(createdAt)) throw new Error("Overnight 편집 초안 만료시각이 올바르지 않습니다.");
-  if (!Array.isArray(draft.items) || draft.items.length === 0) throw new Error("Overnight 편집 초안에는 작업이 필요합니다.");
-  const seen = new Set<string>();
-  const items = draft.items.map(({ item, brief }) => {
-    safeId(item.id, "editable item");
-    if (seen.has(item.id)) throw new Error("Overnight 편집 초안에 중복 작업이 있습니다.");
-    seen.add(item.id);
-    overnightProviderRoute(item.provider);
-    const normalizedBrief = normalizeBrief(brief);
-    if (JSON.stringify(item.selectedSessionIds) !== JSON.stringify(normalizedBrief.sessions.map((session) => session.id))
-      || item.frozenBriefSha256 !== overnightFrozenBriefSha256(normalizedBrief)) {
-      throw new Error("Overnight 편집 초안의 세션 요약이 작업과 일치하지 않습니다.");
-    }
-    return {
-      item: {
-        ...clone(item),
-        title: assessmentText(item.title, 120),
-        outcome: assessmentText(item.outcome, 4_000),
-        verification: assessmentText(item.verification, 2_000),
-        providerReason: assessmentText(item.providerReason, 2_000),
-        selectedSessionIds: [...item.selectedSessionIds],
-        risks: item.risks.map((value) => assessmentText(value, 500)),
-        conflictKeys: item.conflictKeys.map((value) => assessmentText(value, 120)),
-        writeScopes: item.writeScopes.map((value) => assessmentText(value, 300)),
-        dependencyIds: [...item.dependencyIds],
-      },
-      brief: normalizedBrief,
-    };
-  });
-  return {
-    id,
-    status: "selection_required",
-    createdAt,
-    expiresAt,
-    workspace: normalizeWorkspace(draft.workspace),
-    items,
-  };
-}
-
-function editableDraftFingerprint(draft: OvernightPortfolioEditableDraft) {
-  return sha256(JSON.stringify(normalizeEditableDraft(draft)));
 }
 
 function assessmentText(value: string, limit: number) {
@@ -1240,14 +986,6 @@ function clone<T>(value: T): T {
 
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function authorityLineageSha256(authority: OvernightPortfolioExecutionAuthority, replacementOf: string) {
-  return sha256(JSON.stringify({
-    planId: authority.plan.id,
-    approvalFingerprint: authority.plan.approvalFingerprint,
-    replacementOf,
-  }));
 }
 
 function safeId(value: string, label: string) {

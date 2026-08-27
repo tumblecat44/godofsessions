@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, FilePenLine, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.svg";
 import { cn } from "../lib/cn";
-import type { ApprovalRequest, BootstrapState, ConversationDetail, ThinkingLevel } from "../shared/contracts";
+import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightPortfolioPlanSummary, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
+import { TonightPlan } from "./TonightPlan";
 import { Button } from "./ui/Button";
 import { Surface } from "./ui/Surface";
 
@@ -22,6 +23,9 @@ interface ChatViewProps {
   onModel(provider: string, modelId: string): Promise<void>;
   onThinking(level: ThinkingLevel): Promise<void>;
   onOpenSettings(): void;
+  tonightPlan?: OvernightPortfolioPlanSummary;
+  tonightPreparing?: boolean;
+  onStartTonight?(planId: string, itemIds: string[]): Promise<void>;
 }
 const FOLLOW_BOTTOM_THRESHOLD = 80;
 
@@ -105,10 +109,22 @@ export function ChatView(props: ChatViewProps) {
 
   return (
     <main className="chat-workspace h-dvh min-w-0 overflow-hidden bg-night text-ink" hidden={props.hidden}>
-      <section className="chat-main grid h-dvh grid-rows-[86px_minmax(0,1fr)_auto_auto] overflow-hidden">
+      <section className="chat-main grid h-dvh grid-rows-[86px_auto_minmax(0,1fr)_auto_auto] overflow-hidden">
         <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-[clamp(28px,4vw,54px)] pt-2"><div className="flex items-center gap-3"><OperatorMark size={32} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><span className="root-chip max-w-[min(58vw,720px)] overflow-x-auto whitespace-nowrap rounded-lg border border-line-soft bg-white/[0.018] px-3 py-2 font-mono text-[9px] tracking-[0.04em] text-ink-faint" title={ko ? "고정 실행 폴더" : "Fixed execution root"}><strong>{ko ? "실행 폴더" : "EXECUTION ROOT"}</strong> · <code>{props.state.rootPath ?? props.state.rootName}</code></span></header>
 
-        <div className="chat-transcript flex min-h-0 flex-col overflow-y-auto px-[clamp(32px,9vw,150px)] pb-8 pt-10 before:mt-auto before:content-[''] max-[900px]:px-8" ref={scrollRef} onScroll={() => {
+        {props.onStartTonight && (
+          <div className="px-[clamp(32px,9vw,150px)] pt-5 max-[900px]:px-8">
+            <TonightPlan
+              plan={props.tonightPlan}
+              preparing={props.tonightPreparing}
+              language={props.state.language}
+              disabled={Boolean(props.conversation?.busy)}
+              onStart={props.onStartTonight}
+            />
+          </div>
+        )}
+
+        <div className="chat-transcript flex min-h-0 flex-col overflow-y-auto px-[clamp(32px,9vw,150px)] pb-8 pt-6 before:mt-auto before:content-[''] max-[900px]:px-8" ref={scrollRef} onScroll={() => {
           const viewport = scrollRef.current;
           if (viewport) followBottom.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= FOLLOW_BOTTOM_THRESHOLD;
         }}>
@@ -183,7 +199,7 @@ function FriendlyEmpty({ ko, warnings }: { ko: boolean; warnings: string[] }) {
       <div>
         <span className="eyebrow">A QUIET PLACE TO THINK</span>
         <h1>{ko ? "무엇부터 같이 풀어볼까요?" : "What shall we untangle together?"}</h1>
-        <p>{ko ? "그냥 이야기해도 좋아요. 파일이나 명령은 부탁할 때만 사용하고, 바꾸기 전에는 먼저 물어볼게요. 다른 AI 세션을 바탕으로 밤사이 작업을 준비하려면 Overnight에서 직접 시작하세요." : "You can simply talk. I only reach for files or commands when you ask—and I pause before changing anything. Open Overnight when you want to prepare work from other AI sessions."}</p>
+        <p>{ko ? "그냥 이야기해도 좋아요. 위 카드가 별로면 여기서 말해 주세요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. If tonight's cards are wrong, say so here. I only reach for files or commands when you ask, and I pause before changing anything."}</p>
         {warnings.length > 0 && <small className="briefing-warning">{warnings[0]}</small>}
       </div>
     </div>

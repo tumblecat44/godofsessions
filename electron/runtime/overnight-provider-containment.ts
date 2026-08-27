@@ -8,7 +8,6 @@ import {
   overnightProviderEnvironmentSha256,
   type OvernightProviderAdapterInvocation,
 } from "./overnight-provider-adapter";
-import type { OvernightExecutorInvocationMode } from "./overnight-executor-contract";
 
 export const MACOS_PROVIDER_CONTAINMENT_POLICY = Object.freeze({
   fileRead: "system-fixed-root-runtime-auth-only",
@@ -253,9 +252,8 @@ export interface VerifiedOvernightProviderContainmentProof {
     canonical: true;
     disjoint: true;
     bindingSha256: string;
-    /** Present on every attestation-backed live proof; absent on legacy V2 history. */
-    writeScopesSha256?: string;
-    mutationAuthority?: "direct-provider-root-wide-only";
+    writeScopesSha256: string;
+    mutationAuthority: "direct-provider-root-wide-only";
   };
   executable: {
     realpathVerified: true;
@@ -290,18 +288,12 @@ export interface VerifiedOvernightProviderContainmentProof {
     insideWrite: "verified";
     adjacentOutsideWrite: "blocked-and-absent";
     outsideSecretRead: "blocked-and-unobserved";
-    /** Required on every new live attestation-backed proof. */
-    providerCredentialRead?: "verified";
-    /** Required on every new live attestation-backed proof. */
-    toolCredentialRead?: "blocked-and-unobserved";
+    providerCredentialRead: "verified";
+    toolCredentialRead: "blocked-and-unobserved";
     commandNetwork: "blocked";
     commandExternalEffect: "blocked";
   };
-  /**
-   * New live proofs carry the path-independent capability authority. Legacy
-   * V2 durable synthetic fixtures omit it and remain readable for history.
-   */
-  attestation?: {
+  attestation: {
     version: 1;
     sha256: string;
     expiresAt: string;
@@ -321,7 +313,7 @@ export interface VerifiedOvernightProviderLaunchBinding {
   sandboxLauncherPath: string;
   sandboxProfilePath: string;
   /** Ephemeral exact scopes whose digest is frozen in the proof. */
-  writeScopes?: readonly string[];
+  writeScopes: readonly string[];
   /** Exact transient provider environment. Never copy this into a ledger. */
   effectiveEnvironment: Readonly<Record<string, string>>;
 }
@@ -351,6 +343,29 @@ export type OvernightProviderContainmentAttestationDecision =
       reason: OvernightProviderContainmentBlockedReason;
     };
 
+type OvernightProviderContainmentObservationProof = Omit<
+  VerifiedOvernightProviderContainmentProof,
+  "scope" | "canary" | "attestation"
+> & {
+  scope: Pick<VerifiedOvernightProviderContainmentProof["scope"], "canonical" | "disjoint" | "bindingSha256">;
+  canary: VerifiedOvernightProviderContainmentProof["canary"];
+};
+
+type OvernightProviderContainmentObservationBinding = Omit<VerifiedOvernightProviderLaunchBinding, "writeScopes">;
+
+type OvernightProviderContainmentObservationDecision =
+  | {
+      status: "verified";
+      provider: OvernightExecutionProvider;
+      proof: OvernightProviderContainmentObservationProof;
+      launchBinding: OvernightProviderContainmentObservationBinding;
+    }
+  | {
+      status: "blocked";
+      provider: OvernightExecutionProvider;
+      reason: OvernightProviderContainmentBlockedReason;
+    };
+
 export interface OvernightProviderContainmentVerifier {
   attestDisposableCapability(
     request: OvernightProviderContainmentAttestationRequest,
@@ -359,8 +374,6 @@ export interface OvernightProviderContainmentVerifier {
     request: OvernightProviderContainmentBindingRequest,
     attestation: Readonly<VerifiedOvernightProviderCapabilityAttestation>,
   ): Promise<OvernightProviderContainmentDecision>;
-  /** @deprecated V2 fixture compatibility only. Never inject into readiness. */
-  verifyLegacyV2(request: OvernightProviderContainmentRequest): Promise<OvernightProviderContainmentDecision>;
 }
 
 export function createOvernightProviderContainmentVerifier(
@@ -369,7 +382,6 @@ export function createOvernightProviderContainmentVerifier(
   return {
     attestDisposableCapability: (request) => attestDisposableCapability(host, request),
     bindLaunch: (request, attestation) => bindOvernightProviderLaunch(host, request, attestation),
-    verifyLegacyV2: (request) => verifyOvernightProviderContainment(host, request),
   };
 }
 
@@ -395,7 +407,7 @@ async function attestDisposableCapability(
     return blocked("invalid_request");
   }
 
-  const decision = await verifyOvernightProviderContainment(host, request, "macos-outer-verified");
+  const decision = await verifyOvernightProviderContainment(host, request);
   if (decision.status !== "verified") return decision;
   const canonical = await canonicalCapabilityScope(host, request, decision.launchBinding).catch(() => undefined);
   if (!canonical) return blocked("path_observation_failed");
@@ -469,43 +481,24 @@ async function bindOvernightProviderLaunch(
   });
   if (!validSha256(request.profileAuthoritySha256)) return blocked("invalid_request");
   if (request.provider !== "codex" && request.provider !== "claude") return blocked("invalid_request");
-  const writeScopes = normalizeWriteScopes(request.writeScopes);
-  if (!writeScopes || writeScopes.length !== 1 || writeScopes[0] !== "*") return blocked("invalid_request");
+  if (request.writeScopes.length !== 1 || request.writeScopes[0] !== "*") return blocked("invalid_request");
+  const writeScopes = ["*"] as const;
   const now = safeHostNow(host);
   if (!now) return blocked("clock_observation_failed");
   const attestationFailure = validateVerifiedOvernightProviderCapabilityAttestation(attestation, request.provider, now);
   if (attestationFailure) return blocked(attestationFailure);
   if (!host.inspectExecutableStatic) return blocked("executable_identity_observation_failed");
 
-  // bindLaunch receives no canary function. This local evidence adapter merely
-  // reuses the legacy identity/profile observation implementation; it cannot
-  // execute a provider turn or mutate either workspace.
+  // Binding re-observes identity and profile bytes, but the disposable canary
+  // was already frozen in the validated attestation and must not run again.
   const observationOnlyHost: OvernightProviderContainmentHost = {
     ...host,
     inspectExecutable: async (executable) => ({
       ...await host.inspectExecutableStatic!(executable),
       version: attestation.executable.version,
     }),
-    runCanary: async (canaryRequest) => ({
-      bindingSha256: canaryRequest.bindingSha256,
-      executableSha256: canaryRequest.executableSha256,
-      policy: { ...MACOS_PROVIDER_CONTAINMENT_POLICY },
-      processExitCode: 0,
-      providerTurn: "completed",
-      commandReceipt: "observed",
-      insideWrite: "succeeded",
-      adjacentOutsideWrite: "blocked",
-      adjacentOutsideWriteAbsent: true,
-      outsideSecretRead: "blocked",
-      outsideSecretContentObserved: false,
-      providerCredentialRead: "verified",
-      toolCredentialRead: "blocked",
-      credentialSentinelObserved: false,
-      commandNetwork: "blocked",
-      commandExternalEffect: "blocked",
-    }),
   };
-  const decision = await verifyOvernightProviderContainment(observationOnlyHost, request, "macos-outer-verified");
+  const decision = await verifyOvernightProviderContainment(observationOnlyHost, request, attestation.canary);
   if (decision.status !== "verified") return decision;
   const canonical = await canonicalCapabilityScope(host, request, decision.launchBinding).catch(() => undefined);
   if (!canonical) return blocked("path_observation_failed");
@@ -563,9 +556,9 @@ async function bindOvernightProviderLaunch(
 async function verifyOvernightProviderContainment(
   host: OvernightProviderContainmentHost,
   request: OvernightProviderContainmentRequest,
-  invocationMode: OvernightExecutorInvocationMode = "pre-proof",
-): Promise<OvernightProviderContainmentDecision> {
-  const blocked = (reason: OvernightProviderContainmentBlockedReason): OvernightProviderContainmentDecision => ({
+  attestedCanary?: VerifiedOvernightProviderContainmentProof["canary"],
+): Promise<OvernightProviderContainmentObservationDecision> {
+  const blocked = (reason: OvernightProviderContainmentBlockedReason): OvernightProviderContainmentObservationDecision => ({
     status: "blocked",
     provider: request.provider,
     reason,
@@ -645,7 +638,7 @@ async function verifyOvernightProviderContainment(
     fixedRoot,
     runtimeDirectory,
     request.provider === "pi" ? undefined : executable,
-    invocationMode,
+    "macos-outer-verified",
   );
   const invocationIdentity = overnightProviderAdapterIdentity(invocation);
   const effectiveEnvironment = overnightProviderEffectiveEnvironment(invocation, runtimeDirectory);
@@ -667,7 +660,7 @@ async function verifyOvernightProviderContainment(
     sandboxProfileId: request.sandbox.profileId,
     sandboxProfileSha256: launchArtifacts.sandboxProfileSha256,
   });
-  const proofSha256 = containmentProofIdentitySha256({
+  const proofSha256 = containmentObservationIdentitySha256({
     provider: request.provider,
     scope: { bindingSha256 },
     executable: {
@@ -689,33 +682,35 @@ async function verifyOvernightProviderContainment(
       sandboxProfileSha256: launchArtifacts.sandboxProfileSha256,
     },
   });
-  let canary: MacOsProviderCanaryResult;
-  try {
-    canary = await host.runCanary({
-      provider: request.provider,
-      fixedRoot,
-      runtimeDirectory,
-      executable,
-      executableSha256,
-      bindingSha256,
-      policy: MACOS_PROVIDER_CONTAINMENT_POLICY,
-      invocation,
-      effectiveEnvironment,
-      environmentSha256,
-      wrapperInvocationSha256,
-      providerHostPath,
-      providerHostSha256: launchArtifacts.providerHostSha256,
-      sandboxLauncherPath,
-      sandboxLauncherSha256: launchArtifacts.sandboxLauncherSha256,
-      sandboxProfileId: request.sandbox.profileId,
-      sandboxProfilePath,
-      sandboxProfileSha256: launchArtifacts.sandboxProfileSha256,
-    });
-  } catch {
-    return blocked("canary_execution_failed");
+  if (!attestedCanary) {
+    let canary: MacOsProviderCanaryResult;
+    try {
+      canary = await host.runCanary({
+        provider: request.provider,
+        fixedRoot,
+        runtimeDirectory,
+        executable,
+        executableSha256,
+        bindingSha256,
+        policy: MACOS_PROVIDER_CONTAINMENT_POLICY,
+        invocation,
+        effectiveEnvironment,
+        environmentSha256,
+        wrapperInvocationSha256,
+        providerHostPath,
+        providerHostSha256: launchArtifacts.providerHostSha256,
+        sandboxLauncherPath,
+        sandboxLauncherSha256: launchArtifacts.sandboxLauncherSha256,
+        sandboxProfileId: request.sandbox.profileId,
+        sandboxProfilePath,
+        sandboxProfileSha256: launchArtifacts.sandboxProfileSha256,
+      });
+    } catch {
+      return blocked("canary_execution_failed");
+    }
+    const canaryFailure = validateCanary(canary, bindingSha256, executableSha256);
+    if (canaryFailure) return blocked(canaryFailure);
   }
-  const canaryFailure = validateCanary(canary, bindingSha256, executableSha256);
-  if (canaryFailure) return blocked(canaryFailure);
 
   let verifiedAt: string;
   try {
@@ -761,7 +756,7 @@ async function verifyOvernightProviderContainment(
         sandboxProfileSha256: launchArtifacts.sandboxProfileSha256,
       },
       policy: MACOS_PROVIDER_CONTAINMENT_POLICY,
-      canary: {
+      canary: attestedCanary ?? {
         identityBound: true,
         processExit: "zero",
         providerTurn: "completed",
@@ -818,29 +813,9 @@ function pathsOverlap(left: string, right: string) {
   return pathContains(left, right) || pathContains(right, left);
 }
 
-function normalizeWriteScopes(scopes: readonly string[]) {
-  if (!Array.isArray(scopes) || scopes.length < 1 || scopes.length > 256) return undefined;
-  const normalized = [...new Set(scopes.map((scope) => scope.replaceAll("\\", "/").replace(/^\.\//u, "").replace(/\/$/u, "")))]
-    .sort((left, right) => left.localeCompare(right));
-  if (normalized.includes("*") && normalized.length !== 1) return undefined;
-  if (normalized.some((scope) => (
-    !scope
-    || scope.length > 4096
-    || scope.includes("\0")
-    || scope.startsWith("/")
-    || scope === "."
-    || scope === ".."
-    || scope.startsWith("../")
-    || scope.includes("/../")
-    || scope.endsWith("/..")
-  ))) return undefined;
-  return normalized;
-}
-
 export function containmentWriteScopesSha256(scopes: readonly string[]) {
-  const normalized = normalizeWriteScopes(scopes);
-  if (!normalized) throw new Error("Invalid Overnight containment write scopes.");
-  return createHash("sha256").update(JSON.stringify({ version: 1, writeScopes: normalized })).digest("hex");
+  if (scopes.length !== 1 || scopes[0] !== "*") throw new Error("Invalid Overnight containment write scopes.");
+  return createHash("sha256").update(JSON.stringify({ version: 1, writeScopes: ["*"] })).digest("hex");
 }
 
 function writeScopesDigestMatches(expected: string, scopes: readonly string[]) {
@@ -854,7 +829,7 @@ function writeScopesDigestMatches(expected: string, scopes: readonly string[]) {
 async function canonicalCapabilityScope(
   host: OvernightProviderContainmentHost,
   request: OvernightProviderContainmentRequest,
-  launchBinding: Readonly<VerifiedOvernightProviderLaunchBinding>,
+  launchBinding: Readonly<Pick<VerifiedOvernightProviderLaunchBinding, "canonicalNativeExecutable">>,
 ) {
   const [fixedRoot, runtimeDirectory] = await Promise.all([
     host.canonicalize(request.fixedRoot),
@@ -988,7 +963,7 @@ function validAttestationFields(attestation: Readonly<VerifiedOvernightProviderC
 
 function sameAttestedIdentity(
   attestation: Readonly<VerifiedOvernightProviderCapabilityAttestation>,
-  proof: Readonly<VerifiedOvernightProviderContainmentProof>,
+  proof: Readonly<Pick<OvernightProviderContainmentObservationProof, "provider" | "executable" | "launcher">>,
   adapterContract: Readonly<VerifiedOvernightProviderCapabilityAttestation["adapterContract"]>,
   environmentContractSha256: string,
   profileAuthoritySha256: string,
@@ -1090,19 +1065,13 @@ export function verifiedOvernightProviderContainmentMatches(
   providerHostPath?: string,
 ) {
   if (!proof || !launchBinding || !invocation) return false;
-  // A V2 proof remains parseable for durable Morning Review history, but it
-  // never grants fresh mutation authority.  Only a proof derived from the
-  // explicit, path-independent capability attestation may authorize a launch.
-  if (!proof.attestation) return false;
   return verifiedOvernightProviderContainmentMatchesInvocation(proof, invocation)
     && launchBinding.version === 1
     && launchBinding.provider === proof.provider
     && launchBinding.proofBindingSha256 === proof.scope.bindingSha256
-    && (!proof.scope.writeScopesSha256 || (
-      proof.scope.mutationAuthority === "direct-provider-root-wide-only"
-      && Array.isArray(launchBinding.writeScopes)
-      && writeScopesDigestMatches(proof.scope.writeScopesSha256, launchBinding.writeScopes)
-    ))
+    && proof.scope.mutationAuthority === "direct-provider-root-wide-only"
+    && Array.isArray(launchBinding.writeScopes)
+    && writeScopesDigestMatches(proof.scope.writeScopesSha256, launchBinding.writeScopes)
     && (invocation.provider === "pi" || invocation.executableName === launchBinding.canonicalNativeExecutable)
     && (!providerHostPath || providerHostPath === launchBinding.providerHostPath)
     && proof.environment.policyId === "morrow-exact-ephemeral-v1"
@@ -1124,7 +1093,6 @@ export function verifiedOvernightProviderContainmentMatchesInvocation(
   invocation: Readonly<OvernightProviderAdapterInvocation>,
 ) {
   if (!proof || !invocation || !proof.scope || !proof.executable || !proof.invocation || !proof.environment || !proof.launcher || !proof.policy || !proof.canary) return false;
-  if (!proof.attestation) return false;
   const identity = overnightProviderAdapterIdentity(invocation);
   return proof.version === 2
     && proof.provider === invocation.provider
@@ -1134,10 +1102,8 @@ export function verifiedOvernightProviderContainmentMatchesInvocation(
     && proof.scope.canonical === true
     && proof.scope.disjoint === true
     && validSha256(proof.scope.bindingSha256)
-    && (!proof.attestation || (
-      validSha256(proof.scope.writeScopesSha256)
-      && proof.scope.mutationAuthority === "direct-provider-root-wide-only"
-    ))
+    && validSha256(proof.scope.writeScopesSha256)
+    && proof.scope.mutationAuthority === "direct-provider-root-wide-only"
     && proof.executable.realpathVerified === true
     && validSha256(proof.executable.sha256)
     && proof.executable.signature === "verified"
@@ -1162,24 +1128,19 @@ export function verifiedOvernightProviderContainmentMatchesInvocation(
     && proof.canary.insideWrite === "verified"
     && proof.canary.adjacentOutsideWrite === "blocked-and-absent"
     && proof.canary.outsideSecretRead === "blocked-and-unobserved"
-    && (!proof.attestation || (
-      proof.attestation.version === 1
-      && validSha256(proof.attestation.sha256)
-      && validTimestamp(proof.attestation.expiresAt)
-      && proof.canary.providerCredentialRead === "verified"
-      && proof.canary.toolCredentialRead === "blocked-and-unobserved"
-    ))
+    && proof.attestation.version === 1
+    && validSha256(proof.attestation.sha256)
+    && validTimestamp(proof.attestation.expiresAt)
+    && proof.canary.providerCredentialRead === "verified"
+    && proof.canary.toolCredentialRead === "blocked-and-unobserved"
     && proof.canary.commandNetwork === "blocked"
     && proof.canary.commandExternalEffect === "blocked";
 }
 
-export function containmentProofIdentitySha256(proof: Readonly<{
-  attestation?: { version: 1; sha256: string; expiresAt: string };
+type ContainmentProofIdentityBase = Readonly<{
   provider: OvernightExecutionProvider;
   scope: {
     bindingSha256: string;
-    writeScopesSha256?: string;
-    mutationAuthority?: "direct-provider-root-wide-only";
   };
   executable: {
     sha256: string;
@@ -1202,7 +1163,25 @@ export function containmentProofIdentitySha256(proof: Readonly<{
     sandboxProfileId: string;
     sandboxProfileSha256: string;
   };
-}>) {
+}>;
+
+type CompleteContainmentProofIdentity = ContainmentProofIdentityBase & Readonly<{
+  attestation: { version: 1; sha256: string; expiresAt: string };
+  scope: ContainmentProofIdentityBase["scope"] & {
+    writeScopesSha256: string;
+    mutationAuthority: "direct-provider-root-wide-only";
+  };
+}>;
+
+export function containmentProofIdentitySha256(proof: CompleteContainmentProofIdentity) {
+  return containmentObservationIdentitySha256(proof);
+}
+
+function containmentObservationIdentitySha256(
+  proof: ContainmentProofIdentityBase & Partial<Pick<CompleteContainmentProofIdentity, "attestation">> & {
+    scope: ContainmentProofIdentityBase["scope"] & Partial<CompleteContainmentProofIdentity["scope"]>;
+  },
+) {
   return createHash("sha256").update(JSON.stringify({
     identityVersion: 1,
     provider: proof.provider,

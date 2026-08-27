@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { OrchestrationSnapshot } from "../src/shared/contracts";
 
 const testState = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>(),
@@ -12,10 +13,11 @@ const testState = vi.hoisted(() => ({
   },
   morrow: undefined as undefined | {
     initialize: ReturnType<typeof vi.fn>;
-    replanOvernightPortfolio: ReturnType<typeof vi.fn>;
+    orchestrationSnapshot: ReturnType<typeof vi.fn>;
     startOvernightPortfolio: ReturnType<typeof vi.fn>;
     stopOvernightPortfolio: ReturnType<typeof vi.fn>;
     verifyOvernightProvider: ReturnType<typeof vi.fn>;
+    prepareOvernightPortfolio: ReturnType<typeof vi.fn>;
   },
   morrowOptions: undefined as undefined | Record<string, unknown>,
   powerSaveBlocker: {
@@ -76,10 +78,10 @@ vi.mock("./runtime/morrow-service", () => ({
     initialize = vi.fn(async () => undefined);
     bootstrap = vi.fn(async () => ({ orchestration: { context: {}, plans: [], runs: [], portfolioRuns: [] } }));
     orchestrationSnapshot = vi.fn(async () => ({ context: {}, plans: [], runs: [], portfolioRuns: [{ id: "run", status: "running", items: [] }] }));
-    replanOvernightPortfolio = vi.fn(async (input) => ({ id: "replanned", input }));
     startOvernightPortfolio = vi.fn(async (planId) => ({ id: "run", planId }));
     stopOvernightPortfolio = vi.fn(async () => undefined);
     verifyOvernightProvider = vi.fn(async (provider: string) => ({ providerRoutes: [{ provider }] }));
+    prepareOvernightPortfolio = vi.fn(async (input) => ({ input, portfolioPlans: [] }));
     constructor(options: Record<string, unknown>) {
       testState.morrow = this;
       testState.morrowOptions = options;
@@ -91,12 +93,21 @@ function trustedEvent() {
   return { sender: testState.webContents, senderFrame: testState.webContents.mainFrame };
 }
 
+let syncOvernightPowerProtection: (snapshot: OrchestrationSnapshot) => boolean;
+
 beforeAll(async () => {
-  await import("./main");
-  await vi.waitFor(() => expect(testState.handlers.has("morrow:replan-overnight-portfolio")).toBe(true));
+  ({ syncOvernightPowerProtection } = await import("./main"));
+  await vi.waitFor(() => expect(testState.handlers.has("morrow:start-overnight-portfolio")).toBe(true));
 });
 
 describe("portfolio IPC boundary", () => {
+  it("prepares the default read-only Overnight assessment directly", async () => {
+    const result = await testState.handlers.get("morrow:prepare-overnight-portfolio")!(trustedEvent());
+
+    expect(testState.morrow?.prepareOvernightPortfolio).toHaveBeenCalledWith();
+    expect(result).toMatchObject({ portfolioPlans: [] });
+  });
+
   it("accepts only the four execution provider IDs for explicit verification", async () => {
     const invoke = testState.handlers.get("morrow:verify-overnight-provider")!;
     for (const provider of ["claude", "codex", "grok", "pi"]) {
@@ -109,62 +120,11 @@ describe("portfolio IPC boundary", () => {
       await expect(invoke(trustedEvent(), provider)).rejects.toThrow(/provider/);
     }
   });
-  it("preserves the complete selection and forwards only exact supported providers", async () => {
-    const includedItemIds = Array.from({ length: 30 }, (_, index) => `item-${index}`);
-    const input = {
-      planId: "plan-1",
-      includedItemIds,
-      providerByItem: {
-        "item-0": "codex",
-        "item-1": "claude",
-        "item-2": "grok",
-        "item-3": "pi",
-        "item-29": "codex",
-      },
-    };
+  it("starts the exact prepared set and passes the provider host bundle path", async () => {
+    const result = await testState.handlers.get("morrow:start-overnight-portfolio")!(trustedEvent(), "prepared-1");
 
-    const result = await testState.handlers.get("morrow:replan-overnight-portfolio")!(trustedEvent(), input);
-
-    expect(testState.morrow?.replanOvernightPortfolio).toHaveBeenCalledWith(input);
-    expect((testState.morrow?.replanOvernightPortfolio.mock.calls[0]?.[0] as typeof input).includedItemIds).toEqual(includedItemIds);
-    expect(result).toMatchObject({ id: "replanned" });
-  });
-
-  it("accepts every official execution provider for new plans", async () => {
-    const invoke = (provider: string) => testState.handlers.get("morrow:replan-overnight-portfolio")!(trustedEvent(), {
-      planId: "plan-legacy",
-      includedItemIds: ["one"],
-      providerByItem: { one: provider },
-    });
-    for (const provider of ["claude", "codex", "grok", "pi"]) {
-      await expect(invoke(provider)).resolves.toMatchObject({ id: "replanned" });
-    }
-  });
-
-  it("rejects duplicate selections, unsupported providers, and provider keys outside the selection", async () => {
-    const invoke = (input: unknown) => testState.handlers.get("morrow:replan-overnight-portfolio")!(trustedEvent(), input);
-
-    await expect(invoke({ planId: "plan-1", includedItemIds: ["one", "one"] })).rejects.toThrow(/Duplicate/);
-    await expect(invoke({ planId: "plan-1", includedItemIds: ["one"], providerByItem: { one: "auto" } })).rejects.toThrow(/provider/);
-    for (const provider of ["cursor", "hermes", "openclaw"]) {
-      await expect(invoke({ planId: "plan-1", includedItemIds: ["one"], providerByItem: { one: provider } })).rejects.toThrow(/provider/);
-    }
-    await expect(invoke({ planId: "plan-1", includedItemIds: ["one"], providerByItem: { two: "codex" } })).rejects.toThrow(/excluded/);
-  });
-
-  it("rejects an excessive selection without truncating it", async () => {
-    const includedItemIds = Array.from({ length: 10_001 }, (_, index) => `item-${index}`);
-    const invoke = testState.handlers.get("morrow:replan-overnight-portfolio")!;
-
-    await expect(invoke(trustedEvent(), { planId: "plan-1", includedItemIds })).rejects.toThrow(/included item IDs/);
-    expect(testState.morrow?.replanOvernightPortfolio).not.toHaveBeenCalledWith(expect.objectContaining({ includedItemIds }));
-  });
-
-  it("starts the exact replanned portfolio and passes the provider host bundle path", async () => {
-    const result = await testState.handlers.get("morrow:start-overnight-portfolio")!(trustedEvent(), "replanned-1");
-
-    expect(testState.morrow?.startOvernightPortfolio).toHaveBeenCalledWith("replanned-1");
-    expect(result).toEqual({ id: "run", planId: "replanned-1" });
+    expect(testState.morrow?.startOvernightPortfolio).toHaveBeenCalledWith("prepared-1", undefined);
+    expect(result).toEqual({ id: "run", planId: "prepared-1" });
     expect(testState.powerSaveBlocker.start).toHaveBeenCalledWith("prevent-app-suspension");
     expect(testState.morrowOptions?.providerHostPath).toBe(
       join(dirname(fileURLToPath(import.meta.url)), "overnight-provider-host.js"),
@@ -172,6 +132,39 @@ describe("portfolio IPC boundary", () => {
     expect(Object.keys(testState.morrowOptions ?? {}).filter((key) => /providerHost/i.test(key))).toEqual([
       "providerHostPath",
     ]);
+  });
+
+  it("keeps one blocker for an active run and releases it when the run ends", () => {
+    syncOvernightPowerProtection({ portfolioRuns: [] } as unknown as OrchestrationSnapshot);
+    testState.powerSaveBlocker.start.mockClear();
+    testState.powerSaveBlocker.stop.mockClear();
+    const active = { portfolioRuns: [{ status: "running" }] } as unknown as OrchestrationSnapshot;
+
+    expect(syncOvernightPowerProtection(active)).toBe(true);
+    expect(syncOvernightPowerProtection(active)).toBe(true);
+    expect(testState.powerSaveBlocker.start).toHaveBeenCalledOnce();
+
+    expect(syncOvernightPowerProtection({ portfolioRuns: [{ status: "completed" }] } as unknown as OrchestrationSnapshot)).toBe(false);
+    expect(testState.powerSaveBlocker.stop).toHaveBeenCalledOnce();
+    expect(testState.powerSaveBlocker.active.size).toBe(0);
+  });
+
+  it("releases power protection after background completion without renderer polling", async () => {
+    vi.useFakeTimers();
+    try {
+      syncOvernightPowerProtection({ portfolioRuns: [] } as unknown as OrchestrationSnapshot);
+      testState.powerSaveBlocker.stop.mockClear();
+      testState.morrow!.orchestrationSnapshot.mockResolvedValueOnce({ portfolioRuns: [{ status: "completed" }] });
+
+      syncOvernightPowerProtection({ portfolioRuns: [{ status: "running" }] } as unknown as OrchestrationSnapshot);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(testState.powerSaveBlocker.stop).toHaveBeenCalledOnce();
+      expect(testState.powerSaveBlocker.active.size).toBe(0);
+    } finally {
+      syncOvernightPowerProtection({ portfolioRuns: [] } as unknown as OrchestrationSnapshot);
+      vi.useRealTimers();
+    }
   });
 
   it("stops only the exact bounded portfolio run ID", async () => {

@@ -22,6 +22,7 @@ export interface OvernightPortfolioItem extends OvernightPortfolioScheduleItem {
   risks: readonly string[];
   commandPreview: string;
   frozenBriefSha256: string;
+  writeScopes: readonly string[];
 }
 
 export interface FrozenOvernightPortfolio {
@@ -332,7 +333,6 @@ function freezeSchedule(schedule: OvernightPortfolioSchedule): OvernightPortfoli
     ...schedule,
     entries: Object.freeze(schedule.entries.map((entry) => Object.freeze({
       ...entry,
-      writeScopes: Object.freeze([...entry.writeScopes]),
       conflictKeys: Object.freeze([...entry.conflictKeys]),
       dependencyIds: Object.freeze([...entry.dependencyIds]),
     }))),
@@ -361,7 +361,7 @@ function planSnapshot(stored: { plan: Omit<FrozenOvernightPortfolio, "status">; 
 }
 
 function fingerprint(planId: string, items: readonly OvernightPortfolioItem[], capacityByPool: Readonly<Record<string, number>>) {
-  // A replan is a new approval offer even when a shared-root item happens to
+  // A replacement plan is a new approval offer even when a shared-root item happens to
   // retain the same route and fields. Bind the single-use approval to that
   // exact offer rather than letting two draft IDs share one fingerprint.
   return createHash("sha256").update(JSON.stringify({ planId, items, capacityByPool })).digest("hex");

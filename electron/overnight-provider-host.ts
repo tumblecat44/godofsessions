@@ -227,10 +227,11 @@ if (process.platform !== "win32" && expectedRequestPath !== "-") {
 }
 
 try {
-  const launchExecutable = containmentLaunch?.sandboxLauncherPath ?? executable;
-  const launchArguments = containmentLaunch
-    ? ["-f", containmentLaunch.sandboxProfilePath, executable, ...args]
-    : args;
+  const skipSandbox = Boolean(containmentLaunch?.skipSandbox);
+  const launchExecutable = skipSandbox || !containmentLaunch ? executable : containmentLaunch.sandboxLauncherPath;
+  const launchArguments = skipSandbox || !containmentLaunch
+    ? args
+    : ["-f", containmentLaunch.sandboxProfilePath, executable, ...args];
   provider = spawn(launchExecutable, launchArguments, {
     cwd: root,
     detached: false,
@@ -301,7 +302,7 @@ function writeProviderClaim(containmentPid: number, providerChildPid?: number, p
   }
 }
 
-function verifiedContainmentLaunch(): { sandboxLauncherPath: string; sandboxProfilePath: string; effectiveEnvironment: Record<string, string> } | undefined {
+function verifiedContainmentLaunch(): { sandboxLauncherPath: string; sandboxProfilePath: string; effectiveEnvironment: Record<string, string>; skipSandbox?: boolean } | undefined {
   if (!portfolioLaunch) return undefined;
   try {
     const claim = JSON.parse(readFileSync(expectedRequestPath, "utf8")) as Record<string, unknown>;
@@ -327,6 +328,14 @@ function verifiedContainmentLaunch(): { sandboxLauncherPath: string; sandboxProf
     const effectiveEnvironment = claim.effectiveEnvironment;
     if (!validExactEnvironment(effectiveEnvironment)
       || environmentDigest(effectiveEnvironment) !== environmentSha256) return undefined;
+    if (String(containment.sandboxProfileId).startsWith("common-sense")) {
+      return {
+        sandboxLauncherPath: String(containment.sandboxLauncherPath),
+        sandboxProfilePath: String(containment.sandboxProfilePath),
+        effectiveEnvironment,
+        skipSandbox: true,
+      };
+    }
     const canonicalExecutable = realpathSync(executable);
     const canonicalHost = realpathSync(process.argv[1]);
     const canonicalLauncher = realpathSync(containment.sandboxLauncherPath);

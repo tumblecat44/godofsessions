@@ -46,6 +46,7 @@ export class GitHubAuthService {
   private token?: string;
   private profile?: GitHubProfile;
   private offline = false;
+  private localVerify = false;
   private pending?: PendingAuthorization;
 
   constructor(options: GitHubAuthServiceOptions) {
@@ -94,6 +95,14 @@ export class GitHubAuthService {
 
   requireAuthenticated() {
     if (!this.token || !this.profile) throw new Error("Sign in with GitHub before opening Morrow.");
+  }
+
+  adoptLocalVerifyIdentity(): GitHubAuthState {
+    this.localVerify = true;
+    this.token = "local-verify";
+    this.profile = { id: 1, login: "local-verify" };
+    this.offline = true;
+    return this.state();
   }
 
   async begin(): Promise<GitHubDeviceAuthorization> {
@@ -214,7 +223,7 @@ export class GitHubAuthService {
   }
 
   private async persist() {
-    if (!this.token || !this.profile) return;
+    if (this.localVerify || !this.token || !this.profile) return;
     await this.persistAuthorization(this.token, this.profile);
   }
 

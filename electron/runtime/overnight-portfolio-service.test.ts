@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LocalSessionProvider, OvernightExecutionProvider } from "../../src/shared/contracts";
+import type { LocalSessionProvider, OvernightExecutionProvider, OvernightPortfolioRunSummary } from "../../src/shared/contracts";
 import type { DailyContextSession, DailyContextSnapshot } from "./daily-context";
 import { OvernightPortfolioLedger } from "./overnight-portfolio-ledger";
 import type { OvernightPortfolioCandidateProposal, OvernightPortfolioProposal } from "./overnight-portfolio-recommendation";
@@ -321,6 +321,7 @@ async function setupService(dispatchItem = vi.fn(async ({ item }: { item: { prov
   const dataDir = await mkdtemp(join(tmpdir(), "morrow-portfolio-service-"));
   temporaryDirectories.push(dataDir);
   const workspace = workspaceHarness();
+  const containment = containmentControlHarness();
   let planSequence = 0;
   let currentTime = new Date("2026-08-26T18:00:00.000Z");
   const options = {
@@ -335,6 +336,7 @@ async function setupService(dispatchItem = vi.fn(async ({ item }: { item: { prov
       ).find((item) => item.provider === provider)!,
     },
     workspace: workspace.manager,
+    containmentControl: containment.control,
     ledger: new OvernightPortfolioLedger({ dataDir }),
     dispatchItem,
     createPlanId: () => planSequence++ === 0 ? "plan_20260826" : `plan_edit_${planSequence}`,
@@ -345,11 +347,57 @@ async function setupService(dispatchItem = vi.fn(async ({ item }: { item: { prov
   return {
     dataDir,
     workspace,
+    containment,
     options,
     service: new OvernightPortfolioService(options),
     dispatchItem,
     setNow(value: string) { currentTime = new Date(value); },
   };
+}
+
+async function issueSyntheticLaunchIdentity(
+  ledger: OvernightPortfolioLedger,
+  runId: string,
+  itemId: string,
+) {
+  const run = await ledger.readRun(runId);
+  const authority = run ? await ledger.readAuthority(run.planId) : undefined;
+  const frozen = authority?.items.find((item) => item.itemId === itemId);
+  if (!frozen) throw new Error("synthetic authority item missing");
+  const capability = {
+    version: 1 as const,
+    runId,
+    itemId,
+    provider: frozen.containmentAuthority.provider,
+    proofSha256: "d".repeat(64),
+    invocationSha256: "e".repeat(64),
+    token: "11111111-1111-4111-8111-111111111111",
+  };
+  await ledger.issueLaunchCapability(
+    capability,
+    "2026-08-26T18:01:01.000Z",
+    { attestationSha256: frozen.containmentAuthority.attestationSha256 },
+  );
+  return ledger.readIssuedLaunchCapabilityIdentity(runId, itemId);
+}
+
+async function waitForTerminalRun(
+  service: OvernightPortfolioService,
+  runId: string,
+): Promise<OvernightPortfolioRunSummary> {
+  let terminal: OvernightPortfolioRunSummary | undefined;
+  await vi.waitFor(async () => {
+    const current = (await service.snapshotRuns()).find((run) => run.id === runId);
+    expect(current).toBeDefined();
+    expect(["starting", "running", "stopping", "unknown"]).not.toContain(current!.status);
+    terminal = current;
+  });
+  return terminal!;
+}
+
+async function launchAndWait(service: OvernightPortfolioService, planId: string) {
+  const initial = await service.launch(planId);
+  return waitForTerminalRun(service, initial.id);
 }
 
 describe("Overnight portfolio service", () => {
@@ -374,7 +422,7 @@ describe("Overnight portfolio service", () => {
     expect(authorityText).not.toContain("sandboxProfilePath");
     expect(authorityText).not.toContain("provider-runtime");
 
-    await expect(service.start("plan_20260826")).resolves.toMatchObject({ status: "completed" });
+    await expect(launchAndWait(service, "plan_20260826")).resolves.toMatchObject({ status: "completed" });
     expect(containment.prepareApprovedLaunch).toHaveBeenCalledTimes(1);
     expect(containment.prepareApprovedLaunch).toHaveBeenCalledWith(expect.objectContaining({
       planId: "plan_20260826",
@@ -389,7 +437,7 @@ describe("Overnight portfolio service", () => {
     expect(setup.workspace.allocate).toHaveBeenCalledTimes(1);
     expect(setup.dispatchItem).toHaveBeenCalledTimes(1);
     const dispatched = setup.dispatchItem.mock.calls[0][0];
-    expect(dispatched.launchCapability.proofSha256).toBe(dispatched.authority.containmentProof.proofSha256);
+    expect(dispatched.launchCapability.proofSha256).toBe(dispatched.containmentProof.proofSha256);
     // The binding cleans on consumption and the service's outer finally makes
     // the idempotent cleanup call again to cover failures before consumption.
     expect(containment.cleanup).toHaveBeenCalledTimes(2);
@@ -414,7 +462,7 @@ describe("Overnight portfolio service", () => {
       expiresAt: "2026-08-27T18:00:00.000Z",
     });
 
-    await expect(service.start("plan_20260826")).rejects.toThrow(/정체성|검증 증거/u);
+    await expect(service.launch("plan_20260826")).rejects.toThrow(/정체성|검증 증거/u);
     expect(containment.prepareApprovedLaunch).not.toHaveBeenCalled();
     expect(setup.workspace.allocate).not.toHaveBeenCalled();
     expect(setup.dispatchItem).not.toHaveBeenCalled();
@@ -440,7 +488,7 @@ describe("Overnight portfolio service", () => {
       worktreeKey: "/private/worktrees/changed-after-approval",
     });
 
-    await expect(service.start("plan_20260826")).resolves.toMatchObject({ status: "failed" });
+    await expect(launchAndWait(service, "plan_20260826")).resolves.toMatchObject({ status: "failed" });
     expect(containment.prepareApprovedLaunch).not.toHaveBeenCalled();
     expect(setup.dispatchItem).not.toHaveBeenCalled();
   });
@@ -489,7 +537,7 @@ describe("Overnight portfolio service", () => {
       context([session("codex:prepare-fail", "codex", "Fix launch preparation")]),
     );
 
-    await expect(service.start("plan_20260826")).resolves.toMatchObject({ status: "failed" });
+    await expect(launchAndWait(service, "plan_20260826")).resolves.toMatchObject({ status: "failed" });
     expect(containment.prepareApprovedLaunch).toHaveBeenCalledTimes(1);
     expect(setup.dispatchItem).not.toHaveBeenCalled();
   });
@@ -515,14 +563,13 @@ describe("Overnight portfolio service", () => {
     expect(workspace.allocate).not.toHaveBeenCalled();
     expect((await service.snapshotAssessments())[0]).toMatchObject({
       planId: result.plan!.id,
-      selectionId: result.plan!.id,
       candidates: [{ stableKey: "first" }, { stableKey: "second" }, { stableKey: "third" }],
     });
-    expect((await service.snapshotAssessments())[0].editableItemIds).toBeUndefined();
 
     const authorityText = await readFile(join(dataDir, "overnight", "portfolios", "plans", "plan_20260826.json"), "utf8");
-    expect(authorityText).toContain('"containmentProof"');
-    expect(authorityText).toMatch(/"proofSha256":"[a-f0-9]{64}"/u);
+    expect(authorityText).toContain('"containmentAuthority"');
+    expect(authorityText).toMatch(/"attestationSha256":"[a-f0-9]{64}"/u);
+    expect(authorityText).not.toContain('"containmentProof"');
     expect(authorityText).not.toContain('"launchBinding"');
     expect(authorityText).not.toContain("sandboxProfilePath");
     expect(authorityText).not.toContain("providerHostPath");
@@ -531,7 +578,7 @@ describe("Overnight portfolio service", () => {
     expect(authorityText).not.toContain('"prompt"');
   });
 
-  it("curates three high-value discover outcomes while preserving every runnable candidate", async () => {
+  it("includes every runnable discover outcome without an arbitrary item-count cap", async () => {
     const ids = ["routine-one", "routine-two", "routine-three", "goal-result", "explicit-result"];
     const sessions = ids.map((id) => session(`codex:${id}`, "codex", `Continue ${id}`));
     const candidates = ids.map((id) => candidate(id, "codex", [`codex:${id}`]));
@@ -542,11 +589,11 @@ describe("Overnight portfolio service", () => {
     const result = await service.recommend({ requestKind: "discover", candidates }, context(sessions));
 
     expect(result.assessment.candidates).toHaveLength(5);
-    expect(result.plan?.items.map((item) => item.stableKey)).toEqual(["explicit-result", "goal-result", "routine-one"]);
+    expect(result.plan?.items.map((item) => item.stableKey)).toEqual(ids);
     expect((await service.snapshotAssessments())[0].candidates).toHaveLength(5);
   });
 
-  it("allows a concrete Morrow goal to produce more than three outcomes", async () => {
+  it("uses the same uncapped set for a concrete Morrow goal", async () => {
     const ids = ["first", "second", "third", "fourth", "fifth"];
     const sessions = ids.map((id) => session(`codex:${id}`, "codex", `Prepare ${id}`));
     const candidates = ids.map((id) => candidate(id, "codex", [`codex:${id}`]));
@@ -558,7 +605,7 @@ describe("Overnight portfolio service", () => {
     expect(result.assessment.candidates).toHaveLength(5);
   });
 
-  it("expands the default three outcomes when one requires an additional result", async () => {
+  it("keeps every discover outcome when one requires an additional result", async () => {
     const ids = ["primary", "second", "third", "required-setup"];
     const sessions = ids.map((id) => session(`codex:${id}`, "codex", `Prepare ${id}`));
     const candidates = ids.map((id) => candidate(id, "codex", [`codex:${id}`]));
@@ -573,63 +620,7 @@ describe("Overnight portfolio service", () => {
     expect(result.plan?.totalMinutes).toBe(240);
   });
 
-  it("keeps a narrow-scope blocked candidate visible while preparing an independent root-wide item", async () => {
-    const narrowSession = session("codex:narrow", "codex", "Repair the narrow transition");
-    const wideSession = session("codex:wide", "codex", "Repair the root-wide transition");
-    const narrow = candidate("narrow", "codex", [narrowSession.id]);
-    const wide = candidate("wide", "codex", [wideSession.id]);
-    narrow.writeScopes = ["src/narrow"];
-    wide.writeScopes = ["*"];
-    const setup = await setupService();
-    const inspect = vi.fn(async (
-      provider: LocalSessionProvider,
-      execution?: { root: string; runtimeDirectory: string; writeScopes?: readonly string[] },
-    ): Promise<OvernightProviderReadiness> => {
-      if (execution?.writeScopes?.some((scope) => scope !== "*")) {
-        return {
-          provider,
-          label: provider,
-          status: "blocked",
-          reason: "Only a root-wide direct-provider mutation boundary is currently proven.",
-          checks: { installation: "verified", authentication: "verified", containment: "failed" },
-        };
-      }
-      return readyProviders(execution?.root, execution?.runtimeDirectory).find((item) => item.provider === provider)!;
-    });
-    const service = new OvernightPortfolioService({
-      ...setup.options,
-      readiness: { inspectAll: async () => readyProviders(), inspect },
-    });
-
-    const result = await service.recommend(
-      { requestKind: "discover", candidates: [narrow, wide] },
-      context([narrowSession, wideSession]),
-    );
-
-    expect(result.plan?.items.map((item) => item.id)).toEqual(["wide"]);
-    expect(result.assessment.candidates).toHaveLength(2);
-    expect(result.assessment.candidates.find((item) => item.stableKey === "narrow")).toMatchObject({
-      disposition: "clarify",
-      selectedSessions: [{ id: narrowSession.id, provider: "codex", title: narrowSession.title }],
-      reasonCodes: expect.arrayContaining(["executor_unavailable"]),
-      writeScopes: ["src/narrow"],
-    });
-    expect(result.assessment.candidates.find((item) => item.stableKey === "wide")).toMatchObject({
-      disposition: "recommend",
-      writeScopes: ["*"],
-    });
-    const durable = (await service.snapshotAssessments())[0];
-    expect(durable.candidates).toHaveLength(2);
-    expect(durable.candidates.find((item) => item.stableKey === "narrow")).toMatchObject({
-      disposition: "clarify",
-      selectedSessions: [{ id: narrowSession.id, provider: "codex", title: narrowSession.title }],
-      reasonCodes: expect.arrayContaining(["executor_unavailable"]),
-      writeScopes: ["src/narrow"],
-    });
-    expect((await setup.options.ledger.readAuthority(result.plan!.id)).plan.items.map((item) => item.id)).toEqual(["wide"]);
-  });
-
-  it("applies the same narrow-scope guard on the V3 path-free control plane before approval", async () => {
+  it("collapses proposed mutation scopes to the one root-wide approved boundary", async () => {
     const narrowSession = session("codex:v3-narrow", "codex", "Repair the V3 narrow transition");
     const wideSession = session("codex:v3-wide", "codex", "Repair the V3 root-wide transition");
     const narrow = candidate("v3-narrow", "codex", [narrowSession.id]);
@@ -638,16 +629,6 @@ describe("Overnight portfolio service", () => {
     wide.writeScopes = ["*"];
     const setup = await setupService();
     const containment = containmentControlHarness();
-    containment.inspect.mockImplementation(async (provider, execution) => execution?.writeScopes?.[0] === "*"
-      ? {
-          status: "ready" as const,
-          provider,
-          executableSha256: "a".repeat(64),
-          identitySha256: "b".repeat(64),
-          attestationSha256: "c".repeat(64),
-          expiresAt: "2026-08-27T18:00:00.000Z",
-        }
-      : { status: "blocked" as const, provider, reason: "unsupported_write_scopes" });
     const service = new OvernightPortfolioService({ ...setup.options, containmentControl: containment.control });
 
     const result = await service.recommend(
@@ -655,17 +636,19 @@ describe("Overnight portfolio service", () => {
       context([narrowSession, wideSession]),
     );
 
-    expect(result.plan?.items.map((item) => item.id)).toEqual(["v3-wide"]);
+    expect(result.plan?.items.map((item) => item.id)).toEqual(["v3-narrow", "v3-wide"]);
+    expect(result.plan?.items.every((item) => JSON.stringify(item.writeScopes) === '["*"]')).toBe(true);
     expect(result.assessment.candidates.find((item) => item.stableKey === "v3-narrow")).toMatchObject({
-      disposition: "clarify",
-      reasonCodes: expect.arrayContaining(["executor_unavailable"]),
+      disposition: "recommend",
       writeScopes: ["src/narrow"],
     });
+    expect(containment.inspect).toHaveBeenCalledOnce();
+    expect(containment.inspect).toHaveBeenCalledWith("codex", { writeScopes: ["*"] });
     expect(containment.prepareApprovedLaunch).not.toHaveBeenCalled();
   });
 
-  it("backfills the discovery Night Plan to three executable outcomes after an earlier candidate is blocked", async () => {
-    const ids = ["blocked-first", "safe-one", "safe-two", "safe-three"];
+  it("keeps every discovery outcome when proposal scopes differ", async () => {
+    const ids = ["narrow-first", "safe-one", "safe-two", "safe-three"];
     const sessions = ids.map((id) => session(`codex:${id}`, "codex", `Repair ${id}`));
     const candidates = ids.map((id, index) => {
       const value = candidate(id, "codex", [sessions[index].id]);
@@ -674,16 +657,6 @@ describe("Overnight portfolio service", () => {
     });
     const setup = await setupService();
     const containment = containmentControlHarness();
-    containment.inspect.mockImplementation(async (provider, execution) => execution?.writeScopes?.[0] === "*"
-      ? {
-          status: "ready" as const,
-          provider,
-          executableSha256: "a".repeat(64),
-          identitySha256: "b".repeat(64),
-          attestationSha256: "c".repeat(64),
-          expiresAt: "2026-08-27T18:00:00.000Z",
-        }
-      : { status: "blocked" as const, provider, reason: "unsupported_write_scopes" });
     const service = new OvernightPortfolioService({ ...setup.options, containmentControl: containment.control });
 
     const result = await service.recommend(
@@ -691,12 +664,11 @@ describe("Overnight portfolio service", () => {
       context(sessions),
     );
 
-    expect(result.plan?.items.map((item) => item.id)).toEqual(["safe-one", "safe-two", "safe-three"]);
+    expect(result.plan?.items.map((item) => item.id)).toEqual(ids);
     expect(result.assessment.candidates).toHaveLength(4);
     expect(result.assessment.candidates[0]).toMatchObject({
-      stableKey: "blocked-first",
-      disposition: "clarify",
-      reasonCodes: expect.arrayContaining(["executor_unavailable"]),
+      stableKey: "narrow-first",
+      disposition: "recommend",
     });
   });
 
@@ -712,49 +684,6 @@ describe("Overnight portfolio service", () => {
     await service.recommend({ requestKind: "goal", candidates }, context(sessions));
 
     expect(containment.inspect).toHaveBeenCalledTimes(1);
-  });
-
-  it("persists a narrow-only assessment without creating an approval authority", async () => {
-    const narrowSession = session("codex:narrow-only", "codex", "Repair the narrow-only transition");
-    const narrow = candidate("narrow-only", "codex", [narrowSession.id]);
-    narrow.writeScopes = ["src/narrow-only"];
-    const setup = await setupService();
-    const service = new OvernightPortfolioService({
-      ...setup.options,
-      readiness: {
-        inspectAll: async () => readyProviders(),
-        inspect: async (provider) => ({
-          provider,
-          label: provider,
-          status: "blocked",
-          reason: "Only a root-wide direct-provider mutation boundary is currently proven.",
-          checks: { installation: "verified", authentication: "verified", containment: "failed" },
-        }),
-      },
-    });
-
-    const result = await service.recommend(
-      { requestKind: "discover", candidates: [narrow] },
-      context([narrowSession]),
-    );
-
-    expect(result.plan).toBeUndefined();
-    expect(result.selectionId).toBeUndefined();
-    expect(result.assessment).toMatchObject({
-      disposition: "clarify",
-      candidates: [{
-        stableKey: "narrow-only",
-        disposition: "clarify",
-        reasonCodes: expect.arrayContaining(["executor_unavailable"]),
-        selectedSessions: [{ id: narrowSession.id }],
-        writeScopes: ["src/narrow-only"],
-      }],
-    });
-    expect(await service.snapshotPlans()).toEqual([]);
-    expect((await service.snapshotAssessments())[0]).toMatchObject({
-      disposition: "clarify",
-      candidates: [{ stableKey: "narrow-only", disposition: "clarify", writeScopes: ["src/narrow-only"] }],
-    });
   });
 
   it("replaces the current Night Plan when Morrow prepares a revised result mix", async () => {
@@ -777,7 +706,7 @@ describe("Overnight portfolio service", () => {
     }, context([firstSession, secondSession]));
 
     expect((await service.snapshotPlans()).map((plan) => plan.id)).toEqual([revised.plan!.id]);
-    await expect(service.start(first.plan!.id)).rejects.toThrow(/교체/u);
+    await expect(service.launch(first.plan!.id)).rejects.toThrow(/교체/u);
     expect(revised.plan?.items.map((item) => item.stableKey)).toEqual(["second"]);
   });
 
@@ -801,7 +730,7 @@ describe("Overnight portfolio service", () => {
 
     expect(revised.plan).toBeUndefined();
     expect(await service.snapshotPlans()).toEqual([]);
-    await expect(service.start(first.plan!.id)).rejects.toThrow(/교체/u);
+    await expect(service.launch(first.plan!.id)).rejects.toThrow(/교체/u);
   });
 
   it("keeps only one runnable Night Plan when two Morrow revisions finish concurrently", async () => {
@@ -830,76 +759,10 @@ describe("Overnight portfolio service", () => {
     expect(current).toHaveLength(1);
     const currentId = current[0].id;
     const supersededId = recommendations.map((result) => result.plan!.id).find((id) => id !== currentId)!;
-    await expect(firstService.start(supersededId)).rejects.toThrow(/교체/u);
+    await expect(firstService.launch(supersededId)).rejects.toThrow(/교체/u);
   });
 
-  it("allows either edit or start to win without leaving a hidden replacement", async () => {
-    const sessions = [
-      session("codex:first", "codex", "Repair the first flow"),
-      session("grok:second", "grok", "Repair the second flow"),
-    ];
-    const setup = await setupService();
-    const prepared = await setup.service.recommend({
-      requestKind: "goal",
-      candidates: [
-        candidate("first", "codex", [sessions[0].id]),
-        candidate("second", "grok", [sessions[1].id]),
-      ],
-    }, context(sessions));
-    const editingService = new OvernightPortfolioService({
-      ...setup.options,
-      ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }),
-      createPlanId: () => "concurrent_edit_replacement",
-    });
-    const startingService = new OvernightPortfolioService({
-      ...setup.options,
-      ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }),
-      createRunId: () => "concurrent_edit_run",
-    });
-
-    const attempts = await Promise.allSettled([
-      editingService.replan(prepared.plan!.id, { includedItemIds: ["first"] }),
-      startingService.start(prepared.plan!.id),
-    ]);
-
-    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    const plans = await editingService.snapshotPlans();
-    const runs = await editingService.snapshotRuns();
-    expect(plans.length + runs.length).toBe(1);
-    if (plans.length === 1) expect(plans[0].id).toBe("concurrent_edit_replacement");
-    if (runs.length === 1) expect(runs[0].id).toBe("concurrent_edit_run");
-  });
-
-  it("fails dispatch closed when the freshly verified profile identity drifts from the frozen authority", async () => {
-    const setup = await setupService();
-    let drift = false;
-    const readiness = {
-      inspectAll: async () => readyProviders(),
-      inspect: async (provider: LocalSessionProvider, execution?: { root: string; runtimeDirectory: string }) => {
-        const observed = readyProviders(execution?.root, execution?.runtimeDirectory)
-          .find((entry) => entry.provider === provider)!;
-        if (!drift) return observed;
-        const changed = structuredClone(observed);
-        changed.containmentProof!.launcher.sandboxProfileSha256 = "9".repeat(64);
-        changed.containmentProof!.proofSha256 = containmentProofIdentitySha256(changed.containmentProof!);
-        return changed;
-      },
-    };
-    const service = new OvernightPortfolioService({ ...setup.options, readiness });
-    const prepared = await service.recommend({
-      requestKind: "discover",
-      candidates: [candidate("first", "codex", ["codex:first"])],
-    }, context([session("codex:first", "codex", "Fix first transition regression")]));
-    drift = true;
-
-    const run = await service.start(prepared.plan!.id);
-
-    expect(run).toMatchObject({ status: "failed", items: [{ status: "failed", error: expect.stringMatching(/변경|준비/u) }] });
-    expect(setup.dispatchItem).not.toHaveBeenCalled();
-  });
-
-  it("never persists a daily semantic summary marker in authority, editable draft, assessment, or run ledgers", async () => {
+  it("never persists a daily semantic summary marker in authority, assessment, or run ledgers", async () => {
     const rawMarker = "UNIQUE_LAST_ASSISTANT_SEMANTIC_MARKER_MUST_STAY_EPHEMERAL";
     const sessions = [
       session("codex:first", "codex", "Fix first transition regression"),
@@ -925,11 +788,10 @@ describe("Overnight portfolio service", () => {
         third,
       ],
     }, daily);
-    await setup.service.start(prepared.plan!.id);
+    await launchAndWait(setup.service, prepared.plan!.id);
 
     const persisted = (await Promise.all([
       readFile(join(setup.dataDir, "overnight", "portfolios", "plans", `${prepared.plan!.id}.json`), "utf8"),
-      readFile(join(setup.dataDir, "overnight", "portfolios", "editable", `${prepared.selectionId}.json`), "utf8"),
       readFile(join(setup.dataDir, "overnight", "portfolios", "assessments", "assessment_20260826.json"), "utf8"),
       readFile(join(setup.dataDir, "overnight", "portfolios", "runs", "run_20260826", "run.json"), "utf8"),
       readFile(join(setup.dataDir, "overnight", "portfolios", "runs", "run_20260826", "items", "third.json"), "utf8"),
@@ -965,12 +827,13 @@ describe("Overnight portfolio service", () => {
 
     const restarted = new OvernightPortfolioService({ ...setup.options, ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }) });
     const attempts = await Promise.allSettled([
-      restarted.start(prepared.plan!.id),
-      new OvernightPortfolioService({ ...setup.options, ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }) }).start(prepared.plan!.id),
+      restarted.launch(prepared.plan!.id),
+      new OvernightPortfolioService({ ...setup.options, ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }) }).launch(prepared.plan!.id),
     ]);
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    const run = attempts.find((attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof restarted.start>>> => attempt.status === "fulfilled")!.value;
+    const launched = attempts.find((attempt): attempt is PromiseFulfilledResult<OvernightPortfolioRunSummary> => attempt.status === "fulfilled")!.value;
+    const run = await waitForTerminalRun(restarted, launched.id);
     expect(run).toMatchObject({ id: "run_20260826", status: "completed" });
     expect(run.items.map((item) => item.providerReceiptId)).toEqual([
       "codex:native:first",
@@ -978,10 +841,8 @@ describe("Overnight portfolio service", () => {
       "pi:native:third",
     ]);
     expect(run.items[0].resultMetadata).toEqual({
-      executionRoot: "/private/worktrees/plan_20260826/first",
-      worktreeKey: "/private/worktrees/plan_20260826/first",
-      branch: "morrow/overnight/plan_20260826/first",
-      baseRevision: "a".repeat(40),
+      executionRoot: "approved-private-root",
+      worktreeKey: expect.stringMatching(/^path-free:/u),
       integrationStatus: "not_integrated",
     });
     expect(setup.dispatchItem).toHaveBeenCalledTimes(3);
@@ -1001,61 +862,7 @@ describe("Overnight portfolio service", () => {
       .toBe("2026-08-27T01:30:00.000Z");
   });
 
-  it("creates a new exact plan from included items and a ready provider switch without mutating the original authority", async () => {
-    const sessions = [
-      session("codex:first", "codex", "Fix first transition regression"),
-      session("grok:second", "grok", "Fix second transition regression"),
-      session("hermes:third", "hermes", "Fix third transition regression"),
-    ];
-    const proposal: OvernightPortfolioProposal = {
-      requestKind: "discover",
-      candidates: [
-        candidate("first", "codex", ["codex:first"]),
-        candidate("second", "grok", ["grok:second"]),
-        candidate("third", "pi", ["hermes:third"]),
-      ],
-    };
-    const setup = await setupService();
-    const prepared = await setup.service.recommend(proposal, context(sessions));
-    const originalPath = join(setup.dataDir, "overnight", "portfolios", "plans", `${prepared.plan!.id}.json`);
-    const originalBefore = await readFile(originalPath, "utf8");
-    setup.setNow("2026-08-26T18:01:00.000Z");
-
-    const edited = await setup.service.replan(prepared.plan!.id, {
-      includedItemIds: ["first", "third"],
-      providerByItemId: { first: "claude" },
-    });
-
-    expect(edited).toMatchObject({ status: "draft", replacedPlanId: prepared.plan!.id });
-    expect(edited.plan?.id).not.toBe(prepared.plan!.id);
-    expect(edited.plan?.approvalFingerprint).not.toBe(prepared.plan!.approvalFingerprint);
-    expect(edited.plan?.expiresAt).toBe("2026-08-26T18:06:00.000Z");
-    expect(edited.plan?.items.map((item) => [item.id, item.provider])).toEqual([
-      ["first", "claude"],
-      ["third", "pi"],
-    ]);
-    expect(await readFile(originalPath, "utf8")).toBe(originalBefore);
-
-    const replacementLedger = new OvernightPortfolioLedger({ dataDir: setup.dataDir });
-    const replacement = await replacementLedger.readAuthority(edited.plan!.id);
-    expect(replacement?.items.find((item) => item.itemId === "first")?.invocation).toMatchObject({
-      provider: "claude",
-      executableName: "/exact/claude",
-    });
-    const replacementText = await readFile(replacementLedger.authorityPath(edited.plan!.id), "utf8");
-    expect(replacementText).not.toContain("PRIVATE_RAW_EXCERPT");
-    expect(replacementText).not.toContain("PRIVATE_DAILY_CONTEXT_PROMPT");
-    expect(replacementText).not.toContain('"prompt"');
-    expect((await setup.service.snapshotPlans()).map((plan) => plan.id)).toEqual([edited.plan!.id]);
-
-    const restarted = new OvernightPortfolioService({ ...setup.options, ledger: replacementLedger });
-    await expect(restarted.start(prepared.plan!.id)).rejects.toThrow(/교체/u);
-    const run = await restarted.start(edited.plan!.id);
-    expect(run.items.map((item) => item.provider)).toEqual(["claude", "pi"]);
-    expect(await restarted.snapshotPlans()).toEqual([]);
-  });
-
-  it("preserves an over-window recommendation as an editable draft and creates authority only after exclusion", async () => {
+  it("keeps an over-window recommendation visible without creating hidden executable state", async () => {
     const sessions = [
       session("codex:first", "codex", "Fix first transition regression"),
       session("codex:second", "codex", "Fix second transition regression"),
@@ -1069,26 +876,11 @@ describe("Overnight portfolio service", () => {
     const prepared = await setup.service.recommend({ requestKind: "discover", candidates: [first, second] }, context(sessions));
 
     expect(prepared.plan).toBeUndefined();
-    expect(prepared.selectionId).toBe("plan_20260826");
-    expect(prepared.editRequired).toMatch(/450분|실행 창/u);
-    expect(await new OvernightPortfolioLedger({ dataDir: setup.dataDir }).readAuthority(prepared.selectionId!)).toBeUndefined();
-    const draft = await new OvernightPortfolioLedger({ dataDir: setup.dataDir }).readEditableDraft(prepared.selectionId!);
-    expect(draft?.items.map((entry) => entry.item.id)).toEqual(["first", "second"]);
-    const draftText = await readFile(join(setup.dataDir, "overnight", "portfolios", "editable", `${prepared.selectionId}.json`), "utf8");
-    expect(draftText).not.toContain("PRIVATE_RAW_EXCERPT");
-    expect(draftText).not.toContain("PRIVATE_DAILY_CONTEXT_PROMPT");
-    expect(draftText).not.toContain('"prompt"');
+    expect(prepared.scopeDecisionReason).toMatch(/450분|실행 창/u);
+    expect(await new OvernightPortfolioLedger({ dataDir: setup.dataDir }).readAuthority("plan_20260826")).toBeUndefined();
     const assessments = await setup.service.snapshotAssessments();
-    expect(assessments[0]).toMatchObject({ selectionId: prepared.selectionId, candidates: [{ stableKey: "first" }, { stableKey: "second" }] });
-    expect(assessments[0].editableItemIds).toEqual(["first", "second"]);
-    expect(assessments[0].editRequiredReason).toMatch(/450분|실행 창/u);
-
-    setup.setNow("2026-08-26T18:01:00.000Z");
-    const edited = await setup.service.replan(prepared.selectionId!, { includedItemIds: ["first"] });
-    expect(edited).toMatchObject({ status: "draft", plan: { totalMinutes: 300 } });
-    expect(edited.plan?.items.map((item) => item.id)).toEqual(["first"]);
-    await expect(setup.service.start(prepared.selectionId!)).rejects.toThrow(/찾을 수/u);
-    await expect(setup.service.start(edited.plan!.id)).resolves.toMatchObject({ status: "completed" });
+    expect(assessments[0]).toMatchObject({ candidates: [{ stableKey: "first" }, { stableKey: "second" }] });
+    expect(assessments[0].scopeDecisionReason).toMatch(/450분|실행 창/u);
   });
 
   it("persists clarify-only recommendations as bounded assessment summaries without raw evidence", async () => {
@@ -1138,6 +930,35 @@ describe("Overnight portfolio service", () => {
     finish!({ status: "completed", providerReceiptId: "codex:native:first", report: "first verified" });
     await vi.waitFor(async () => {
       expect((await new OvernightPortfolioLedger({ dataDir: setup.dataDir }).readRun("run_20260826"))?.status).toBe("completed");
+    });
+  });
+
+  it("exposes bounded live activity without persisting raw provider logs", async () => {
+    let finish: ((value: { status: "completed"; providerReceiptId: string; report: string }) => void) | undefined;
+    const dispatch = vi.fn((input: { onActivity(activity: "verification"): void }) => new Promise<{ status: "completed"; providerReceiptId: string; report: string }>((resolve) => {
+      finish = resolve;
+      input.onActivity("verification");
+    }));
+    const setup = await setupService(dispatch);
+    const selected = session("codex:signal", "codex", "Verify live progress");
+    const prepared = await setup.service.recommend({
+      requestKind: "discover",
+      candidates: [candidate("signal", "codex", [selected.id])],
+    }, context([selected]));
+
+    await setup.service.launch(prepared.plan!.id);
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1));
+
+    expect((await setup.service.snapshotRuns())[0]).toMatchObject({
+      updatedAt: "2026-08-26T18:00:00.000Z",
+      items: [{ itemId: "signal", status: "running", activity: "verification", activityAt: "2026-08-26T18:00:00.000Z" }],
+    });
+    const stored = await readFile(join(setup.dataDir, "overnight", "portfolios", "runs", "run_20260826", "items", "signal.json"), "utf8");
+    expect(stored).not.toContain("activity");
+
+    finish!({ status: "completed", providerReceiptId: "codex:native:signal", report: "signal verified" });
+    await vi.waitFor(async () => {
+      expect((await setup.service.snapshotRuns())[0]?.status).toBe("completed");
     });
   });
 
@@ -1196,11 +1017,11 @@ describe("Overnight portfolio service", () => {
     });
     const service = new OvernightPortfolioService({ ...setup.options, ledger });
 
-    const startPromise = service.start(prepared.plan!.id);
+    const launched = await service.launch(prepared.plan!.id);
     await runningAttempted;
     await service.stop("run_20260826");
     continueRunning();
-    const run = await startPromise;
+    const run = await waitForTerminalRun(service, launched.id);
 
     expect(setup.workspace.allocate).not.toHaveBeenCalled();
     expect(setup.dispatchItem).not.toHaveBeenCalled();
@@ -1210,7 +1031,7 @@ describe("Overnight portfolio service", () => {
     });
   });
 
-  it("preserves dependency-blocked candidates in an editable draft and still fails closed on an unsafe edit", async () => {
+  it("keeps dependency-blocked candidates visible while preparing only independent safe work", async () => {
     const sessions = [
       session("codex:first", "codex", "Fix first transition regression"),
       session("grok:second", "grok", "Fix second transition regression"),
@@ -1229,54 +1050,20 @@ describe("Overnight portfolio service", () => {
     const setup = await setupService();
     const prepared = await setup.service.recommend(proposal, context(sessions));
     expect(prepared.plan?.items.map((item) => item.id)).toEqual(["third"]);
-    expect(prepared.editRequired).toMatch(/의존 작업 결과|차단된 의존 관계/u);
+    expect(prepared.scopeDecisionReason).toMatch(/의존 작업 결과|차단된 의존 관계/u);
     expect(prepared.assessment.candidates.map((item) => item.stableKey)).toEqual(["first", "second", "third"]);
-    expect((await new OvernightPortfolioLedger({ dataDir: setup.dataDir }).readEditableDraft(prepared.selectionId!))
-      ?.items.map((entry) => entry.item.id)).toEqual(["first", "second"]);
     expect((await new OvernightPortfolioLedger({ dataDir: setup.dataDir }).readAuthority(prepared.plan!.id))
       ?.plan.items.map((item) => item.id)).toEqual(["third"]);
     expect((await setup.service.snapshotAssessments())[0]).toMatchObject({
       planId: prepared.plan!.id,
-      selectionId: prepared.selectionId,
-      editableItemIds: ["first", "second"],
-      editRequiredReason: expect.stringMatching(/차단된 의존 관계/u),
-    });
-    expect((await setup.service.snapshotPlans()).map((plan) => plan.id)).toEqual([prepared.plan!.id]);
-
-    await expect(setup.service.replan(prepared.selectionId!, { includedItemIds: ["second"] }))
-      .rejects.toThrow(/의존 작업/u);
-
-    const readiness = readyProviders().map((item) => item.provider === "pi"
-      ? { ...item, status: "blocked" as const, reason: "containment unavailable" }
-      : item);
-    const blockedService = new OvernightPortfolioService({
-      ...setup.options,
-      readiness: {
-        inspectAll: async () => readiness,
-        inspect: async (provider) => readiness.find((item) => item.provider === provider)!,
-      },
-    });
-    await expect(blockedService.replan(prepared.selectionId!, {
-      includedItemIds: ["first", "second"],
-      providerByItemId: { first: "pi" },
-    })).rejects.toThrow(/준비되지|containment/u);
-    expect((await setup.options.ledger.readEditableDraft(prepared.selectionId!))?.items.map((entry) => entry.item.id))
-      .toEqual(["first", "second"]);
-    expect((await blockedService.snapshotAssessments())[0]).toMatchObject({
-      selectionId: prepared.selectionId,
-      editableItemIds: ["first", "second"],
+      scopeDecisionReason: expect.stringMatching(/차단된 의존 관계/u),
       candidates: [
         { stableKey: "first", selectedSessions: [{ id: "codex:first" }] },
         { stableKey: "second", selectedSessions: [{ id: "grok:second" }] },
         { stableKey: "third", selectedSessions: [{ id: "hermes:third" }] },
       ],
     });
-
-    await expect(setup.service.replan(prepared.selectionId!, { includedItemIds: ["first", "second"] }))
-      .rejects.toThrow(/의존 작업 결과|차단된 의존 관계/u);
-
-    const repaired = await setup.service.replan(prepared.selectionId!, { includedItemIds: ["first"] });
-    expect(repaired).toMatchObject({ status: "draft", plan: { items: [{ id: "first" }] } });
+    expect((await setup.service.snapshotPlans()).map((plan) => plan.id)).toEqual([prepared.plan!.id]);
   });
 
   it("allows a dependency chain when both items execute in the same shared workspace", async () => {
@@ -1294,29 +1081,9 @@ describe("Overnight portfolio service", () => {
       candidates: [candidate("first", "codex", ["codex:first"]), second],
     }, context(sessions));
 
-    expect(prepared.editRequired).toBeUndefined();
-    expect(prepared.selectionId).toBe(prepared.plan?.id);
+    expect(prepared.scopeDecisionReason).toBeUndefined();
     expect(prepared.plan?.items.map((item) => item.id)).toEqual(["first", "second"]);
     expect(prepared.plan?.items.every((item) => item.isolation === "shared")).toBe(true);
-  });
-
-  it("durably replaces the old draft with no execution when every item is excluded", async () => {
-    const sessions = [session("codex:first", "codex", "Fix first transition regression")];
-    const setup = await setupService();
-    const prepared = await setup.service.recommend({
-      requestKind: "discover",
-      candidates: [candidate("first", "codex", ["codex:first"])],
-    }, context(sessions));
-
-    const edited = await setup.service.replan(prepared.plan!.id, { includedItemIds: [] });
-    expect(edited).toEqual({ status: "no_execution", replacedPlanId: prepared.plan!.id });
-
-    const restarted = new OvernightPortfolioService({
-      ...setup.options,
-      ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }),
-    });
-    await expect(restarted.start(prepared.plan!.id)).rejects.toThrow(/교체/u);
-    expect(setup.dispatchItem).not.toHaveBeenCalled();
   });
 
   it("recovers an interrupted run without repeating completed work", async () => {
@@ -1364,6 +1131,7 @@ describe("Overnight portfolio service", () => {
       status: "running",
       startedAt: "2026-08-26T18:00:00.000Z",
     });
+    await issueSyntheticLaunchIdentity(ledger, "recover_run", "second");
 
     const restarted = new OvernightPortfolioService({
       ...setup.options,
@@ -1415,11 +1183,13 @@ describe("Overnight portfolio service", () => {
       status: "running",
       startedAt: "2026-08-26T18:01:00.000Z",
     });
+    const issuedIdentity = await issueSyntheticLaunchIdentity(ledger, "orphan_run", "first");
 
-    const persistedClaimInvocationSha256 = "0".repeat(64);
     const verifyCleanup = vi.fn(async (input: OvernightPortfolioResumeCleanupInput) => ({
-      safeToResume: input.runningItems.every((item) => item.invocationSha256 === persistedClaimInvocationSha256),
-      reason: "persisted claim invocation digest mismatch",
+      safeToResume: false,
+      reason: input.runningItems.every((item) => item.invocationSha256 === issuedIdentity?.invocationSha256)
+        ? "orphan process still exists"
+        : "issued launch identity mismatch",
     }));
     const run = await new OvernightPortfolioService({
       ...setup.options,
@@ -1436,14 +1206,16 @@ describe("Overnight portfolio service", () => {
       runningItems: [expect.objectContaining({
         itemId: "first",
         provider: "codex",
-        invocation: expect.objectContaining({ executableName: "/exact/codex", provider: "codex" }),
-        invocationIdentityVersion: 1,
-        invocationSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        proofSha256: issuedIdentity?.proofSha256,
+        invocationSha256: issuedIdentity?.invocationSha256,
+        attestationSha256: issuedIdentity?.attestationSha256,
+        capabilitySha256: issuedIdentity?.capabilitySha256,
+        executableSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       })],
     }));
     expect(run.items).toEqual([
       expect.objectContaining({ itemId: "first", status: "failed", error: expect.stringMatching(/영수증/u) }),
-      expect.objectContaining({ itemId: "second", status: "skipped", error: expect.stringMatching(/digest mismatch/u) }),
+      expect.objectContaining({ itemId: "second", status: "skipped", error: expect.stringMatching(/orphan process/u) }),
     ]);
   });
 
@@ -1477,6 +1249,7 @@ describe("Overnight portfolio service", () => {
       status: "running",
       startedAt: "2026-08-26T18:01:00.000Z",
     });
+    await issueSyntheticLaunchIdentity(ledger, "cleanup_race_run", "first");
     let enterCleanup!: () => void;
     const cleanupEntered = new Promise<void>((resolve) => { enterCleanup = resolve; });
     let finishCleanup!: (value: { safeToResume: boolean }) => void;
@@ -1562,6 +1335,7 @@ describe("Overnight portfolio service", () => {
       status: "running",
       startedAt: "2026-08-26T18:01:00.000Z",
     });
+    await issueSyntheticLaunchIdentity(ledger, "cleanup_failure_run", "first");
     let enterCleanup!: () => void;
     const cleanupEntered = new Promise<void>((resolve) => { enterCleanup = resolve; });
     let finishCleanup!: (value: { safeToResume: boolean; reason: string }) => void;

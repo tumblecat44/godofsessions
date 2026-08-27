@@ -8,11 +8,10 @@ describe("portfolio preview fallback", () => {
     window.morrow = undefined as never;
   });
 
-  it("explains that portfolio editing and execution require the desktop app", async () => {
+  it("explains that portfolio execution requires the desktop app", async () => {
     window.morrow = undefined as never;
     const bridge = getMorrowBridge();
 
-    await expect(bridge.replanOvernightPortfolio?.({ planId: "plan-1", includedItemIds: [] })).rejects.toThrow(/desktop app/);
     await expect(bridge.startOvernightPortfolio?.("plan-1")).rejects.toThrow(/desktop app/);
     await expect(bridge.stopOvernightPortfolio?.("run-1")).rejects.toThrow(/desktop app/);
     await expect(bridge.verifyOvernightProvider?.("codex")).rejects.toThrow(/desktop app/);

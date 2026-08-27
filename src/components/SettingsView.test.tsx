@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapState } from "../shared/contracts";
 import { SettingsView } from "./SettingsView";
@@ -42,6 +42,7 @@ describe("Settings user-facing safety contract", () => {
         githubProfile={{ id: 1, login: "synthetic-user" }}
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -57,5 +58,41 @@ describe("Settings user-facing safety contract", () => {
     expect(screen.queryByRole("button", { name: "Replay welcome" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Confirmation before changes" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/local first|local by default|Pi SDK|Pi runtime/i);
+  });
+
+  it("keeps setup for exactly the four Overnight workers out of the Overnight page", async () => {
+    const verify = vi.fn(async () => undefined);
+    render(
+      <SettingsView
+        state={{
+          ...state,
+          orchestration: {
+            ...state.orchestration,
+            providerRoutes: [
+              { provider: "claude", label: "Claude Code", status: "blocked", verification: { state: "unsupported", canVerify: false } },
+              { provider: "codex", label: "Codex", status: "setup_required", verification: { state: "not_verified", canVerify: true } },
+              { provider: "grok", label: "Grok Build", status: "blocked", verification: { state: "unsupported", canVerify: false } },
+              { provider: "pi", label: "Pi Agent", status: "blocked", verification: { state: "unsupported", canVerify: false } },
+            ],
+          },
+        }}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={verify}
+        onLanguage={vi.fn(async () => undefined)}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+      />,
+    );
+
+    for (const provider of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) {
+      expect(screen.getByText(provider)).toBeInTheDocument();
+    }
+    expect(document.body).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
+    expect(screen.getAllByText("Not installed")).toHaveLength(4);
+    expect(screen.getByText("codex login")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Safety check" })).not.toBeInTheDocument();
+    expect(verify).not.toHaveBeenCalled();
   });
 });

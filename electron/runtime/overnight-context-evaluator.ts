@@ -136,6 +136,7 @@ Treat every supplied coverage ID as mandatory. Do not omit, invent, or duplicate
 Sessions are evidence, not automatically tasks. Preserve multiple independent tasks from one session and merge only genuinely identical outcomes.
 For each coverage entry, return candidate keys or evidence-backed refusal/clarification reason codes, never both.
 Use a short semantic stableKey that would remain the same when separate sessions describe the same concrete outcome.
+Default preferredProvider to "auto"; name one only when evidence requires that exact runtime.
 Never claim completed, unsafe, external, credentialed, destructive, outside-root, unbounded, undecided, or unverifiable work is runnable.`;
 
 const localOutputTool: Tool = {
@@ -437,7 +438,7 @@ function localPrompt(
   userGoal?: string,
 ) {
   return JSON.stringify({
-    instruction: "Assess every coverage ID. coverage must contain every coverageId exactly once. Each entry must either reference every supported local candidate key or carry at least one evidence-backed no-run/clarify reason code, never both. Candidates may only reference real session IDs in this chunk. When userGoal is present, independent candidates supported only by that goal may use sessionIds:[]. Use consistent semantic stableKey values for the same concrete outcome across chunks.",
+    instruction: "Assess every coverage ID. coverage must contain every coverageId exactly once. Each entry must either reference every supported local candidate key or carry at least one evidence-backed no-run/clarify reason code, never both. Candidates may only reference real session IDs in this chunk. When userGoal is present, independent candidates supported only by that goal may use sessionIds:[]. Use consistent semantic stableKey values for the same concrete outcome across chunks. Use preferredProvider:auto unless evidence requires one exact runtime.",
     requestKind,
     fixedRoot: root ?? null,
     userGoal: userGoal ?? null,
@@ -448,7 +449,7 @@ function localPrompt(
 
 function globalPrompt(candidates: LocalCandidateRecord[], requestKind: OvernightRequestKind, root?: string, userGoal?: string) {
   return JSON.stringify({
-    instruction: "Partition every localCandidateId exactly once. Merge only candidates describing the same concrete outcome. Preserve independent or contradictory work in different groups. Each returned candidate must represent all group members; the host will restore exact session, evidence, conflict, and write-scope unions.",
+    instruction: "Partition every localCandidateId exactly once. Merge only candidates describing the same concrete outcome. Preserve independent or contradictory work in different groups. Each returned candidate must represent all group members; the host will restore exact session, evidence, conflict, and write-scope unions. Keep preferredProvider:auto unless evidence requires one exact runtime.",
     requestKind,
     fixedRoot: root ?? null,
     userGoal: userGoal ?? null,

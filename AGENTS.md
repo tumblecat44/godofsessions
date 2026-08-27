@@ -13,8 +13,10 @@ picker. Overnight is a provider-neutral portfolio across four official local
 execution routes: Claude Code, Codex, Grok Build, and Pi Agent. Cursor, Hermes,
 and OpenClaw may contribute read-only historical session evidence, but cannot
 be selected for new Overnight execution.
-Morrow recommends work, the user edits the portfolio, and one exact single-use
-approval freezes its items before conflict- and capacity-aware scheduling.
+Morrow shows up to three tonight cards on chat, all checked. The start button
+runs the checked cards. The Overnight tab lists those cards and opens each onto
+its board. Official CLIs on PATH are enough to run. Do not rebuild OS
+containment canaries as a product gate.
 Morning Review preserves evidence for every item. Each provider worker is
 forbidden from spawning its own subagents. It is not a cloud service.
 
@@ -40,7 +42,7 @@ forbidden from spawning its own subagents. It is not a cloud service.
 
 - Keep Pi SessionManager records authoritative for Morrow conversations.
 - Preserve a fail-closed approval boundary before file mutations and commands.
-- Overnight planning and portfolio editing are read-only. Its one-time approval
+- Overnight planning and revision through Morrow are read-only. Its one-time approval
   freezes every selected item, provider, daily-session brief, outcome,
   verification, fixed root, schedule, and deadline before detached local
   workers start.
@@ -48,9 +50,9 @@ forbidden from spawning its own subagents. It is not a cloud service.
   active conversation. In-root file-write
   approval may also be remembered.
 - Use official provider runtimes for authentication and execution.
-- A route is Ready only after local installation, authentication, and every OS
-  containment and capability canary required by that route are verified.
-  Otherwise keep it Setup or Blocked with the reason visible.
+- A route is Ready when its official CLI is on PATH. Keep it Setup or Blocked
+  with the reason visible when the CLI is missing. Do not restore a Safety
+  check or OS containment canary as a Ready gate.
 - This pre-release codebase has one Overnight model: a date contains zero or
   more purpose cards, each with one Kanban. Do not add singular legacy or
   stored-history compatibility branches.

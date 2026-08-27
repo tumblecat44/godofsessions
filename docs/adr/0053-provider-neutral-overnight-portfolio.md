@@ -67,12 +67,10 @@ sessions, reason codes, questions, risks, dependencies, conflicts, write scopes,
 provider preference, and provider-selection reason. The service must not
 silently truncate candidates or their session identifiers.
 
-For discovery without a specific goal, the default Night Plan selects three
-high-value morning outcomes. Explicit priority, direct goal evidence, and recent
-session evidence determine the stable order. Every other runnable result stays
-in the candidate ledger and can enter a revised plan through Morrow. A concrete
-goal is not capped at three, and the dependency closure of a selected outcome
-is always included even when that makes the plan larger.
+The default Night Plan has no arbitrary item-count cap. Every independent
+runnable outcome enters the exact set when the complete conflict- and
+capacity-aware schedule fits the 450-minute window. If it does not fit, Morrow
+asks for one scope decision instead of silently dropping a lower-ranked item.
 
 ### Separate evidence sources from four execution routes
 
@@ -92,7 +90,7 @@ required by that route succeeds. A missing or failed proof produces `Setup` or
 `Blocked` with a visible reason. A successful executable lookup, help command,
 authentication probe, or provider exit code cannot promote a route to `Ready`.
 
-Normal refresh, recommendation, and portfolio editing never start a provider or
+Normal refresh, recommendation, and revision never start a provider or
 capability canary. They may only compare a statically observed official runtime
 identity with a fresh, path-free attestation already stored by an explicit
 `Verify` or `Reverify` action. Every explicit action runs a new disposable
@@ -103,18 +101,14 @@ Each route uses its official local runtime or embedded software development kit
 (SDK). Provider limitations remain visible. Provider workers cannot spawn their
 own subagents.
 
-### Edit before granting authority
+### Prepare one exact set before granting authority
 
-The user may include or exclude each recommended item and select a proven
-alternative provider. Editing does not mutate the earlier frozen authority. It
-creates a new plan ID, approval fingerprint, schedule, and expiry after the main
+Morrow automatically prepares the exact safe set. A requested revision creates
+a fresh plan ID, approval fingerprint, schedule, and expiry after the main
 process revalidates dependencies, conflicts, write scopes, provider readiness,
-capacity, and the time window.
-
-An empty selection creates no runnable plan. Missing dependencies, blocked
-providers, unsafe roots, and schedules longer than 450 minutes return an
-explicit edit requirement. The service does not drop work to fit the window.
-Exactly 450 minutes is valid.
+capacity, and the time window. Missing dependencies, blocked providers, unsafe
+roots, and schedules longer than 450 minutes cannot be approved. The service
+does not drop work to fit the window; exactly 450 minutes is valid.
 
 Preparing a new recommendation supersedes the current runnable Night Plan. If
 the new assessment is `clarify` or `no_run`, it revokes the earlier draft rather
@@ -122,7 +116,7 @@ than leaving a hidden approval behind the latest judgment.
 
 ### Freeze one exact single-use portfolio approval
 
-Planning and editing are read-only. One fresh, expiring, single-use approval
+Planning and revision are read-only. One fresh, expiring, single-use approval
 freezes the exact portfolio before any mutation starts. The fingerprint covers:
 
 - selected items and providers
@@ -165,10 +159,10 @@ the same workspace and the same worktree. It schedules that dependency
 sequentially, so the successor can observe the predecessor's result in the
 approved location.
 
-The runtime does not prove cross-worktree result handoff. It therefore moves
-each cross-worktree dependent connected component into an editable blocked
-draft with the reason visible. Independent components remain in the runnable
-plan. The service does not silently omit blocked dependent work or pretend that
+The runtime does not prove cross-worktree result handoff. It therefore keeps
+each cross-worktree dependent connected component out of runnable authority
+with the reason visible in the assessment. Independent components remain in the
+runnable plan. The service does not silently erase blocked dependent work or pretend that
 scheduler order alone makes files available across worktrees.
 
 ### Recover item by item after restart
@@ -200,12 +194,12 @@ first public release. The portfolio is the only Overnight authority and UI.
   recency into task priority.
 - The portfolio can mix supported agents while every unsafe route stays
   fail-closed.
-- One approval remains understandable because it freezes the complete edited
+- One approval remains understandable because it freezes the complete prepared
   portfolio and schedule.
 - Conflict and capacity evidence remain visible because they change execution
   order and approval meaning.
 - Same-worktree dependencies may run sequentially; cross-worktree dependent
-  components remain editable and blocked until result lineage is proven.
+  components stay blocked until result lineage is proven.
 - Morning Review can report partial success honestly and recover it after app
   restart.
 - A date renders one flat collection of zero or more purpose cards regardless

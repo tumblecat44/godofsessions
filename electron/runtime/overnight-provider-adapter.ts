@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import type { OvernightExecutionProvider, OvernightExecutor } from "../../src/shared/contracts";
+import type { OvernightCliExecutor, OvernightExecutionProvider } from "../../src/shared/contracts";
 import {
   DEFAULT_OVERNIGHT_EXECUTOR_INVOCATION_MODE,
   overnightExecutorInvocation,
@@ -84,7 +84,7 @@ export function overnightProviderAdapterInvocation(
   const route = overnightProviderRoute(provider);
   if (provider === "codex" || provider === "claude") {
     const invocation = overnightExecutorInvocation(
-      provider as OvernightExecutor,
+      provider as OvernightCliExecutor,
       root,
       executablePath,
       invocationMode,

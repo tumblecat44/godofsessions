@@ -1,8 +1,9 @@
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { startedRunItems, tonightPlanItems } from "../lib/tonight";
 import type { OvernightPortfolioPlanSummary, OvernightPortfolioRunSummary } from "../shared/contracts";
 
-const activeStatuses = new Set<OvernightPortfolioRunSummary["status"]>(["starting", "running", "stopping", "unknown"]);
+const activeStatuses = new Set<OvernightPortfolioRunSummary["status"]>(["starting", "running", "stopping"]);
 
 interface OvernightCalendarProps {
   selectedDate: string;
@@ -18,6 +19,11 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
   const details = useRef<HTMLDetailsElement>(null);
   const [visibleMonth, setVisibleMonth] = useState(() => selectedDate.slice(0, 7));
   useEffect(() => setVisibleMonth(selectedDate.slice(0, 7)), [selectedDate]);
+  const closeCalendar = (date?: string) => {
+    if (date) onSelect(date);
+    details.current?.removeAttribute("open");
+    details.current?.querySelector("summary")?.focus();
+  };
   const runPlanIds = new Set(runs.map((run) => run.planId));
   const inventory = new Map<string, { count: number; active: boolean; attention: boolean }>();
   const include = (date: string, count: number, active: boolean, attention: boolean) => {
@@ -25,15 +31,19 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
     inventory.set(date, { count: current.count + count, active: current.active || active, attention: current.attention || attention });
   };
   for (const plan of plans) {
-    if (runPlanIds.has(plan.id) || plan.status === "expired") continue;
-    include(overnightDateKey(plan.createdAt, timeZone), plan.items.length, false, false);
+    if (runPlanIds.has(plan.id) || plan.status !== "draft") continue;
+    include(overnightDateKey(plan.createdAt, timeZone), tonightPlanItems(plan).length, false, false);
   }
   for (const run of runs) {
-    include(overnightDateKey(run.startedAt, timeZone), run.items.length, activeStatuses.has(run.status), run.status !== "completed" && !activeStatuses.has(run.status));
+    include(overnightDateKey(run.startedAt, timeZone), startedRunItems(run.items).length, activeStatuses.has(run.status), run.status !== "completed" && !activeStatuses.has(run.status));
   }
   const weekdays = ko ? ["일", "월", "화", "수", "목", "금", "토"] : ["S", "M", "T", "W", "T", "F", "S"];
   return (
-    <details ref={details} className="overnight-calendar">
+    <details ref={details} className="overnight-calendar" onKeyDown={(event) => {
+      if (event.key !== "Escape" || !details.current?.open) return;
+      event.preventDefault();
+      closeCalendar();
+    }}>
       <summary aria-label={ko ? "Overnight 날짜 선택" : "Choose Overnight date"}><CalendarDays size={15} /><span>{formatCalendarDate(selectedDate, ko)}</span><ChevronRight size={13} /></summary>
       <div className="overnight-calendar__popover">
         <header><button type="button" aria-label={ko ? "이전 달" : "Previous month"} onClick={() => setVisibleMonth(shiftCalendarMonth(visibleMonth, -1))}><ChevronLeft size={15} /></button><strong>{formatCalendarMonth(visibleMonth, ko)}</strong><button type="button" aria-label={ko ? "다음 달" : "Next month"} onClick={() => setVisibleMonth(shiftCalendarMonth(visibleMonth, 1))}><ChevronRight size={15} /></button></header>
@@ -41,9 +51,9 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
         <div className="overnight-calendar__days">{calendarGridDays(visibleMonth).map((date) => {
           const record = inventory.get(date);
           const classes = [date === selectedDate && "is-selected", date === contextDate && "is-today", date.slice(0, 7) !== visibleMonth && "is-outside", record?.active && "is-active", record?.attention && "is-attention"].filter(Boolean).join(" ");
-          return <button type="button" key={date} className={classes} aria-label={`${formatCalendarDate(date, ko)}${record ? (ko ? `, Overnight ${record.count}개` : `, ${record.count} Overnight${record.count === 1 ? "" : "s"}`) : ""}`} onClick={() => { onSelect(date); details.current?.removeAttribute("open"); }}><span>{Number(date.slice(8, 10))}</span>{record && <em>{record.count}</em>}</button>;
+          return <button type="button" key={date} className={classes} aria-current={date === selectedDate ? "date" : undefined} aria-label={`${formatCalendarDate(date, ko)}${record ? (ko ? `, Overnight ${record.count}개` : `, ${record.count} Overnight${record.count === 1 ? "" : "s"}`) : ""}`} onClick={() => closeCalendar(date)}><span>{Number(date.slice(8, 10))}</span>{record && <em>{record.count}</em>}</button>;
         })}</div>
-        <footer><span><i className="is-active" />{ko ? "실행 중" : "Running"}</span><span><i />{ko ? "기록 있음" : "Has records"}</span><button type="button" onClick={() => { onSelect(contextDate); details.current?.removeAttribute("open"); }}>{ko ? "오늘로 이동" : "Go to today"}</button></footer>
+        <footer><span><i className="is-active" />{ko ? "실행 중" : "Running"}</span><span><i />{ko ? "기록 있음" : "Has records"}</span><button type="button" onClick={() => closeCalendar(contextDate)}>{ko ? "오늘로 이동" : "Go to today"}</button></footer>
       </div>
     </details>
   );

@@ -11,10 +11,6 @@ import {
   type OvernightProviderAdapterInvocation,
   type OvernightProviderLaunchCapability,
 } from "./overnight-provider-adapter";
-import {
-  verifiedOvernightProviderContainmentMatchesInvocation,
-  type VerifiedOvernightProviderContainmentProof,
-} from "./overnight-provider-containment";
 
 const CLAIM_VERSION = 1;
 export const OVERNIGHT_PROVIDER_PROCESS_IDENTITY_VERSION = 1 as const;
@@ -27,8 +23,12 @@ const execFileAsync = promisify(execFile);
 export interface OvernightProviderRecoveryItem {
   itemId: string;
   status: "running" | "queued";
-  invocation: Readonly<OvernightProviderAdapterInvocation>;
-  containmentProof: Readonly<VerifiedOvernightProviderContainmentProof>;
+  provider: OvernightExecutionProvider;
+  proofSha256: string;
+  invocationSha256: string;
+  attestationSha256: string;
+  capabilitySha256: string;
+  executableSha256: string;
 }
 
 export interface OvernightProviderItemCleanupProof {
@@ -61,17 +61,19 @@ export interface OvernightProviderResumeCleanupInput {
   runningItems: ReadonlyArray<{
     itemId: string;
     provider: OvernightExecutionProvider;
-    invocation: Readonly<OvernightProviderAdapterInvocation>;
-    containmentProof: Readonly<VerifiedOvernightProviderContainmentProof>;
-    invocationIdentityVersion: typeof OVERNIGHT_PROVIDER_PROCESS_IDENTITY_VERSION;
+    proofSha256: string;
     invocationSha256: string;
+    attestationSha256: string;
+    capabilitySha256: string;
+    executableSha256: string;
   }>;
 }
 
 /**
- * Adapter for OvernightPortfolioService's resumeCleanupGuard seam. It verifies
- * the service's versioned frozen invocation digest instead of trusting process
- * memory from the previous app instance, then delegates to process recovery.
+ * Adapter for OvernightPortfolioService's resumeCleanupGuard seam. It accepts
+ * only the hash-only authority and one-shot launch identity kept by the V3
+ * ledger, then delegates to process recovery without reviving an older raw
+ * invocation authority format.
  */
 export class OvernightProviderResumeCleanupGuard {
   private readonly dataDir: string;
@@ -98,21 +100,23 @@ export class OvernightProviderResumeCleanupGuard {
         return { safeToResume: false, reason: "Overnight 복구 마감시각이 올바르지 않습니다." };
       }
       const items: OvernightProviderRecoveryItem[] = input.runningItems.map((running) => {
-        if (running.invocationIdentityVersion !== OVERNIGHT_PROVIDER_PROCESS_IDENTITY_VERSION
-          || running.invocation.provider !== running.provider
-          || running.invocationSha256 !== overnightProviderInvocationSha256(running.invocation)
-          || !verifiedOvernightProviderContainmentMatchesInvocation(running.containmentProof, running.invocation)) {
+        if (![running.proofSha256, running.invocationSha256, running.attestationSha256, running.capabilitySha256, running.executableSha256]
+          .every((value) => /^[a-f0-9]{64}$/u.test(value))) {
           throw blocked(
             "claim_identity_mismatch",
-            "복구할 running 항목이 동결된 Overnight 실행기 identity와 일치하지 않습니다.",
+            "복구할 running 항목의 동결된 Overnight 실행 identity가 올바르지 않습니다.",
             running.itemId,
           );
         }
         return {
           itemId: running.itemId,
           status: "running",
-          invocation: running.invocation,
-          containmentProof: running.containmentProof,
+          provider: running.provider,
+          proofSha256: running.proofSha256,
+          invocationSha256: running.invocationSha256,
+          attestationSha256: running.attestationSha256,
+          capabilitySha256: running.capabilitySha256,
+          executableSha256: running.executableSha256,
         };
       });
       const proof = await recoverOvernightProviderProcesses({
@@ -188,6 +192,7 @@ interface ProviderLaunchIntent {
   parentStartIdentity: string;
   provider: string;
   executable: string;
+  args: string[];
   invocationSha256: string;
   providerHostPath: string;
   requestPath: string;
@@ -287,9 +292,8 @@ export async function recoverOvernightProviderProcesses(
   const seen = new Set<string>();
   for (const item of input.items) {
     if (!validIdentityPart(item.itemId) || seen.has(item.itemId)) throw new Error("Overnight 복구 항목 ID가 올바르지 않습니다.");
-    if (item.invocation.adapterKind === "embedded-sdk" || !item.invocation.executableName) {
-      throw blocked("observation_unknown", "분리 실행 프로세스가 아닌 공급자 항목은 process claim으로 복구할 수 없습니다.", item.itemId);
-    }
+    if (![item.proofSha256, item.invocationSha256, item.attestationSha256, item.capabilitySha256, item.executableSha256]
+      .every((value) => /^[a-f0-9]{64}$/u.test(value))) throw blocked("claim_identity_mismatch", "Overnight 복구 identity가 올바르지 않습니다.", item.itemId);
     seen.add(item.itemId);
   }
 
@@ -416,14 +420,13 @@ function parseAndValidateClaim(
   let value: Partial<ProviderProcessClaim>;
   try { value = JSON.parse(raw) as Partial<ProviderProcessClaim>; }
   catch { throw blocked("claim_identity_mismatch", "Overnight provider claim을 안전하게 읽지 못해 재개를 차단했습니다.", item.itemId); }
-  const expectedInvocation = overnightProviderInvocationSha256(item.invocation);
   if (value.version !== CLAIM_VERSION
     || value.runId !== hostRunId
     || value.portfolioRunId !== portfolioRunId
     || value.itemId !== item.itemId
-    || value.provider !== item.invocation.provider
-    || value.executable !== item.invocation.executableName
-    || value.invocationSha256 !== expectedInvocation
+    || value.provider !== item.provider
+    || value.executable !== intent.executable
+    || value.invocationSha256 !== item.invocationSha256
     || typeof value.providerHostPath !== "string"
     || resolve(value.providerHostPath) !== resolve(providerHostPath)
     || value.requestPath !== intent.requestPath
@@ -532,10 +535,17 @@ function validateLaunchIntent(
 ): ProviderLaunchIntent {
   try {
     const value = JSON.parse(raw) as Partial<ProviderLaunchIntent>;
-    const expectedCommandSha256 = typeof value.nodeExecutablePath === "string"
+    const args = Array.isArray(value.args) && value.args.every((argument) => typeof argument === "string")
+      ? value.args
+      : undefined;
+    const expectedCommandSha256 = args
+      && typeof value.nodeExecutablePath === "string"
       && typeof value.parentPid === "number"
       && typeof value.deadlineAt === "string"
       && typeof value.cwd === "string"
+      && typeof value.provider === "string"
+      && typeof value.executable === "string"
+      && typeof value.invocationSha256 === "string"
       && typeof value.guardNonce === "string"
       && typeof value.containmentBindingSha256 === "string"
       && typeof value.proofSha256 === "string"
@@ -550,23 +560,25 @@ function validateLaunchIntent(
           requestPath,
           value.deadlineAt,
           value.cwd,
-          item.invocation.provider,
-          item.invocation.executableName!,
-          overnightProviderInvocationSha256(item.invocation),
+          value.provider,
+          value.executable,
+          value.invocationSha256,
           value.guardNonce,
           value.containmentBindingSha256,
           value.proofSha256,
           value.environmentSha256,
           value.launchCapabilitySha256,
-          ...item.invocation.args,
+          ...args,
         ])
       : undefined;
     if (value.version === CLAIM_VERSION
       && value.runId === hostRunId
       && value.portfolioRunId === portfolioRunId
       && value.itemId === item.itemId
-      && value.provider === item.invocation.provider
-      && value.executable === item.invocation.executableName
+      && value.provider === item.provider
+      && typeof value.executable === "string"
+      && value.executable.length > 0
+      && args !== undefined
       && typeof value.providerHostPath === "string"
       && resolve(value.providerHostPath) === resolve(providerHostPath)
       && value.requestPath === requestPath
@@ -575,38 +587,44 @@ function validateLaunchIntent(
       && value.parentStartIdentity.length > 0
       && typeof value.deadlineAt === "string"
       && Number.isFinite(Date.parse(value.deadlineAt))
-      && value.cwd === item.invocation.cwd
+      && typeof value.cwd === "string"
+      && value.cwd.length > 0
       && typeof value.guardNonce === "string"
       && /^[a-f0-9-]{36}$/u.test(value.guardNonce)
-      && value.containmentBindingSha256 === item.containmentProof.scope.bindingSha256
-      && value.proofSha256 === item.containmentProof.proofSha256
-      && value.environmentSha256 === item.containmentProof.environment.sha256
+      && typeof value.containmentBindingSha256 === "string"
+      && /^[a-f0-9]{64}$/u.test(value.containmentBindingSha256)
+      && value.proofSha256 === item.proofSha256
+      && typeof value.environmentSha256 === "string"
+      && /^[a-f0-9]{64}$/u.test(value.environmentSha256)
       && validLaunchIntentCapability(value as Record<string, unknown>, item)
       && value.hostCommandSha256 === expectedCommandSha256
       && typeof value.nodeExecutablePath === "string"
       && value.nodeExecutablePath.length > 0
-      && value.invocationSha256 === overnightProviderInvocationSha256(item.invocation)
-      && launchIntentContainmentMatches(value as Record<string, unknown>, item.containmentProof)) return value as ProviderLaunchIntent;
+      && value.invocationSha256 === item.invocationSha256
+      && launchIntentContainmentMatches(value as Record<string, unknown>, item)) return value as ProviderLaunchIntent;
   } catch { /* Report every malformed or mismatched intent identically. */ }
   throw blocked("claim_identity_mismatch", "Overnight provider launch intent가 동결된 실행기 identity와 일치하지 않아 재개를 차단했습니다.", item.itemId);
 }
 
 function launchIntentContainmentMatches(
   intent: Record<string, unknown>,
-  proof: Readonly<VerifiedOvernightProviderContainmentProof>,
+  item: Readonly<OvernightProviderRecoveryItem>,
 ) {
   const containment = intent.containment;
   if (!containment || typeof containment !== "object" || Array.isArray(containment)) return false;
   const value = containment as Record<string, unknown>;
-  return value.bindingSha256 === proof.scope.bindingSha256
-    && value.proofSha256 === proof.proofSha256
-    && value.environmentSha256 === proof.environment.sha256
-    && value.executableSha256 === proof.executable.sha256
-    && value.wrapperInvocationSha256 === proof.executable.wrapperInvocationSha256
-    && value.providerHostSha256 === proof.launcher.providerHostSha256
-    && value.sandboxLauncherSha256 === proof.launcher.sandboxLauncherSha256
-    && value.sandboxProfileId === proof.launcher.sandboxProfileId
-    && value.sandboxProfileSha256 === proof.launcher.sandboxProfileSha256;
+  const sha = (candidate: unknown) => typeof candidate === "string" && /^[a-f0-9]{64}$/u.test(candidate);
+  return value.bindingSha256 === intent.containmentBindingSha256
+    && value.proofSha256 === item.proofSha256
+    && value.environmentSha256 === intent.environmentSha256
+    && value.executableSha256 === item.executableSha256
+    && value.attestationSha256 === item.attestationSha256
+    && sha(value.wrapperInvocationSha256)
+    && sha(value.providerHostSha256)
+    && sha(value.sandboxLauncherSha256)
+    && typeof value.sandboxProfileId === "string"
+    && value.sandboxProfileId.length > 0
+    && sha(value.sandboxProfileSha256);
 }
 
 function validLaunchIntentCapability(
@@ -616,14 +634,16 @@ function validLaunchIntentCapability(
   const environment = intent.effectiveEnvironment;
   const capability = intent.launchCapability;
   if (!environment || typeof environment !== "object" || Array.isArray(environment)
-    || overnightProviderEnvironmentSha256(environment as Record<string, string>) !== item.containmentProof.environment.sha256
+    || overnightProviderEnvironmentSha256(environment as Record<string, string>) !== intent.environmentSha256
     || !capability || typeof capability !== "object" || Array.isArray(capability)) return false;
   const typed = capability as OvernightProviderLaunchCapability;
   return typed.version === 1
+    && typed.runId === intent.portfolioRunId
     && typed.itemId === item.itemId
-    && typed.provider === item.invocation.provider
-    && typed.proofSha256 === item.containmentProof.proofSha256
-    && typed.invocationSha256 === overnightProviderInvocationSha256(item.invocation)
+    && typed.provider === item.provider
+    && typed.proofSha256 === item.proofSha256
+    && typed.invocationSha256 === item.invocationSha256
+    && intent.launchCapabilitySha256 === item.capabilitySha256
     && intent.launchCapabilitySha256 === overnightProviderLaunchCapabilitySha256(typed);
 }
 

@@ -19,6 +19,7 @@ import type {
 import { containmentProofIdentitySha256, containmentWriteScopesSha256 } from "./overnight-provider-containment";
 import {
   overnightProviderHostRunId,
+  overnightProviderInvocationSha256,
   overnightProviderRunArtifactPrefix,
   OvernightProviderRecoveryBlockedError,
 } from "./overnight-provider-process-recovery";
@@ -135,7 +136,7 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
       });
       const proof = await restartedRunner.recoverPersistedRun({
         runId: fixture.runId,
-        items: [{ itemId: fixture.itemId, status: "running", invocation: fixture.invocation, containmentProof: fixture.containmentProof }],
+        items: [recoveryItem(fixture)],
       });
 
       expect(proof).toMatchObject({ status: "clean", items: [{ itemId: fixture.itemId, disposition: "terminated" }] });
@@ -187,7 +188,7 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
 
       await expect(restartedRunner.recoverPersistedRun({
         runId: fixture.runId,
-        items: [{ itemId: fixture.itemId, status: "running", invocation: fixture.invocation, containmentProof: fixture.containmentProof }],
+        items: [recoveryItem(fixture)],
       })).rejects.toMatchObject<Partial<OvernightProviderRecoveryBlockedError>>({ reason: "claim_identity_mismatch" });
       expect(processExists(fixture.pids.providerPid)).toBe(true);
       expect(processExists(fixture.pids.grandchildPid)).toBe(true);
@@ -208,7 +209,7 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
 
       await expect(restartedRunner.recoverPersistedRun({
         runId: fixture.runId,
-        items: [{ itemId: fixture.itemId, status: "running", invocation: fixture.invocation, containmentProof: fixture.containmentProof }],
+        items: [recoveryItem(fixture)],
       })).rejects.toMatchObject<Partial<OvernightProviderRecoveryBlockedError>>({ reason: "observation_unknown" });
       expect(processExists(fixture.pids.providerPid)).toBe(true);
       expect(processExists(fixture.pids.grandchildPid)).toBe(true);
@@ -251,7 +252,7 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
 
       await expect(restartedRunner.recoverPersistedRun({
         runId: fixture.runId,
-        items: [{ itemId: fixture.itemId, status: "running", invocation: fixture.invocation, containmentProof: fixture.containmentProof }],
+        items: [recoveryItem(fixture)],
       })).rejects.toMatchObject<Partial<OvernightProviderRecoveryBlockedError>>({ reason: "claim_identity_mismatch" });
     } finally {
       await fixture.cleanup();
@@ -272,7 +273,7 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
 
       await expect(restartedRunner.recoverPersistedRun({
         runId: fixture.runId,
-        items: [{ itemId: fixture.itemId, status: "running", invocation: fixture.invocation, containmentProof: fixture.containmentProof }],
+        items: [recoveryItem(fixture)],
       })).rejects.toMatchObject<Partial<OvernightProviderRecoveryBlockedError>>({ reason: "unexpected_claim" });
       expect(processExists(fixture.pids.providerPid)).toBe(false);
       expect(processExists(fixture.pids.grandchildPid)).toBe(false);
@@ -340,6 +341,7 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
       provider: "claude",
       proofSha256: containmentProof.proofSha256,
       invocationSha256: containmentProof.invocation.sha256,
+      attestationSha256: containmentProof.attestation!.sha256,
       capabilitySha256: overnightProviderLaunchCapabilitySha256(launchCapability),
       issuedAt: "2099-08-26T12:00:00.000Z",
     }), { mode: 0o600 });
@@ -389,6 +391,24 @@ describe.skipIf(process.platform === "win32")("Overnight provider process restar
     }
   }, 10_000);
 });
+
+function recoveryItem(fixture: Readonly<{
+  itemId: string;
+  invocation: OvernightProviderAdapterInvocation;
+  containmentProof: VerifiedOvernightProviderContainmentProof;
+  launchCapability: Parameters<typeof overnightProviderLaunchCapabilitySha256>[0];
+}>) {
+  return {
+    itemId: fixture.itemId,
+    status: "running" as const,
+    provider: fixture.invocation.provider,
+    proofSha256: fixture.containmentProof.proofSha256,
+    invocationSha256: overnightProviderInvocationSha256(fixture.invocation),
+    attestationSha256: fixture.containmentProof.attestation!.sha256,
+    capabilitySha256: overnightProviderLaunchCapabilitySha256(fixture.launchCapability),
+    executableSha256: fixture.containmentProof.executable.sha256,
+  };
+}
 
 async function startSyntheticProvider(runId: string, itemId: string) {
   const dataDir = await mkdtemp(join(tmpdir(), "morrow-provider-recovery-"));
@@ -448,6 +468,7 @@ async function startSyntheticProvider(runId: string, itemId: string) {
     provider: "claude",
     proofSha256: containmentProof.proofSha256,
     invocationSha256: containmentProof.invocation.sha256,
+    attestationSha256: containmentProof.attestation!.sha256,
     capabilitySha256: overnightProviderLaunchCapabilitySha256(launchCapability),
     issuedAt: "2099-08-26T12:00:00.000Z",
   }), { mode: 0o600 });

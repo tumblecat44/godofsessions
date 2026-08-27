@@ -8,7 +8,6 @@ export interface OvernightPortfolioScheduleItem {
   isolation: "isolated" | "shared";
   worktreeKey: string;
   conflictKeys: readonly string[];
-  writeScopes: readonly string[];
   dependencyIds: readonly string[];
   estimatedMinutes: number;
 }
@@ -119,17 +118,7 @@ export function overnightScheduleItemsConflict(left: OvernightPortfolioScheduleI
   if (left.workspaceKey !== right.workspaceKey) return false;
   if (left.isolation === "shared" || right.isolation === "shared") return true;
   if (left.worktreeKey === right.worktreeKey) return true;
-  if (left.conflictKeys.some((key) => right.conflictKeys.includes(key))) return true;
-  return left.writeScopes.some((leftScope) => right.writeScopes.some((rightScope) => scopesOverlap(leftScope, rightScope)));
-}
-
-function scopesOverlap(left: string, right: string) {
-  const normalizedLeft = left.replace(/\/+$/u, "");
-  const normalizedRight = right.replace(/\/+$/u, "");
-  if (normalizedLeft === "*" || normalizedRight === "*") return true;
-  return normalizedLeft === normalizedRight
-    || normalizedLeft.startsWith(`${normalizedRight}/`)
-    || normalizedRight.startsWith(`${normalizedLeft}/`);
+  return left.conflictKeys.some((key) => right.conflictKeys.includes(key));
 }
 
 function intervalsOverlap(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) {
