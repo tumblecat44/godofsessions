@@ -451,6 +451,71 @@ describe("App Overnight integration", () => {
   });
 });
 
+describe("Korean language toggle", () => {
+  it("renders the complete shell with Korean language without blanking", async () => {
+    const koreanState = state({
+      language: "ko",
+      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
+    });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => koreanState),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overnight" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
+  });
+
+  it("switches to Korean in Settings and keeps the shell visible", async () => {
+    let currentLanguage = "en" as "en" | "ko";
+    const finishOnboarding = vi.fn(async (input: { language: "en" | "ko" }) => {
+      currentLanguage = input.language;
+    });
+    const getBootstrap = () => state({ language: currentLanguage });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => getBootstrap()),
+      finishOnboarding,
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    const { rerender } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "한국어" }));
+    await waitFor(() => expect(finishOnboarding).toHaveBeenCalledWith({ language: "ko" }));
+
+    expect(screen.getByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
+  });
+
+  it("survives a reload after Korean is persisted", async () => {
+    const koreanState = state({
+      language: "ko",
+      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
+    });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => koreanState),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    
+    const { unmount } = render(<App />);
+    expect(await screen.findByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    
+    unmount();
+    
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
+  });
+});
+
 describe("GitHub identity gate", () => {
   it("does not bootstrap Morrow until GitHub sign-in completes", async () => {
     const initial = state({ onboardingComplete: false });
