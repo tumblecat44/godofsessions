@@ -1,0 +1,83 @@
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss";
+@import "./styles.css" layer(legacy);
+
+@theme {
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --color-night: #090d13;
+  --color-night-raised: #0d121a;
+  --color-surface: #111720;
+  --color-surface-raised: #151c27;
+  --color-line: #252c36;
+  --color-line-soft: #1b222c;
+  --color-ink: #f2eddf;
+  --color-ink-muted: #9a9da5;
+  --color-ink-faint: #727783;
+  --color-amber: #eab04f;
+  --color-amber-soft: #d79a3d;
+  --color-teal: #67c8b5;
+  --color-danger: #e9918d;
+
+  --radius-panel: 18px;
+  --radius-control: 10px;
+
+  --shadow-panel: 0 24px 80px rgb(0 3 8 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.025);
+  --shadow-control: 0 8px 26px rgb(0 2 7 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.035);
+
+  --ease-morrow: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    font-family: var(--font-sans);
+    background: var(--color-night);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-width: 720px;
+    min-height: 100dvh;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 78% 18%, rgb(53 77 106 / 0.09), transparent 33%),
+      radial-gradient(circle at 25% 82%, rgb(234 176 79 / 0.035), transparent 28%),
+      var(--color-night);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: rgb(234 176 79 / 0.26);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(234 176 79 / 0.78);
+    outline-offset: 3px;
+  }
+}

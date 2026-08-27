@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a focused product or developer-experience improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user outcome, not private provider data. Do not include
+        credentials, transcripts, private repository names, personal absolute paths,
+        unredacted logs, or screenshots containing private data.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This request contains only public or synthetic information.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should be solved, and who experiences it?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What observable result would make this request successful?
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and provider boundaries
+      description: |
+        Could this affect provider-owned sessions, approvals, dispatch,
+        authentication, receipts, or ambiguous external starts?
+      placeholder: No, or explain how the existing safety boundary should be preserved.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Include smaller approaches or workarounds if useful.

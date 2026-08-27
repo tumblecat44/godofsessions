@@ -1,0 +1,95 @@
+{
+  "name": "god-of-sessions",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A local-first Electron home for Morrow conversations and provider-neutral Overnight work.",
+  "author": "tumblecat44",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http-get://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build:electron": "node scripts/build-electron.mjs",
+    "test:packaged-provider-host": "node --test scripts/verify-packaged-provider-host.test.mjs",
+    "build": "tsc && tsc -p tsconfig.electron.json && vite build && npm run build:electron",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench:performance": "vitest bench benchmarks --run",
+    "bench:startup": "npm run build && node benchmarks/startup.mjs",
+    "dogfood:electron": "npm run build && node e2e/overnight-dogfood.mjs",
+    "dogfood:electron:github-login": "npm run build && node e2e/github-login-gate-dogfood.mjs",
+    "dogfood:electron:frozen-context": "npm run build && node e2e/overnight-frozen-context-dogfood.mjs",
+    "dogfood:electron:single-use": "npm run build && node e2e/overnight-single-use-dogfood.mjs",
+    "dogfood:electron:expiry": "npm run build && node e2e/overnight-expiry-dogfood.mjs",
+    "dogfood:electron:one-active-run": "npm run build && node e2e/overnight-one-active-run-dogfood.mjs",
+    "dogfood:electron:executor-contract": "npm run build && node e2e/overnight-executor-contract-dogfood.mjs",
+    "dogfood:electron:morning-review": "npm run build && node e2e/overnight-morning-review-dogfood.mjs",
+    "dogfood:electron:portfolio": "npm run build && node e2e/overnight-portfolio-electron.mjs",
+    "dogfood:electron:real-readonly": "npm run build && node e2e/overnight-real-readonly-smoke.mjs",
+    "package:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir",
+    "landing:dev": "vite --config landing/vite.config.ts",
+    "landing:build": "vite build --config landing/vite.config.ts",
+    "landing:preview": "vite preview --config landing/vite.config.ts",
+    "landing:test": "node --test landing/worker.test.mjs",
+    "landing:deploy": "npm run landing:build && npx wrangler d1 migrations apply god-of-sessions-metrics --remote && npx wrangler deploy",
+    "preview": "vite preview",
+    "check": "npm run build && npm test && npm run landing:test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@fontsource-variable/instrument-sans": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "9.2.4",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "jsdom": "27.4.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5.7.2",
+    "vite": "^8.1.5",
+    "vitest": "4.1.11",
+    "wait-on": "8.0.5"
+  },
+  "build": {
+    "appId": "dev.beautifului.godofsessions",
+    "productName": "God of Sessions",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "!dist-electron/overnight-provider-host.js",
+      "!dist-electron/overnight-provider-host.js.map",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-electron/overnight-provider-host.js",
+        "to": "overnight-provider-host.js"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/@silvia-odwyer/photon-node/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}

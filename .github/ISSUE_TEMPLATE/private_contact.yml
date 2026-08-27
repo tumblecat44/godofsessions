@@ -1,0 +1,21 @@
+name: Private contact request
+description: Ask a maintainer to establish a private channel without sharing sensitive details.
+title: "[Private contact request]"
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form only to request a private contact route. Do not describe
+        the vulnerability, conduct concern, affected system, reproduction,
+        credentials, people, or other confidential details here.
+  - type: checkboxes
+    id: safe-request
+    attributes:
+      label: Safe public request
+      options:
+        - label: I have not included security, conduct, personal, or other confidential details in this public issue.
+          required: true
+        - label: I will wait for a maintainer to provide an appropriate private reporting route.
+          required: true

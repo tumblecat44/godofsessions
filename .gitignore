@@ -1,0 +1,21 @@
+node_modules/
+dist/
+dist-electron/
+src-tauri/target/
+landing/public/downloads/*.dmg
+.DS_Store
+*.log
+
+# Local/private material. These patterns do not make already tracked files safe.
+private/
+.private/
+.local/
+.secrets/
+.env
+.env.*
+.wrangler/
+wrangler.jsonc
+wrangler.generated.json
+.serena/
+docs/dogfood/private/
+docs/dogfood/raw/

@@ -1,0 +1,4 @@
+node_modules/
+dist/
+public/downloads/*.dmg
+.DS_Store

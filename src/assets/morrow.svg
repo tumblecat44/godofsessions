@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title description">
+  <title id="title">Morrow</title>
+  <desc id="description">A geometric night operator mark with a warm signal and teal status light.</desc>
+  <rect width="640" height="640" rx="152" fill="#0b0f15"/>
+  <circle cx="320" cy="320" r="214" fill="none" stroke="#403827" stroke-width="18"/>
+  <circle cx="320" cy="82" r="24" fill="#6fbaa7"/>
+  <path d="M246 208 408 320 246 432Z" fill="none" stroke="#e2aa54" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

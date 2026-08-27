@@ -1,0 +1,70 @@
+# Instructions for AI coding agents
+
+Before changing this repository, read `OPEN_SOURCE_BOUNDARY.md`. It is the
+authoritative rule for deciding what may be committed to the public project.
+
+## Project identity
+
+God of Sessions V2 is an MIT-licensed, local-first Electron home for
+conversations with Morrow. Electron embeds the Pi Agent SDK directly. Morrow is
+conversation-first and uses file or command tools only when the user explicitly
+asks for work that needs them. The app has one fixed launch root and no project
+picker. Overnight is a provider-neutral portfolio across seven official local
+routes: Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw.
+Morrow recommends work, the user edits the portfolio, and one exact single-use
+approval freezes its items before conflict- and capacity-aware scheduling.
+Morning Review preserves evidence for every item. Each provider worker is
+forbidden from spawning its own subagents. It is not a cloud service.
+
+## Public/private decisions
+
+- Source code, tests, synthetic fixtures, architecture decisions, and
+  redistributable product documentation are public.
+- Generic CI, build, and release workflow definitions are public when they
+  contain no account-specific values or credentials.
+- Credentials, personal provider data, transcripts, local paths, private
+  repositories, unredacted screenshots/logs, dogfood records, deployment
+  account identifiers, generated runtime configuration, signing material, and
+  provider-console settings are private.
+- Never commit secrets or copy provider OAuth values into app state, logs,
+  fixtures, or docs.
+- Never assume `.gitignore` makes an already tracked file private.
+- Live dogfood records stay outside this public source tree. Use synthetic
+  fixtures for checked-in verification evidence.
+- If a new file could contain private information, keep it outside this
+  repository or in a local ignored path and ask the maintainer when unsure.
+
+## Product safety invariants
+
+- Keep Pi SessionManager records authoritative for Morrow conversations.
+- Preserve a fail-closed approval boundary before file mutations and commands.
+- Overnight planning and portfolio editing are read-only. Its one-time approval
+  freezes every selected item, provider, daily-session brief, outcome,
+  verification, fixed root, schedule, and deadline before detached local
+  workers start.
+- Only exact argument-free `pwd` or `git status` may be remembered for the
+  active conversation. In-root file-write
+  approval may also be remembered.
+- Use official provider runtimes for authentication and execution.
+- A route is Ready only after local installation, authentication, and every OS
+  containment and capability canary required by that route are verified.
+  Otherwise keep it Setup or Blocked with the reason visible.
+- Keep the legacy singular Overnight board only for stored-history
+  compatibility; new work uses the provider-neutral portfolio path.
+
+## Working rules
+
+- Read the relevant ADRs and `CONTEXT.md` before changing orchestration or
+  provider contracts.
+- Preserve unrelated user changes in a dirty worktree.
+- Use synthetic fixtures for normal tests; live-provider tests must be ignored
+  and must never expose credential values.
+- Run `npm run check` for normal changes. The active desktop runtime has no
+  Rust or Tauri build step.
+- Do not publish, push, sign, notarize, or change repository visibility unless
+  the user explicitly asks for that action.
+- `package.json` has `private: true` intentionally to prevent accidental npm
+  package publication. It does not mean the GitHub source repository should
+  be private.
+- Do not add a dependency or asset without checking its license and recording
+  any required notice.
