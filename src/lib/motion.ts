@@ -54,9 +54,12 @@ export function transitionState(update: () => void) {
 
   try {
     const transition = startViewTransition.call(document, applyUpdate);
+    // ponytail: Observe ready rejection without re-throwing.
+    // Non-AbortError (e.g. duplicate view-transition-name) logs but does not
+    // propagate as unhandled rejection, since the state update already applied.
     void transition.ready?.catch((error: unknown) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      throw error;
+      console.warn("[view-transition]", error);
     });
     const currentTransition = { transition, applyUpdate };
     activeTransition = currentTransition;

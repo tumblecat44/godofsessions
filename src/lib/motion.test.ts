@@ -103,19 +103,12 @@ describe("transitionState", () => {
     });
   });
 
-  it("keeps a non-abort ready rejection observable", async () => {
+  it("logs a non-abort ready rejection without propagating it", async () => {
     let rejectReady: ((reason?: unknown) => void) | undefined;
     const ready = new Promise<void>((_resolve, reject) => {
       rejectReady = reject;
     });
-    let handledReady: Promise<unknown> | undefined;
-    const originalCatch = ready.catch.bind(ready);
-    vi.spyOn(ready, "catch").mockImplementation((onRejected) => {
-      const caught = originalCatch(onRejected);
-      handledReady = caught;
-      void caught.catch(() => undefined);
-      return caught;
-    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const transition = {
       ready,
       updateCallbackDone: new Promise<void>(() => undefined),
@@ -134,9 +127,10 @@ describe("transitionState", () => {
       "InvalidStateError",
     );
     rejectReady?.(readyError);
+    await Promise.resolve();
 
-    expect(handledReady).toBeDefined();
-    await expect(handledReady).rejects.toBe(readyError);
+    expect(warnSpy).toHaveBeenCalledWith("[view-transition]", readyError);
+    warnSpy.mockRestore();
     updateStateWithoutTransition(() => undefined);
   });
 });
