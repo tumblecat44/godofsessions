@@ -107,11 +107,11 @@ text, and reasoning do not become durable orchestration records. Restart
 recovery preserves completed item receipts and never dispatches them again; it
 resumes or honestly terminates only unfinished items.
 
-Morning Review shows every item's provider, receipt, report, approved
-verification result, failure or skip, and remaining risk separately. A provider
-exit or final report cannot claim completion when verification is missing or
-failed. The legacy singular plan and run board remains readable only for stored
-history compatibility; all newly prepared work uses the portfolio path.
-_Avoid_: hidden start, reusable approval, single-worker product definition,
+Each Overnight card keeps its provider receipt, report, approved verification,
+failure or skip, and remaining risk. A provider exit or final report cannot
+claim completion when verification is missing or failed. This pre-release
+codebase has no singular legacy board or stored-history compatibility branch.
+_Avoid_: hidden start, reusable approval, state-specific page modes,
+singular compatibility branches,
 provider readiness inferred from installation alone, provider-worker
 subagents, cloud queue

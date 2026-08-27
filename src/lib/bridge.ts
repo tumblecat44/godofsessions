@@ -40,8 +40,10 @@ const demoState: BootstrapState = {
   ],
   orchestration: {
     context: { date: new Date().toISOString().slice(0, 10), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, generatedAt: new Date().toISOString(), totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "Preview context" },
-    plans: [],
-    runs: [],
+    providerRoutes: [],
+    portfolioAssessments: [],
+    portfolioPlans: [],
+    portfolioRuns: [],
   },
 };
 
@@ -66,8 +68,6 @@ function previewBridge(): MorrowBridge {
     replanOvernightPortfolio: async () => { throw new Error("Overnight portfolio editing is only available in the desktop app."); },
     startOvernightPortfolio: async () => { throw new Error("Overnight portfolio runs are only available in the desktop app."); },
     stopOvernightPortfolio: async () => { throw new Error("Overnight portfolio controls are only available in the desktop app."); },
-    startOvernight: async () => { throw new Error("Overnight runs are only available in the desktop app."); },
-    stopOvernight: async () => undefined,
     openExternal: async (url) => { window.open(url, "_blank", "noopener"); },
     onEvent: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
   };

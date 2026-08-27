@@ -12,7 +12,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import {
   validateVerifiedOvernightProviderCapabilityAttestation,
   type VerifiedOvernightProviderCapabilityAttestation,
@@ -26,11 +26,8 @@ const PROVIDERS = Object.freeze([
   "codex",
   "claude",
   "grok",
-  "cursor",
   "pi",
-  "hermes",
-  "openclaw",
-] as const satisfies readonly LocalSessionProvider[]);
+] as const satisfies readonly OvernightExecutionProvider[]);
 
 const PROVIDER_SET = new Set<string>(PROVIDERS);
 const SAFE_REASON = /^[a-z][a-z0-9_]{0,63}$/u;
@@ -68,16 +65,16 @@ export interface OvernightProviderAttestationLastAttempt {
 }
 
 export type OvernightProviderAttestationReadResult =
-  | { status: "missing"; provider: LocalSessionProvider }
+  | { status: "missing"; provider: OvernightExecutionProvider }
   | {
       status: "verified";
-      provider: LocalSessionProvider;
+      provider: OvernightExecutionProvider;
       attestation: VerifiedOvernightProviderCapabilityAttestation;
       lastAttempt: OvernightProviderAttestationLastAttempt & { state: "verified" };
     }
   | {
       status: "blocked";
-      provider: LocalSessionProvider;
+      provider: OvernightExecutionProvider;
       reason: string;
       /** Absent when an untrusted record could not supply a trustworthy attempt. */
       lastAttempt?: OvernightProviderAttestationLastAttempt;
@@ -88,15 +85,15 @@ export type OvernightProviderAttestationReadResult =
  * or exposed through the public shape.
  */
 export interface ExplicitOvernightProviderAttestationAttemptToken {
-  readonly provider: LocalSessionProvider;
+  readonly provider: OvernightExecutionProvider;
 }
 
 export interface OvernightProviderAttestationStore {
   /** Strictly read-only: it never creates, repairs, touches, or deletes files. */
-  read(provider: LocalSessionProvider): Promise<OvernightProviderAttestationReadResult>;
+  read(provider: OvernightExecutionProvider): Promise<OvernightProviderAttestationReadResult>;
   /** The only operation allowed to create the owner-only store and attempt lock. */
   beginExplicitReverification(
-    provider: LocalSessionProvider,
+    provider: OvernightExecutionProvider,
   ): Promise<ExplicitOvernightProviderAttestationAttemptToken>;
   recordVerified(
     token: ExplicitOvernightProviderAttestationAttemptToken,
@@ -143,7 +140,7 @@ export interface OvernightProviderAttestationProcessObserver {
 }
 
 interface AttemptAuthority {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   attemptSha256: string;
   observedAt: string;
   deadlineAt: string;
@@ -158,7 +155,7 @@ interface StoredAttemptAuthority extends AttemptAuthority {
 
 interface StoredRecordBody {
   version: typeof STORE_VERSION;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   disposition: "verified" | "blocked";
   lastAttempt: OvernightProviderAttestationLastAttempt;
   attestation?: VerifiedOvernightProviderCapabilityAttestation;
@@ -182,7 +179,7 @@ export function createOvernightProviderAttestationStore(
   const tokens = new WeakMap<object, AttemptSecret>();
 
   const read = async (
-    provider: LocalSessionProvider,
+    provider: OvernightExecutionProvider,
   ): Promise<OvernightProviderAttestationReadResult> => {
     assertProvider(provider);
     const directoryStatus = await inspectPrivateDirectory(directory);
@@ -200,7 +197,7 @@ export function createOvernightProviderAttestationStore(
   };
 
   const beginExplicitReverification = async (
-    provider: LocalSessionProvider,
+    provider: OvernightExecutionProvider,
   ): Promise<ExplicitOvernightProviderAttestationAttemptToken> => {
     assertProvider(provider);
     await ensurePrivateDirectory(directory);
@@ -398,7 +395,7 @@ async function claimAttempt(
 
 async function recoverPriorAttempt(
   directory: string,
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   processObserver: OvernightProviderAttestationProcessObserver,
   observed: Date,
 ) {
@@ -545,7 +542,7 @@ async function assertReplaceTargetUnchanged(path: string, expected: Exclude<Repl
 
 async function readStoredRecord(
   path: string,
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   now: Date,
 ): Promise<OvernightProviderAttestationReadResult> {
   const raw = await readPrivateFile(path);
@@ -584,7 +581,7 @@ async function readStoredRecord(
   };
 }
 
-function parseStoredRecord(value: unknown, provider: LocalSessionProvider): StoredRecord | undefined {
+function parseStoredRecord(value: unknown, provider: OvernightExecutionProvider): StoredRecord | undefined {
   if (!exactObject(value, ["version", "provider", "disposition", "lastAttempt", "attestation", "contractSha256"], ["attestation"])) {
     return undefined;
   }
@@ -615,7 +612,7 @@ function parseStoredRecord(value: unknown, provider: LocalSessionProvider): Stor
 
 async function readAttemptAuthority(
   path: string,
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   allowClaimHardlink = false,
 ): Promise<StoredAttemptAuthority | undefined> {
   const raw = await readPrivateFile(path, allowClaimHardlink ? 2 : 1);
@@ -712,7 +709,7 @@ async function readPrivateFile(path: string, allowedLinks = 1): Promise<PrivateR
 
 function normalizeVerifiedAttestation(
   value: Readonly<VerifiedOvernightProviderCapabilityAttestation>,
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   now: Date,
 ): VerifiedOvernightProviderCapabilityAttestation | undefined {
   if (!strictAttestationShape(value, provider)) return undefined;
@@ -720,7 +717,7 @@ function normalizeVerifiedAttestation(
   return JSON.parse(JSON.stringify(value)) as VerifiedOvernightProviderCapabilityAttestation;
 }
 
-function strictAttestationShape(value: unknown, provider: LocalSessionProvider) {
+function strictAttestationShape(value: unknown, provider: OvernightExecutionProvider) {
   if (!exactObject(value, [
     "version", "provider", "attestationSha256", "platform", "verifiedAt", "expiresAt",
     "executable", "adapterContract", "environmentContract", "mutation", "launcher", "policy", "canary",
@@ -801,7 +798,7 @@ async function inspectPrivateDirectory(directory: string): Promise<"missing" | "
 
 async function hasPendingExplicitAttempt(
   directory: string,
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
 ): Promise<boolean | "error"> {
   try {
     const names = await readdir(directory);
@@ -880,15 +877,15 @@ function exactStorePath(directory: string) {
   return directory;
 }
 
-function recordPath(directory: string, provider: LocalSessionProvider) {
+function recordPath(directory: string, provider: OvernightExecutionProvider) {
   return join(directory, `${provider}.v${STORE_VERSION}.json`);
 }
 
-function attemptPath(directory: string, provider: LocalSessionProvider) {
+function attemptPath(directory: string, provider: OvernightExecutionProvider) {
   return join(directory, `.${provider}.v${STORE_VERSION}.attempt.json`);
 }
 
-function claimPath(directory: string, provider: LocalSessionProvider, attemptSha256: string) {
+function claimPath(directory: string, provider: OvernightExecutionProvider, attemptSha256: string) {
   return join(directory, `.${provider}.v${STORE_VERSION}.${attemptSha256}.claim.json`);
 }
 
@@ -899,7 +896,7 @@ function boundedReason(reason: string) {
   return reason;
 }
 
-function assertProvider(provider: LocalSessionProvider) {
+function assertProvider(provider: OvernightExecutionProvider) {
   if (!PROVIDER_SET.has(provider)) throw storeError("store_path_invalid");
 }
 
@@ -967,7 +964,7 @@ function safeNow(now: () => Date) {
 }
 
 function blockedRead(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   reason: string,
 ): OvernightProviderAttestationReadResult {
   return { status: "blocked", provider, reason: boundedReadReason(reason) };

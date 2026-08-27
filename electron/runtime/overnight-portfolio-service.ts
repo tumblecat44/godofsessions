@@ -127,7 +127,7 @@ export interface OvernightPortfolioResumeCleanupInput {
   deadlineAt: string;
   runningItems: ReadonlyArray<{
     itemId: string;
-    provider: LocalSessionProvider;
+    provider: OvernightExecutionProvider;
     invocation: Readonly<OvernightProviderAdapterInvocation>;
     containmentProof: Readonly<VerifiedOvernightProviderContainmentProof>;
     invocationIdentityVersion: typeof OVERNIGHT_PROVIDER_INVOCATION_IDENTITY_VERSION;

@@ -11,8 +11,8 @@
 > preceded the portfolio runtime. Its 48-session admission cap, one-candidate
 > recommendation, one-worker approval, and Codex-only production route do not
 > describe the product contract after 2026-08-26. ADR 0053 is authoritative for
-> newly prepared Overnight work. Singular plans and runs remain readable only as
-> stored-history compatibility records.
+> newly prepared Overnight work. The singular implementation and its stored
+> record/UI contract were removed before the first public release.
 
 ## Decision
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import type { Readable, Writable } from "node:stream";
-import type { LocalSessionProvider, OvernightExecutor } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider, OvernightExecutor } from "../../src/shared/contracts";
 import { AcpJsonRpcClient, type AcpPermissionRequest } from "./overnight-acp-client";
 import type { OvernightPortfolioItem } from "./overnight-portfolio-coordinator";
 import {
@@ -87,7 +87,7 @@ export interface OvernightProviderRunResult {
 export type OvernightPiRunner = (input: OvernightProviderRunInput & { signal: AbortSignal }) => Promise<OvernightProviderRunResult>;
 
 export interface OvernightAcpPermissionContext {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   request: AcpPermissionRequest;
   root: string;
   writeScopes: readonly string[];
@@ -391,7 +391,7 @@ function collectAcpCommandReceipt(
 }
 
 function validateCompletedReceipt(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   result: OvernightProviderRunResult,
   verification: string,
 ): OvernightProviderRunResult {
@@ -582,7 +582,7 @@ async function waitForProviderClaim(
     hostRunId: string;
     portfolioRunId: string;
     itemId: string;
-    provider: LocalSessionProvider;
+    provider: OvernightExecutionProvider;
     executable: string;
     invocationSha256: string;
     providerHostPath: string;
@@ -729,7 +729,7 @@ async function terminateLaunchedProvider(handle: OvernightLaunchedProviderProces
 }
 
 function providerExitError(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   outcome: { code: number | null; signal: NodeJS.Signals | null },
   resultStatus: string,
 ) {
@@ -740,7 +740,7 @@ function providerExitError(
     : `${provider} 실행이 실패했습니다.`;
 }
 
-function validProviderReceipt(receipt: string, provider: LocalSessionProvider) {
+function validProviderReceipt(receipt: string, provider: OvernightExecutionProvider) {
   return receipt.startsWith(`${provider}:`) && validNativeId(receipt) && receipt.split(":").length >= 3;
 }
 

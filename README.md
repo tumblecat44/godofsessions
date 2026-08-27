@@ -35,9 +35,9 @@ The V2 alpha includes:
 - three top-level destinations: **Ask Morrow**, **Overnight**, and **Settings**
 
 It deliberately excludes project selection, provider-worker subagent spawning,
-and the old provider session inbox and Control Board. The legacy singular
-Overnight board is retained only to read stored history; new work uses the
-portfolio path.
+the old provider session inbox, and the Control Board. Because the product has
+not had a public release, the current portfolio is the only Overnight model;
+there is no singular compatibility path.
 
 ## Runtime and trust
 
@@ -96,11 +96,9 @@ or Reverify action. After the user approves Run, Morrow consumes the exact
 running item claim before creating its private sandbox binding; a failed
 reverification or mismatched claim fails closed.
 
-Morning Review survives app restart and separates every item's provider-native
-receipt, report, verification result, failure or skip, and remaining risk.
-Provider self-report never substitutes for approved verification. The legacy
-singular plan and run surfaces remain readable only for stored-history
-compatibility and do not define new Overnight work.
+Every Overnight card survives app restart with its provider-native receipt,
+report, verification result, failure or skip, and remaining risk. Provider
+self-report never substitutes for approved verification.
 
 ## Development
 
@@ -116,45 +114,14 @@ Validation:
 ```sh
 npm run check
 npm run dogfood:electron:github-login
-npm run dogfood:electron
-npm run dogfood:electron:frozen-context
-npm run dogfood:electron:single-use
-npm run dogfood:electron:expiry
-npm run dogfood:electron:one-active-run
-npm run dogfood:electron:executor-contract
-npm run dogfood:electron:morning-review
 npm run dogfood:electron:portfolio
+npm run dogfood:electron:real-readonly
 npm run package:mac
 ```
 
-`dogfood:electron` launches the real Electron shell against isolated synthetic
-state and verifies the complete Overnight UI lifecycle without using a provider
-or personal session data. Maintainers can additionally run
-`npm run dogfood:electron:github-login` to prove a clean install exposes only
+`dogfood:electron:github-login` proves a clean install exposes only
 the GitHub identity gate and does not initialize the Morrow surfaces. It does
-not start an OAuth authorization or use a real account. Maintainers can run
-`npm run dogfood:electron:frozen-context` to prepare a plan with the actual
-Overnight service, replace the synthetic daily context, and prove the Run
-request still contains only the reviewed context. The
-`dogfood:electron:single-use` command submits two simultaneous Run requests
-through the production Electron bridge and proves that the actual service
-creates only one launch and one visible run. The
-`dogfood:electron:expiry` command advances an injected clock past the actual
-service's five-minute approval boundary and proves that Run is rejected with
-zero launches before the prior outcome is prepared again under a fresh plan.
-The `dogfood:electron:one-active-run` command starts one captured fixed-root
-run, proves that a second Chat route cannot prepare or launch another worker,
-confirms a second Electron process exits, and then prepares a fresh plan only
-after the first run is terminal.
-The `dogfood:electron:executor-contract` command renders the complete fixed
-working directory and argument vector for both Codex and Claude in the real
-Electron plan card, then passes those frozen arguments through the actual
-detached worker to an isolated synthetic command. It never launches a provider.
-The `dogfood:electron:morning-review` command feeds provider-shaped Codex success
-and Claude failure events through the actual detached worker, reloads the
-production Electron renderer, and proves that the approved outcome,
-verification, bounded report, failure evidence, and permission-denial count
-remain readable without retaining raw tool input. It never launches a provider.
+not start an OAuth authorization or use a real account.
 The `dogfood:electron:portfolio` command drives the provider-neutral portfolio
 through the real Electron renderer and IPC boundary with synthetic worker
 receipts. It proves parallel independent work, serial conflicting work, an
@@ -166,10 +133,8 @@ Maintainers can also run
 against their local session summary. That command never prepares or starts a
 run, and writes its private screenshots only to an operating-system temporary
 directory outside the repository.
-The earlier singular live-Codex smoke was removed when that worker became
-stored-history-only. A live provider may run only through the current portfolio
-path after an identity-bound containment canary and one-time approval; no
-uncontained compatibility command is retained.
+A live provider may run only through the current portfolio path after an
+identity-bound containment canary and one-time approval.
 
 The unpacked macOS app is written to
 `dist/mac-arm64/God of Sessions.app`. The local package smoke build intentionally

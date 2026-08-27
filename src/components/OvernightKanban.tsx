@@ -1,16 +1,15 @@
 import { Radio } from "lucide-react";
-import type { OvernightPortfolioPlanItemSummary, OvernightPortfolioRunItemSummary, OvernightPortfolioRunSummary } from "../shared/contracts";
+import type { OvernightPortfolioPlanItemSummary, OvernightPortfolioRunItemSummary } from "../shared/contracts";
 
 type Lane = "waiting" | "working" | "checking" | "done";
 
 interface OvernightKanbanProps {
   item: OvernightPortfolioRunItemSummary;
   planItem?: OvernightPortfolioPlanItemSummary;
-  run: OvernightPortfolioRunSummary;
   ko: boolean;
 }
 
-export function OvernightKanban({ item, planItem, run, ko }: OvernightKanbanProps) {
+export function OvernightKanban({ item, planItem, ko }: OvernightKanbanProps) {
   const outcome = planItem?.outcome ?? item.outcome ?? item.title ?? (ko ? "보존된 Overnight" : "Retained Overnight");
   const workerLane: Lane = item.status === "queued" ? "waiting" : item.status === "running" ? "working" : item.status === "completed" ? "done" : "checking";
   const verificationLane: Lane = item.status === "completed"
@@ -18,8 +17,8 @@ export function OvernightKanban({ item, planItem, run, ko }: OvernightKanbanProp
     : ["failed", "skipped", "stopped", "timed_out", "unknown"].includes(item.status) ? "checking" : "waiting";
   const cards: Array<{ id: string; lane: Lane; title: string; copy: string; tone: string }> = [
     { id: "contract", lane: "done", title: ko ? "계획과 승인 고정" : "Plan and approval frozen", copy: planItem?.verification ?? item.verification ?? (ko ? "승인된 실행 계약이 보존되어 있습니다." : "The approved execution contract is retained."), tone: "done" },
-    { id: "worker", lane: workerLane, title: ko ? `${item.providerLabel} 작업` : `${item.providerLabel} worker`, copy: item.error ?? (ko ? `현재 상태: ${itemStatusLabel(item.status, ko)}` : `Current state: ${itemStatusLabel(item.status, ko)}`), tone: item.status },
-    { id: "verification", lane: verificationLane, title: ko ? "검증과 결과 보고" : "Verification and report", copy: item.result?.report ?? verificationLabel(item, ko), tone: item.result?.status ?? "pending" },
+    { id: "worker", lane: workerLane, title: ko ? `${item.providerLabel} 작업` : `${item.providerLabel} worker`, copy: ko ? `현재 상태: ${itemStatusLabel(item.status, ko)}` : `Current state: ${itemStatusLabel(item.status, ko)}`, tone: item.status },
+    { id: "verification", lane: verificationLane, title: ko ? "검증과 결과 보고" : "Verification and report", copy: verificationLabel(item, ko), tone: item.result?.status ?? "pending" },
   ];
   const lanes: Array<{ id: Lane; label: string }> = [
     { id: "waiting", label: ko ? "대기" : "WAITING" },
@@ -28,7 +27,6 @@ export function OvernightKanban({ item, planItem, run, ko }: OvernightKanbanProp
     { id: "done", label: ko ? "완료" : "DONE" },
   ];
   return <section className="overnight-kanban" aria-label={ko ? `${outcome} 칸반` : `Kanban for ${outcome}`}>
-    <header><div><span>{ko ? "선택한 OVERNIGHT 목적" : "SELECTED OVERNIGHT PURPOSE"}</span><h3>{outcome}</h3><p>{planItem?.title ?? item.title}</p></div><div><strong>{item.providerLabel}</strong><small>{ko ? `마지막 상태 ${formatTimestamp(run.updatedAt, ko)}` : `Last state ${formatTimestamp(run.updatedAt, ko)}`}</small></div></header>
     <div className="overnight-kanban__lanes">{lanes.map((lane) => {
       const laneCards = cards.filter((card) => card.lane === lane.id);
       return <section key={lane.id} className={`is-${lane.id}`}><header><span>{lane.label}</span><em>{laneCards.length}</em></header><div>{laneCards.map((card) => <article key={card.id} className={`is-${card.tone}`}><i aria-hidden="true" /><strong>{card.title}</strong><p>{card.copy}</p>{card.id === "worker" && item.providerReceiptId && <code>{item.providerReceiptId}</code>}</article>)}{laneCards.length === 0 && <p className="overnight-kanban__empty">{ko ? "항목 없음" : "No cards"}</p>}</div></section>;
@@ -48,8 +46,4 @@ function verificationLabel(item: OvernightPortfolioRunItemSummary, ko: boolean) 
   if (item.result?.status === "success") return ko ? "작업자가 통과했다고 보고함 · 사용자 검토 필요" : "Worker reports passed · user review needed";
   if (item.result?.status === "failure") return ko ? "실패했다고 보고됨" : "Reported failed";
   return ko ? "통과 근거 없음" : "No passing evidence";
-}
-
-function formatTimestamp(value: string, ko: boolean) {
-  return new Intl.DateTimeFormat(ko ? "ko-KR" : "en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }

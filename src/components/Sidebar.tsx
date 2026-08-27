@@ -24,22 +24,7 @@ export function Sidebar({ view, language, conversations, activeConversationId, o
   const activeItems = typeof activePortfolioItemCount === "number" && Number.isInteger(activePortfolioItemCount) && activePortfolioItemCount > 0
     ? activePortfolioItemCount
     : undefined;
-  const activeItemsEnglish = activeItems === 1 ? "1 Overnight" : `${activeItems} Overnights`;
-  const orchestrateLabel = overnightStatus === "starting"
-    ? activeItems
-      ? (ko ? `Overnight · ${activeItems}개 시작 중` : `Overnight · ${activeItemsEnglish} starting`)
-      : (ko ? "Overnight · 시작 중" : "Overnight · starting")
-    : overnightStatus === "running"
-      ? activeItems
-        ? (ko ? `Overnight · ${activeItems}개 진행 중` : `Overnight · ${activeItemsEnglish} active`)
-        : (ko ? "Overnight · 진행 중" : "Overnight · active")
-      : overnightStatus === "stopping"
-        ? activeItems
-          ? (ko ? `Overnight · ${activeItems}개 중지 중` : `Overnight · ${activeItemsEnglish} stopping`)
-          : (ko ? "Overnight · 중지 중" : "Overnight · stopping")
-        : overnightStatus === "attention"
-          ? (ko ? "Overnight · 확인 필요" : "Overnight · attention needed")
-          : "Overnight";
+  const orchestrateLabel = "Overnight";
   const overnightBadge = overnightStatus === "starting"
     ? activeItems ? `${activeItems} STARTING` : "STARTING"
     : overnightStatus === "running"

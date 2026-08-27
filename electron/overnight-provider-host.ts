@@ -14,9 +14,7 @@ const PROVIDERS = new Set(["codex", "claude", "grok", "pi"]);
 const [runId, parentPidText, expectedWorkerPath, expectedRequestPath, deadlineAt, root, providerId, executable, ...providerArguments] = process.argv.slice(2);
 const parentPid = Number(parentPidText);
 const portfolioLaunch = expectedWorkerPath === "morrow-portfolio";
-// This host is exclusively the proof-bound portfolio launcher. The singular
-// Overnight worker is stored-history compatibility only and must not reuse an
-// uncontained legacy entrypoint through this binary.
+// This host is exclusively the proof-bound portfolio launcher.
 if (!portfolioLaunch) process.exit(2);
 const invocationSha256 = portfolioLaunch ? providerArguments.shift() : undefined;
 const guardNonce = portfolioLaunch ? providerArguments.shift() : undefined;

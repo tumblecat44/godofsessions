@@ -3,6 +3,7 @@ import { link, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/p
 import { basename, dirname, join, resolve } from "node:path";
 import type {
   LocalSessionProvider,
+  OvernightExecutionProvider,
   OvernightDisposition,
   OvernightPortfolioRunItemSummary,
   OvernightPortfolioRunSummary,
@@ -49,7 +50,7 @@ export interface OvernightPortfolioExecutionAuthorityItem {
 /** Durable V3 authority. It deliberately contains no executable or sandbox path. */
 export interface OvernightPortfolioPathFreeContainmentAuthority {
   version: 3;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   executableSha256: string;
   identitySha256: string;
   attestationSha256: string;
@@ -98,8 +99,8 @@ export interface OvernightPortfolioAssessmentRecord {
     excludedSessions: Array<{ sessionId: string; reasonCode: OvernightReasonCode; explanation: string }>;
     outcome: string;
     verification: string;
-    preferredProvider: "auto" | LocalSessionProvider;
-    resolvedProvider?: LocalSessionProvider;
+    preferredProvider: "auto" | OvernightExecutionProvider;
+    resolvedProvider?: OvernightExecutionProvider;
     providerReason: string;
     estimatedMinutes: number;
     risks: string[];
@@ -140,7 +141,7 @@ export interface CreateOvernightPortfolioRunInput {
   title: string;
   startedAt: string;
   deadlineAt: string;
-  items: Array<{ itemId: string; provider: LocalSessionProvider }>;
+  items: Array<{ itemId: string; provider: OvernightExecutionProvider }>;
 }
 
 interface StoredAuthority {
@@ -175,7 +176,7 @@ interface StoredLaunchCapability {
   version: typeof LEDGER_VERSION;
   runId: string;
   itemId: string;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   proofSha256: string;
   invocationSha256: string;
   capabilitySha256: string;
@@ -187,7 +188,7 @@ interface StoredLaunchPreparationClaim {
   planId: string;
   runId: string;
   itemId: string;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   approvalClaimSha256: string;
   executionRootSha256: string;
   worktreeKeySha256: string;

@@ -24,17 +24,6 @@ await build({
 });
 
 await build({
-  entryPoints: ["electron/overnight-worker.ts"],
-  outfile: "dist-electron/overnight-worker.js",
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node22",
-  packages: "external",
-  sourcemap: true,
-});
-
-await build({
   entryPoints: ["electron/overnight-provider-host.ts"],
   outfile: "dist-electron/overnight-provider-host.js",
   bundle: true,

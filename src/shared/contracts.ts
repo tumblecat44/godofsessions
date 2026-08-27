@@ -9,11 +9,6 @@ export const OVERNIGHT_EXECUTION_PROVIDERS = [
   "pi",
 ] as const;
 export type OvernightExecutionProvider = typeof OVERNIGHT_EXECUTION_PROVIDERS[number];
-/**
- * Historical Overnight records may name any provider that God of Sessions has
- * previously observed. New execution plans must use OvernightExecutionProvider.
- */
-export type OvernightProvider = LocalSessionProvider;
 export type OvernightExecutor = "codex" | "claude";
 
 export function isOvernightExecutionProvider(value: unknown): value is OvernightExecutionProvider {
@@ -99,56 +94,6 @@ export interface OvernightExcludedSessionProposal {
   explanation: string;
 }
 
-export interface OvernightExcludedSessionSummary extends OvernightExcludedSessionProposal {
-  session: DailySessionSummary;
-}
-
-export interface OvernightRecommendationSummary {
-  id: string;
-  disposition: OvernightDisposition;
-  requestKind: OvernightRequestKind;
-  title: string;
-  rationale: string;
-  reasonCodes: OvernightReasonCode[];
-  selectedSessions: DailySessionSummary[];
-  excludedSessions: OvernightExcludedSessionSummary[];
-  outcome?: string;
-  verification?: string;
-  executor?: OvernightExecutor;
-  executorLabel?: string;
-  executorReason?: string;
-  risks: string[];
-  questions: string[];
-  planId?: string;
-  createdAt: string;
-  contextGeneratedAt: string;
-}
-
-export interface OvernightPlanSummary {
-  id: string;
-  status: "draft" | "starting" | "started" | "expired";
-  title: string;
-  outcome: string;
-  verification: string;
-  executor: OvernightExecutor;
-  executorLabel: string;
-  commandPreview: string;
-  durationMinutes?: number;
-  recommendationId?: string;
-  rationale?: string;
-  reasonCodes?: OvernightReasonCode[];
-  executorReason?: string;
-  risks?: string[];
-  excludedSessions?: OvernightExcludedSessionSummary[];
-  selectedSessions: OvernightSessionReference[];
-  contextSessions?: OvernightSessionReference[];
-  contextDate?: string;
-  contextTimeZone?: string;
-  contextWarnings?: string[];
-  createdAt: string;
-  expiresAt: string;
-}
-
 export type OvernightActivityKind =
   | "starting"
   | "working"
@@ -157,13 +102,6 @@ export type OvernightActivityKind =
   | "file-change"
   | "verification"
   | "reporting";
-
-export interface OvernightProgressSummary {
-  activity: OvernightActivityKind;
-  eventsObserved: number;
-  heartbeatAt: string;
-  lastActivityAt?: string;
-}
 
 export type OvernightResultWarningCode =
   | "invalid_event"
@@ -182,38 +120,6 @@ export interface OvernightProviderResult {
   status: "success" | "failure" | "unknown";
   report?: string;
   warnings: OvernightResultWarning[];
-}
-
-export interface OvernightRunSummary {
-  id: string;
-  planId: string;
-  title: string;
-  outcome: string;
-  verification: string;
-  executor: OvernightExecutor;
-  executorLabel: string;
-  status: "starting" | "running" | "completed" | "failed" | "stopping" | "stopped" | "timed_out" | "unknown";
-  durationMinutes?: number;
-  deadlineAt?: string;
-  /** Private-runtime integrity marker for the complete frozen worker handoff. */
-  contractSha256?: string;
-  progress?: OvernightProgressSummary;
-  selectedSessions: OvernightSessionReference[];
-  contextSessions?: OvernightSessionReference[];
-  contextDate?: string;
-  contextTimeZone?: string;
-  contextWarnings?: string[];
-  startedAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  workerPid?: number;
-  providerHostPid?: number;
-  providerPid?: number;
-  exitCode?: number;
-  stopReason?: "user" | "worker_unreachable";
-  error?: string;
-  result?: OvernightProviderResult;
-  logTail: string[];
 }
 
 export interface OvernightProviderRouteSummary {
@@ -272,7 +178,7 @@ export interface OvernightPortfolioPlanItemSummary {
   title: string;
   outcome: string;
   verification: string;
-  provider: OvernightProvider;
+  provider: OvernightExecutionProvider;
   providerLabel: string;
   providerReason: string;
   estimatedMinutes: number;
@@ -304,7 +210,7 @@ export interface OvernightPortfolioRunItemSummary {
   title?: string;
   outcome?: string;
   verification?: string;
-  provider: OvernightProvider;
+  provider: OvernightExecutionProvider;
   providerLabel: string;
   status: "queued" | "running" | "completed" | "failed" | "skipped" | "stopped" | "timed_out" | "unknown";
   providerReceiptId?: string;
@@ -340,13 +246,10 @@ export interface OvernightPortfolioEditInput {
 
 export interface OrchestrationSnapshot {
   context: DailyContextSummary;
-  recommendation?: OvernightRecommendationSummary;
-  plans: OvernightPlanSummary[];
-  runs: OvernightRunSummary[];
-  providerRoutes?: OvernightProviderRouteSummary[];
-  portfolioAssessments?: OvernightPortfolioAssessmentSummary[];
-  portfolioPlans?: OvernightPortfolioPlanSummary[];
-  portfolioRuns?: OvernightPortfolioRunSummary[];
+  providerRoutes: OvernightProviderRouteSummary[];
+  portfolioAssessments: OvernightPortfolioAssessmentSummary[];
+  portfolioPlans: OvernightPortfolioPlanSummary[];
+  portfolioRuns: OvernightPortfolioRunSummary[];
 }
 
 export interface ProviderSummary {
@@ -374,14 +277,10 @@ export interface ConversationSummary {
 }
 
 export interface TranscriptPart {
-  type: "text" | "thinking" | "tool" | "overnight-plan" | "overnight-run";
+  type: "text" | "thinking" | "tool";
   text: string;
   toolName?: string;
   state?: "running" | "done" | "error";
-  overnightPlanId?: string;
-  /** Full plan payload so the chat card renders without waiting for an orchestration refresh. */
-  overnightPlan?: OvernightPlanSummary;
-  overnightRunId?: string;
 }
 
 export interface TranscriptMessage {
@@ -452,7 +351,7 @@ export interface MorrowBridge {
   logoutGitHub?(): Promise<GitHubAuthState>;
   bootstrap(): Promise<BootstrapState>;
   /** Lightweight status refresh used while an Overnight worker is active. */
-  overnightSnapshot?(): Promise<OrchestrationSnapshot>;
+  overnightSnapshot(): Promise<OrchestrationSnapshot>;
   startConversation(): Promise<ConversationDetail>;
   openConversation(path: string): Promise<ConversationDetail>;
   sendMessage(input: { text: string }): Promise<void>;
@@ -465,12 +364,10 @@ export interface MorrowBridge {
   disconnectProvider(providerId: string): Promise<void>;
   finishOnboarding(input: { language: AppLanguage }): Promise<void>;
   refreshDailyContext(): Promise<OrchestrationSnapshot>;
-  verifyOvernightProvider?(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
-  replanOvernightPortfolio?(input: OvernightPortfolioEditInput): Promise<OvernightPortfolioPlanSummary | undefined>;
-  startOvernightPortfolio?(planId: string): Promise<OvernightPortfolioRunSummary>;
-  stopOvernightPortfolio?(runId: string): Promise<void>;
-  startOvernight(planId: string): Promise<OvernightRunSummary>;
-  stopOvernight(runId: string): Promise<void>;
+  verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
+  replanOvernightPortfolio(input: OvernightPortfolioEditInput): Promise<OvernightPortfolioPlanSummary | undefined>;
+  startOvernightPortfolio(planId: string): Promise<OvernightPortfolioRunSummary>;
+  stopOvernightPortfolio(runId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   onEvent(listener: (event: MorrowEvent) => void): () => void;
 }

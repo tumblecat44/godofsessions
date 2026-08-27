@@ -4,7 +4,7 @@ import { open, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import type { Readable } from "node:stream";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import type {
   MacOsOfficialExecutableObservation,
   MacOsOfficialExecutableStaticObservation,
@@ -33,7 +33,7 @@ const MACH_O_MAGICS = new Set([
 ]);
 
 export type MacOsProviderTeamIdentifierAllowlist = Partial<
-  Record<LocalSessionProvider, readonly string[]>
+  Record<OvernightExecutionProvider, readonly string[]>
 >;
 
 /**
@@ -41,7 +41,7 @@ export type MacOsProviderTeamIdentifierAllowlist = Partial<
  * caller-owned evidence: this module deliberately does not guess identities.
  */
 export function macOsOfficialTeamIdentifiers(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   callerAllowlist: MacOsProviderTeamIdentifierAllowlist = {},
 ): readonly string[] {
   if (provider === "codex") return Object.freeze([OPENAI_CODEX_TEAM_IDENTIFIER]);
@@ -91,7 +91,7 @@ export type MacOsContainmentSpawn = (
 
 export interface MacOsOvernightProviderContainmentHostOptions {
   /** One host instance is bound to one provider route and its Team-ID policy. */
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   /** Ignored for Codex, whose audited OpenAI Team ID is fixed in this module. */
   officialTeamIdentifiers?: readonly string[];
   /** No default canary exists: production must inject the real bounded probe. */

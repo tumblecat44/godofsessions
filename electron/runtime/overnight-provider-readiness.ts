@@ -46,8 +46,7 @@ export interface OvernightProviderReadinessOptions {
   verifyContainment?: OvernightProviderContainmentResolver;
   piReady?: () => Promise<boolean>;
   piCancellationReady?: () => Promise<boolean>;
-  acpPermissionPolicyReady?: (provider: "grok" | "cursor" | "hermes" | "openclaw") => Promise<boolean>;
-  hermesCapabilityReady?: () => Promise<boolean>;
+  acpPermissionPolicyReady?: (provider: "grok") => Promise<boolean>;
 }
 
 export class OvernightProviderReadinessService {

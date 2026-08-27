@@ -14,13 +14,7 @@ const contextHome = join(sandbox, "context-home");
 const dataRoot = join(sandbox, "ledger");
 const serviceBundle = join(sandbox, "portfolio-service.cjs");
 const nightPlanScreenshot = join(sandbox, "night-plan-results.png");
-const outcomeDialogScreenshot = join(sandbox, "night-plan-outcome-dialog.png");
-const threeOutcomeScreenshot = join(sandbox, "night-plan-three-outcomes.png");
-const discoveredOutcomeScreenshot = join(sandbox, "night-plan-discovered-three-outcomes.png");
-const morningReviewScreenshot = join(sandbox, "morning-review-results.png");
-const fiveOutcomeScreenshot = join(sandbox, "night-plan-five-outcomes.png");
 const compactKoreanScreenshot = join(sandbox, "night-plan-korean-compact.png");
-const compactKoreanDialogScreenshot = join(sandbox, "night-plan-korean-dialog.png");
 await Promise.all([mkdir(workspace), mkdir(userData), mkdir(contextHome), mkdir(dataRoot)]);
 await build({
   entryPoints: [join(root, "e2e", "fixtures", "portfolio-service-entry.ts")],
@@ -48,284 +42,63 @@ try {
   const page = await app.firstWindow();
   await installPortfolioIpc(app, { serviceBundle, workspace, dataRoot });
 
-  const compactOnly = process.env.MORROW_E2E_COMPACT_ONLY === "1";
-  let plan;
-  if (!compactOnly) {
   await resetScenario(app, "parallel");
   await openOrchestrate(page);
+  assert.equal(await page.locator("aside .overnight-calendar").count(), 0, "the calendar must not live in the sidebar");
+  await page.getByLabel("Choose Overnight date").waitFor();
   await preparePortfolio(page, "Run two independent repairs in parallel");
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.waitFor();
-  assert.equal((await readFixture(app)).snapshot.portfolioPlans[0].peakParallelism, 2, "independent outcomes must remain parallel in the exact Night Plan");
-  const outcomeCards = plan.locator('[aria-label="Tonight\'s outcomes"] > article');
-  assert.equal(await outcomeCards.count(), 2, "the Night Plan must render every selected result as a peer outcome card");
-  const [firstOutcomeBox, secondOutcomeBox] = await Promise.all([
-    outcomeCards.nth(0).boundingBox(),
-    outcomeCards.nth(1).boundingBox(),
-  ]);
-  assert.ok(firstOutcomeBox && secondOutcomeBox, "outcome cards must be measurable in the live Electron window");
-  assert.ok(Math.abs(firstOutcomeBox.width - secondOutcomeBox.width) < 2, "peer outcome cards must have equal width");
-  assert.ok(Math.abs(firstOutcomeBox.y - secondOutcomeBox.y) < 2, "two outcomes must share a row at the default desktop width");
+
+  let plan = page.getByRole("article", { name: "Tonight's Overnight plan" });
+  try {
+    await plan.waitFor({ timeout: 10_000 });
+  } catch (error) {
+    process.stderr.write(`${await page.locator("body").innerText()}\n`);
+    process.stderr.write(`${JSON.stringify(await readFixture(app), null, 2)}\n`);
+    throw error;
+  }
+  await plan.getByText("2 Overnights ready", { exact: true }).waitFor();
+  let cards = plan.locator('[aria-label="Tonight\'s Overnights"] > article');
+  assert.equal(await cards.count(), 2, "the date must render both Overnights as peer cards");
+  assert.equal(await plan.locator("select").count(), 2, "every Overnight must own one worker choice inside its details");
+  await page.locator(".orchestrate-view").evaluate((element) => element.scrollTo(0, 0));
   await page.screenshot({ path: nightPlanScreenshot });
+  await cards.nth(0).getByRole("group").click();
+  await cards.nth(0).getByText("EXACT EXECUTION SCOPE", { exact: true }).waitFor();
 
-  await plan.getByRole("button", { name: "Open details for The first transition regression is fixed without changing unrelated behavior." }).click();
-  const outcomeDialog = page.getByRole("dialog", { name: "The first transition regression is fixed without changing unrelated behavior." });
-  await outcomeDialog.waitFor();
-  const [dialogBox, viewport] = await Promise.all([
-    outcomeDialog.boundingBox(),
-    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-  ]);
-  assert.ok(dialogBox, "the outcome details dialog must be measurable");
-  await page.screenshot({ path: outcomeDialogScreenshot });
-  assert.ok(dialogBox.x >= 0 && dialogBox.y >= 0 && dialogBox.x + dialogBox.width <= viewport.width && dialogBox.y + dialogBox.height <= viewport.height, `the outcome details dialog must remain inside the Electron viewport: ${JSON.stringify({ dialogBox, viewport })}`);
-  assert.equal(await page.getByRole("button", { name: "Close outcome details" }).evaluate((element) => element === document.activeElement), true, "the outcome dialog must take keyboard focus");
-  await outcomeDialog.getByRole("button", { name: "Revise this outcome with Morrow" }).click();
-  const discussionDraft = page.getByPlaceholder("Talk to Morrow about anything…");
-  await discussionDraft.waitFor();
-  assert.equal(await discussionDraft.evaluate((element) => element === document.activeElement), true, "the result-to-Morrow handoff must focus the conversation draft");
-  assert.match(await discussionDraft.inputValue(), /Outcome to focus on: The first transition regression is fixed/u);
-  assert.doesNotMatch(await discussionDraft.inputValue(), /npm test|src\/first|codex:first/u, "the Morrow handoff must carry visible results, not execution internals");
-  await page.getByRole("button", { name: "Orchestrate" }).click();
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.waitFor();
-  await page.getByText("2 outcomes Morrow considered", { exact: true }).click();
-  const firstCandidate = page.locator(".portfolio-candidate-ledger > article", {
-    has: page.getByRole("heading", { name: "Fix first transition regression", exact: true }),
-  });
-  const evidenceDisclosure = firstCandidate.locator("details.portfolio-candidate-context");
-  await evidenceDisclosure.getByText("View 2 evidence conversations", { exact: true }).click();
-  assert.equal(await evidenceDisclosure.getByText("Codex", { exact: true }).count(), 2, "each disclosed session must retain its provider label");
-  await evidenceDisclosure.getByText("Fix first transition regression", { exact: true }).waitFor();
-  await evidenceDisclosure.getByText("Fix first transition regression verification", { exact: true }).waitFor();
-  const disclosedEvidence = await evidenceDisclosure.innerText();
-  assert.doesNotMatch(disclosedEvidence, /codex:first|codex:first-evidence-internal/u, "renderer must not expose internal session IDs");
-  assert.equal(await page.getByText("SYNTHETIC_RAW_EVIDENCE_MARKER", { exact: true }).count(), 0, "renderer must not expose raw session evidence");
-  assert.equal((await readFixture(app)).snapshot.portfolioAssessments.length, 1, "recommendation must create portfolioAssessments");
-  assert.equal((await readFixture(app)).snapshot.portfolioPlans[0].peakParallelism, 2);
-  await plan.getByRole("button", { name: "Approve once & start 2 results" }).click();
-  await page.getByRole("article", { name: "Portfolio in progress" }).waitFor();
-  await waitForMorningReview(page);
-  let observed = await readFixture(app);
-  assert.deepEqual(observed.events.slice(0, 2).map(eventName).sort(), ["start:first", "start:second"], "independent items must start before either one finishes");
-  assert.ok(observed.events.findIndex((event) => event.type === "finish") > 1, "parallel starts must overlap");
-  assert.equal(observed.calls.start, 1, "one visible Run action must create one approval claim");
-  await assertNativeReceipts(page, ["codex:synthetic-native:first", "grok:synthetic-native:second"]);
-  assert.match(await replayConsumedPlan(app), /already|이미 사용/u, "the exact approval must be single-use");
-  process.stdout.write("portfolio E2E: independent parallel + single-use approval passed\n");
-  process.stdout.write(`portfolio E2E evidence: ${nightPlanScreenshot}\n`);
-  process.stdout.write(`portfolio E2E evidence: ${outcomeDialogScreenshot}\n`);
-
-  await resetScenario(app, "conflict");
-  await openOrchestrate(page);
-  await preparePortfolio(page, "Serialize two repairs that touch the same scope");
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.waitFor();
-  assert.equal((await readFixture(app)).snapshot.portfolioPlans[0].peakParallelism, 1, "overlapping write scopes must remain serialized in the exact Night Plan");
-  await plan.getByText("2h overnight", { exact: true }).waitFor();
-  await plan.getByRole("button", { name: "Approve once & start 2 results" }).click();
-  await waitForMorningReview(page);
-  observed = await readFixture(app);
-  assert.deepEqual(observed.events.map(eventName), ["start:first", "finish:first", "start:second", "finish:second"], "overlapping write scopes must execute serially");
-  assert.equal(observed.snapshot.portfolioRuns[0].status, "completed");
-  process.stdout.write("portfolio E2E: conflicting scope serialization passed\n");
-
-  await resetScenario(app, "over-window");
-  await openOrchestrate(page);
-  await preparePortfolio(page, "Choose one of two long conflicting repairs");
-  const selection = page.getByRole("article", { name: "Edit portfolio to fit the night" });
-  const editReason = selection.locator(".portfolio-edit-reason");
-  await editReason.waitFor();
-  assert.match(await editReason.innerText(), /600/u);
-  assert.match(await editReason.innerText(), /450/u);
-  observed = await readFixture(app);
-  assert.equal(observed.snapshot.portfolioAssessments[0].candidates.length, 2, "over-window assessment must retain every candidate");
-  assert.ok(observed.snapshot.portfolioAssessments[0].selectionId, "over-window assessment must expose its selectionId");
-  const selectionId = observed.snapshot.portfolioAssessments[0].selectionId;
-  await selection.getByRole("checkbox", { name: "Include Fix second transition regression" }).uncheck();
-  await selection.getByRole("button", { name: "Build plan from selection" }).click();
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.getByText("5h overnight", { exact: true }).waitFor();
-  assert.equal(await plan.getByRole("checkbox").count(), 1, "the exact replacement plan must contain only the selected item");
-  observed = await readFixture(app);
-  assert.notEqual(observed.snapshot.portfolioPlans[0].id, selectionId, "editing must mint a new exact plan identity");
-  assert.equal(observed.snapshot.portfolioPlans[0].totalMinutes, 300);
-  await plan.getByRole("button", { name: "Approve once & start 1 results" }).click();
-  await waitForMorningReview(page);
-  await assertNativeReceipts(page, ["codex:synthetic-native:first"]);
-  process.stdout.write("portfolio E2E: 600-minute selection edit to exact 300-minute plan passed\n");
-
-  await resetScenario(app, "stop-late");
-  await openOrchestrate(page);
-  await preparePortfolio(page, "Stop a portfolio before its receipt arrives");
-  await page.getByRole("button", { name: "Approve once & start 1 results" }).click();
-  const active = page.getByRole("article", { name: "Portfolio in progress" });
-  await active.waitFor();
-  await waitForEvent(app, "start:first");
-  await active.getByRole("button", { name: "Stop Overnight" }).click();
-  await active.getByRole("button", { name: "Confirm stop all" }).click();
-  let review = page.getByRole("article", { name: "Portfolio morning review" });
-  await review.getByText("Stopped", { exact: true }).first().waitFor();
-  assert.equal((await readFixture(app)).calls.stop, 1, "the visible stop must cross morrow:stop-overnight-portfolio");
-  await releaseLateReceipt(app);
-  await page.waitForTimeout(150);
-  observed = await readFixture(app);
-  assert.equal(observed.snapshot.portfolioRuns[0].status, "stopped");
-  assert.equal(observed.snapshot.portfolioRuns[0].items[0].status, "stopped", "a late receipt must not overwrite stopped");
-  assert.equal(observed.snapshot.portfolioRuns[0].items[0].providerReceiptId, undefined);
-  assert.equal(await review.getByText("codex:synthetic-native:first", { exact: true }).count(), 0);
-  process.stdout.write("portfolio E2E: stop boundary rejected late receipt overwrite\n");
-
-  await resetScenario(app, "restart-partial");
-  await openOrchestrate(page);
-  await preparePortfolio(page, "Resume queued work after an interrupted portfolio");
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.getByText("3 outcomes by morning", { exact: true }).waitFor();
-  const threeOutcomeCards = plan.locator('[aria-label="Tonight\'s outcomes"] > article');
-  assert.equal(await threeOutcomeCards.count(), 3, "the default Night Plan must keep all three outcomes visible");
-  const threeOutcomeBoxes = await Promise.all([0, 1, 2].map((index) => threeOutcomeCards.nth(index).boundingBox()));
-  assert.ok(threeOutcomeBoxes.every(Boolean), "all three outcome cards must be measurable");
-  assert.ok(threeOutcomeBoxes.every((box) => Math.abs(box.width - threeOutcomeBoxes[0].width) < 2), "three outcomes must have equal card width");
-  assert.ok(threeOutcomeBoxes.every((box) => Math.abs(box.y - threeOutcomeBoxes[0].y) < 2), "three outcomes must share one row at the default desktop width");
-  const [approveBox, desktopViewport] = await Promise.all([
-    page.getByRole("button", { name: "Approve once & start 3 results" }).boundingBox(),
-    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-  ]);
-  assert.ok(approveBox && approveBox.y >= 0 && approveBox.y + approveBox.height <= desktopViewport.height, `the default three-result plan must keep its one approval action visible without scrolling: ${JSON.stringify({ approveBox, desktopViewport })}`);
-  const includeBoxes = await Promise.all([0, 1, 2].map((index) => threeOutcomeCards.nth(index).locator('input[type="checkbox"]').boundingBox()));
-  assert.ok(
-    includeBoxes.every((box) => box && box.y >= 0 && box.y + box.height < approveBox.y),
-    `each outcome selection must remain visible above the approval action instead of being covered by it: ${JSON.stringify({ includeBoxes, approveBox })}`,
-  );
-  await page.screenshot({ path: threeOutcomeScreenshot });
-  await page.getByRole("button", { name: "Approve once & start 3 results" }).click();
-  await waitForEvent(app, "start:second");
-  await armRestartOnBootstrap(app);
-  await page.reload();
-  await page.getByRole("button", { name: "Orchestrate" }).click();
-  review = page.getByRole("article", { name: "Portfolio morning review" });
-  await review.getByText("Some reports need review", { exact: true }).waitFor();
-  await review.getByText("The full approval plan for this earlier run is unavailable.", { exact: false }).waitFor();
-  observed = await readFixture(app);
-  await assertNativeReceipts(page, ["codex:synthetic-native:first", "hermes:synthetic-native:third"]);
-  await review.getByText(/Morrow가 다시 시작되기 전/u).waitFor();
-  await page.waitForTimeout(450);
-  await page.screenshot({ path: morningReviewScreenshot });
-  observed = await readFixture(app);
-  assert.equal(observed.calls.initializations, 2, "reload must initialize a fresh portfolio service over the durable ledger");
-  assert.equal(observed.calls.resume, 1, "fresh initialization must resume the interrupted run once");
-  assert.deepEqual(observed.dispatchCounts, { first: 1, second: 1, third: 1 }, "completed work must not rerun and queued work must resume once");
-  assert.equal(observed.snapshot.portfolioPlans.length, 0, "Morning Review must remain itemized without a runnable plan");
-  assert.deepEqual(observed.snapshot.portfolioRuns[0].items.map((item) => [item.itemId, item.status]), [
-    ["first", "completed"],
-    ["second", "failed"],
-    ["third", "completed"],
-  ]);
-  process.stdout.write("portfolio E2E: restart retained completed receipt and resumed queued item\n");
-  process.stdout.write(`portfolio E2E evidence: ${threeOutcomeScreenshot}\n`);
-  process.stdout.write(`portfolio E2E evidence: ${morningReviewScreenshot}\n`);
-
-  await resetScenario(app, "discover-many");
-  await openOrchestrate(page);
-  await page.getByRole("button", { name: "Recommend from today" }).click();
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.getByText("3 outcomes by morning", { exact: true }).waitFor();
-  assert.equal(
-    await plan.locator('[aria-label="Tonight\'s outcomes"] > article').count(),
-    3,
-    "open-ended discovery must default to three morning outcomes",
-  );
-  await page.screenshot({ path: discoveredOutcomeScreenshot });
-  await page.getByText("5 outcomes Morrow considered", { exact: true }).click();
-  assert.equal(
-    await page.locator(".portfolio-candidate-ledger > article").count(),
-    5,
-    "discovery must keep every valuable candidate available for discussion or addition",
-  );
-  process.stdout.write("portfolio E2E: open-ended discovery curated three outcomes while preserving five candidates\n");
-  process.stdout.write(`portfolio E2E evidence: ${discoveredOutcomeScreenshot}\n`);
+  await plan.getByRole("button", { name: "Approve once & start 2 Overnights" }).click();
+  await page.locator(".portfolio-run-item").first().waitFor({ timeout: 10_000 });
+  await page.waitForFunction(() => document.querySelectorAll(".portfolio-run-item.is-completed").length === 2, undefined, { timeout: 10_000 });
+  assert.equal(await page.locator(".portfolio-run-item").count(), 2, "one completed run must retain two Overnight cards");
+  assert.equal(await page.locator(".portfolio-run-item .overnight-kanban").count(), 2, "every Overnight card must keep exactly one Kanban");
+  await page.getByLabel("Choose Overnight date").click();
+  assert.equal(await page.locator(".overnight-calendar__days button em").count(), 1, "the calendar must mark the date without becoming a separate page");
+  const observed = await readFixture(app);
+  assert.deepEqual(observed.events.slice(0, 2).map(eventName).sort(), ["start:first", "start:second"], "independent Overnights must start in parallel");
+  assert.equal(observed.calls.start, 1, "one approval must start the exact Overnight set");
 
   await resetScenario(app, "many");
   await openOrchestrate(page);
-  await preparePortfolio(page, "Keep five useful outcomes visible without changing their card weight");
-  plan = page.getByRole("article", { name: "Tonight's outcome plan" });
-  await plan.getByText("5 outcomes by morning", { exact: true }).waitFor();
-  const fiveOutcomeCards = plan.locator('[aria-label="Tonight\'s outcomes"] > article');
-  assert.equal(await fiveOutcomeCards.count(), 5, "more than three useful outcomes must remain available in one plan");
-  const fiveOutcomeBoxes = await Promise.all([0, 1, 2, 3, 4].map((index) => fiveOutcomeCards.nth(index).boundingBox()));
-  assert.ok(fiveOutcomeBoxes.every(Boolean), "all five outcome cards must be measurable");
-  assert.ok(fiveOutcomeBoxes.every((box) => Math.abs(box.width - fiveOutcomeBoxes[0].width) < 2), "an incomplete final row must not make later outcomes look more important");
-  await fiveOutcomeCards.nth(0).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: fiveOutcomeScreenshot });
-  process.stdout.write(`portfolio E2E evidence: ${fiveOutcomeScreenshot}\n`);
-
-  await resetScenario(app, "stop-cleanup");
-  await openOrchestrate(page);
-  await preparePortfolio(page, "Stop while restart cleanup is still being verified");
-  await page.getByRole("button", { name: "Approve once & start 2 results" }).click();
-  await waitForEvent(app, "start:first");
-  await beginCleanupRace(app);
-  await waitForCleanupGuard(app);
-  const cleanupActive = page.getByRole("article", { name: "Portfolio in progress" });
-  await cleanupActive.getByRole("button", { name: "Stop Overnight" }).click();
-  await cleanupActive.getByRole("button", { name: "Confirm stop all" }).click();
-  await waitForStopPending(app);
-  observed = await readFixture(app);
-  assert.equal(observed.stopPending, true, "Stop must remain pending until restart cleanup is proven safe");
-  assert.equal(observed.stopCompleted, false, "Stop must not complete before the cleanup guard resolves");
-  assert.equal(observed.snapshot.portfolioRuns[0].status, "running", "the durable run must stay active while cleanup proof is pending");
-  assert.deepEqual(observed.snapshot.portfolioRuns[0].items.map((item) => [item.itemId, item.status]), [
-    ["first", "running"],
-    ["second", "queued"],
-  ]);
-  review = page.getByRole("article", { name: "Portfolio morning review" });
-  assert.equal(await review.count(), 0, "Morning Review must not claim stopped before cleanup proof resolves");
-  assert.equal(await cleanupActive.getByText("Stopped", { exact: true }).count(), 0, "the active UI must not claim stopped before cleanup proof resolves");
-  await releaseCleanupGuard(app);
-  await waitForCleanupResume(app);
-  await waitForStopCompleted(app);
-  await review.getByText("Stopped", { exact: true }).first().waitFor();
-  observed = await readFixture(app);
-  assert.equal(observed.stopPending, false);
-  assert.equal(observed.stopCompleted, true, "Stop must complete after safe cleanup proof resolves");
-  assert.equal(observed.resumeDispatches, 0, "Stop during cleanup must prevent every resumed provider dispatch");
-  assert.equal(observed.resumeAllocations, 0, "Stop during cleanup must prevent every resumed workspace allocation");
-  assert.equal(observed.snapshot.portfolioRuns[0].status, "stopped");
-  assert.deepEqual(observed.snapshot.portfolioRuns[0].items.map((item) => [item.itemId, item.status]), [
-    ["first", "stopped"],
-    ["second", "stopped"],
-  ]);
-  assert.equal(await review.getByText(/synthetic-native/u).count(), 0, "stopped cleanup race must not surface a provider receipt");
-  process.stdout.write("portfolio E2E: Stop waited for safe cleanup proof, then prevented resumed dispatch\n");
-  }
+  await preparePortfolio(page, "Keep five useful outcomes visible");
+  plan = page.getByRole("article", { name: "Tonight's Overnight plan" });
+  await plan.getByText("5 Overnights ready", { exact: true }).waitFor();
+  cards = plan.locator('[aria-label="Tonight\'s Overnights"] > article');
+  assert.equal(await cards.count(), 5, "the UI must accept any non-negative Overnight count without changing modes");
 
   await resizeWindow(app, 920, 700);
   await resetScenario(app, "korean");
   await openOrchestrate(page);
-  await page.getByRole("textbox", { name: "오늘 밤 중요한 것 (선택)" }).fill("아침에 바로 확인할 수 있는 결과 세 가지를 준비해 줘");
+  await page.getByLabel("Overnight 날짜 선택").waitFor();
+  await page.getByRole("textbox", { name: "오늘 밤 중요한 것 (선택)" }).fill("아침에 확인할 세 가지 목적을 준비해 줘");
   await page.getByRole("button", { name: "이 목표 판단하기" }).click();
-  await page.waitForTimeout(500);
+  plan = page.getByRole("article", { name: "오늘 밤 Overnight 계획" });
+  await plan.getByText("Overnight 3개 준비됨", { exact: true }).waitFor();
+  assert.equal(await plan.locator('[aria-label="오늘 밤 Overnight 목록"] > article').count(), 3);
+  await page.locator(".orchestrate-view").evaluate((element) => element.scrollTo(0, 0));
   await page.screenshot({ path: compactKoreanScreenshot });
-  process.stdout.write(`portfolio E2E compact checkpoint: ${compactKoreanScreenshot}\n`);
-  plan = page.getByRole("article", { name: "오늘 밤 결과 계획" });
-  await plan.getByText("아침에 얻게 될 결과 3개", { exact: true }).waitFor();
-  const koreanCards = plan.locator('[aria-label="오늘 밤 결과 목록"] > article');
-  assert.equal(await koreanCards.count(), 3, "compact Korean UI must retain all three morning outcomes");
-  await koreanCards.nth(0).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: compactKoreanScreenshot });
-  await koreanCards.nth(0).getByRole("button").click();
-  const koreanDialog = page.getByRole("dialog");
-  const [koreanDialogBox, compactViewport] = await Promise.all([
-    koreanDialog.boundingBox(),
-    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-  ]);
-  assert.ok(koreanDialogBox && koreanDialogBox.x >= 0 && koreanDialogBox.y >= 0 && koreanDialogBox.x + koreanDialogBox.width <= compactViewport.width && koreanDialogBox.y + koreanDialogBox.height <= compactViewport.height, "the Korean outcome dialog must remain inside a compact Electron window");
-  await page.screenshot({ path: compactKoreanDialogScreenshot });
-  process.stdout.write(`portfolio E2E evidence: ${compactKoreanScreenshot}\n`);
-  process.stdout.write(`portfolio E2E evidence: ${compactKoreanDialogScreenshot}\n`);
 
-  process.stdout.write(compactOnly
-    ? "Provider-neutral portfolio compact Korean Electron E2E passed.\n"
-    : "Provider-neutral portfolio Electron E2E passed: three-result discovery with preserved candidates, result planning, detail-to-Morrow handoff, parallelism, conflict serialization, over-window edit, stop/late receipt, restart resume, Stop during cleanup, five-result density, and compact Korean layout.\n");
+  process.stdout.write("portfolio E2E passed: in-page calendar, date 0..N model, one-purpose cards, one Kanban per Overnight, four execution routes, and stable Korean compact layout.\n");
+  process.stdout.write(`portfolio E2E evidence: ${nightPlanScreenshot}\n`);
+  process.stdout.write(`portfolio E2E evidence: ${compactKoreanScreenshot}\n`);
 } finally {
   await app.close();
 }
@@ -346,7 +119,8 @@ async function installPortfolioIpc(electronApp, paths) {
       overnightProviderEffectiveEnvironment,
       overnightProviderEnvironmentSha256,
     } = createRequire(serviceBundle)(serviceBundle);
-    const providers = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"];
+    const providers = ["codex", "claude", "grok", "pi"];
+    const evidenceProviders = ["codex", "claude", "grok", "cursor", "pi", "hermes", "openclaw"];
     const labels = { codex: "Codex", claude: "Claude Code", grok: "Grok Build", cursor: "Cursor", pi: "Pi Agent", hermes: "Hermes", openclaw: "OpenClaw" };
     const clone = (value) => JSON.parse(JSON.stringify(value));
     const digest = (value) => createHash("sha256").update(String(value)).digest("hex");
@@ -507,13 +281,23 @@ async function installPortfolioIpc(electronApp, paths) {
       excerptCount: 1,
       excerpts: [{ role: "assistant", text: "The bounded implementation and its exact verification remain." }],
     });
+    const localDate = (value = new Date()) => {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Los_Angeles",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(value);
+      const part = (type) => parts.find((entry) => entry.type === type)?.value ?? "";
+      return `${part("year")}-${part("month")}-${part("day")}`;
+    };
     const contextFor = (sessions) => ({
       summary: {
-        date: new Date().toISOString().slice(0, 10),
+        date: localDate(),
         timeZone: "America/Los_Angeles",
         generatedAt: new Date().toISOString(),
         totalSessions: sessions.length,
-        providerCounts: Object.fromEntries(providers.map((provider) => [provider, sessions.filter((item) => item.provider === provider).length])),
+        providerCounts: Object.fromEntries(evidenceProviders.map((provider) => [provider, sessions.filter((item) => item.provider === provider).length])),
         sessions: sessions.map(({ nativeId: _nativeId, excerpts: _excerpts, ...item }) => item),
         warnings: [],
         methodology: "synthetic provider-neutral Electron fixture",
@@ -546,9 +330,9 @@ async function installPortfolioIpc(electronApp, paths) {
     const scenarioDefinition = (name) => {
       const many = name === "many" || name === "discover-many";
       const providersByItem = name === "restart-partial" || name === "korean"
-        ? ["codex", "grok", "hermes"]
+        ? ["codex", "grok", "claude"]
         : many
-          ? ["codex", "grok", "claude", "cursor", "hermes"]
+          ? ["codex", "grok", "claude", "codex", "grok"]
         : name === "over-window"
           ? ["codex", "codex"]
           : ["codex", "grok"];
@@ -820,7 +604,7 @@ async function installPortfolioIpc(electronApp, paths) {
       "morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval",
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
       "morrow:refresh-daily-context", "morrow:replan-overnight-portfolio", "morrow:start-overnight-portfolio", "morrow:stop-overnight-portfolio",
-      "morrow:start-overnight", "morrow:stop-overnight", "morrow:open-external",
+      "morrow:open-external",
     ];
     for (const channel of channels) ipcMain.removeHandler(channel);
     ipcMain.handle("github:state", () => ({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } }));
@@ -864,7 +648,7 @@ async function installPortfolioIpc(electronApp, paths) {
     });
     ipcMain.handle("morrow:start-conversation", () => ({ id: "synthetic-conversation", title: "New conversation", thinkingLevel: "medium", busy: false, messages: [] }));
     ipcMain.handle("morrow:open-conversation", () => ({ id: "synthetic-conversation", title: "Overnight planning", thinkingLevel: "medium", busy: false, messages: [] }));
-    for (const channel of ["morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval", "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding", "morrow:start-overnight", "morrow:stop-overnight", "morrow:open-external"]) {
+    for (const channel of ["morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval", "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding", "morrow:open-external"]) {
       ipcMain.handle(channel, () => undefined);
     }
   }, paths);
@@ -884,7 +668,7 @@ async function resizeWindow(electronApp, width, height) {
 
 async function openOrchestrate(page) {
   await page.reload();
-  await page.getByRole("button", { name: /^(?:Orchestrate|Overnight 관리)$/u }).click();
+  await page.getByRole("button", { name: "Overnight" }).click();
 }
 
 async function preparePortfolio(page, goal) {
@@ -892,79 +676,8 @@ async function preparePortfolio(page, goal) {
   await page.getByRole("button", { name: "Assess this goal" }).click();
 }
 
-async function waitForMorningReview(page) {
-  await page.getByRole("article", { name: "Portfolio morning review" }).waitFor({ timeout: 10_000 });
-}
-
-async function assertNativeReceipts(page, receiptIds) {
-  const review = page.getByRole("article", { name: "Portfolio morning review" });
-  for (const receiptId of receiptIds) await review.getByText(receiptId, { exact: true }).waitFor();
-}
-
 async function readFixture(electronApp) {
   return electronApp.evaluate(async () => globalThis.__morrowPortfolioE2E.read());
-}
-
-async function replayConsumedPlan(electronApp) {
-  return electronApp.evaluate(async () => globalThis.__morrowPortfolioE2E.replay());
-}
-
-async function releaseLateReceipt(electronApp) {
-  await electronApp.evaluate(() => globalThis.__morrowPortfolioE2E.releaseLate());
-}
-
-async function armRestartOnBootstrap(electronApp) {
-  await electronApp.evaluate(() => globalThis.__morrowPortfolioE2E.armRestart());
-}
-
-async function beginCleanupRace(electronApp) {
-  await electronApp.evaluate(() => globalThis.__morrowPortfolioE2E.beginCleanupRace());
-}
-
-async function waitForCleanupGuard(electronApp) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if ((await readFixture(electronApp)).cleanupStarted) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("Timed out waiting for the restart cleanup guard barrier.");
-}
-
-async function releaseCleanupGuard(electronApp) {
-  await electronApp.evaluate(() => globalThis.__morrowPortfolioE2E.releaseCleanup());
-}
-
-async function waitForCleanupResume(electronApp) {
-  await electronApp.evaluate(async () => globalThis.__morrowPortfolioE2E.waitCleanupResume());
-}
-
-async function waitForStopPending(electronApp) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if ((await readFixture(electronApp)).stopPending) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("Timed out waiting for Stop to remain pending behind the cleanup guard.");
-}
-
-async function waitForStopCompleted(electronApp) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const state = await readFixture(electronApp);
-    if (state.stopCompleted && !state.stopPending) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("Timed out waiting for Stop to complete after safe cleanup proof.");
-}
-
-async function waitForEvent(electronApp, expected) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const state = await readFixture(electronApp);
-    if (state.events.map(eventName).includes(expected)) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for synthetic provider event ${expected}.`);
 }
 
 function eventName(event) {

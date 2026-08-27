@@ -22,7 +22,7 @@ New Overnight plans may select exactly four execution routes:
 - Pi Agent
 
 Cursor, Hermes, and OpenClaw remain valid `LocalSessionProvider` values so
-existing session discovery and stored history stay readable. They are not
+existing session discovery stays readable. They are not
 `OvernightExecutionProvider` values, do not appear in the execution registry,
 cannot pass the IPC provider validator, and cannot be launched by the detached
 provider host.
@@ -37,7 +37,7 @@ from ADR 0053 remain unchanged.
 
 - Overnight setup shows four execution choices and has a smaller truthful
   support boundary.
-- Historical sessions from the other three provider families remain useful
+- Session evidence from the other three provider families remains useful
   without implying that God of Sessions can run them.
 - Adding another execution route later requires an explicit contract change,
   registry entry, IPC acceptance, detached-host support, readiness proof, and

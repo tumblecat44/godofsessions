@@ -16,8 +16,10 @@ const state: BootstrapState = {
   language: "en",
   orchestration: {
     context: { date: "2026-08-13", timeZone: "UTC", generatedAt: "2026-08-13T12:00:00.000Z", totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "test" },
-    plans: [],
-    runs: [],
+    providerRoutes: [],
+    portfolioAssessments: [],
+    portfolioPlans: [],
+    portfolioRuns: [],
   },
 };
 
@@ -25,7 +27,6 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
-
 describe("Morrow first-use conversation", () => {
   it("explains conversation-first tool behavior without a project picker", () => {
     render(<ChatView state={state} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} />);
@@ -237,100 +238,6 @@ describe("Morrow first-use conversation", () => {
 
     expect(screen.queryByRole("button", { name: /Continue overnight/i })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox")).toHaveValue("");
-  });
-
-  it("renders a runnable plan card from the message part before orchestration refreshes", () => {
-    const plan = {
-      id: "plan-1", status: "draft" as const, title: "Finish tests", outcome: "All green", verification: "npm test",
-      executor: "codex" as const, executorLabel: "Codex CLI · codex exec", commandPreview: "cwd: \"/synthetic root\"\nargv: codex exec --sandbox workspace-write --cd \"/synthetic root\" --ephemeral --ignore-user-config --ignore-rules --json --skip-git-repo-check -",
-      selectedSessions: [], createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    };
-    const onReviewOvernight = vi.fn();
-    render(<ChatView state={state} conversation={{ id: "one", title: "t", thinkingLevel: "medium", busy: true, messages: [{ id: "m", role: "tool", parts: [{ type: "overnight-plan", text: "", overnightPlanId: plan.id, overnightPlan: plan }] }] }} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} onReviewOvernight={onReviewOvernight} />);
-
-    expect(screen.getByRole("heading", { name: "Finish tests" })).toBeInTheDocument();
-    const review = screen.getByRole("button", { name: "Review & run in Overnight" });
-    expect(review).toBeEnabled();
-    fireEvent.click(review);
-    expect(onReviewOvernight).toHaveBeenCalledOnce();
-    expect(screen.getByText(/review the outcome, verification, risks, and invocation/i)).toBeInTheDocument();
-    expect(screen.getByText("Codex CLI · codex exec")).toBeInTheDocument();
-    expect(screen.getByText("Up to 7h")).toBeInTheDocument();
-    expect(screen.getByText("0 sessions")).toBeInTheDocument();
-    expect(screen.queryByText("All green")).not.toBeInTheDocument();
-    expect(screen.queryByText("npm test")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Fixed working directory and execution arguments")).not.toBeInTheDocument();
-    expect(screen.queryByText(/expired after the app restarted/i)).not.toBeInTheDocument();
-  });
-
-  it("treats a restored plan id without process-local authority as restart-expired", () => {
-    render(<ChatView state={state} conversation={{ id: "one", title: "t", thinkingLevel: "medium", busy: false, messages: [{ id: "m", role: "tool", parts: [{ type: "overnight-plan", text: "", overnightPlanId: "plan-before-restart" }] }] }} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} />);
-
-    expect(screen.getByText(/expired after the app restarted/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Prepare again" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Review & run in Overnight" })).not.toBeInTheDocument();
-  });
-
-  it("removes Run and preserves same-content recovery when a visible chat plan expires", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-20T07:00:00.000Z"));
-    const plan = {
-      id: "plan-expiry", status: "draft" as const, title: "Finish tests", outcome: "All green", verification: "npm test",
-      executor: "codex" as const, executorLabel: "Codex CLI · codex exec", commandPreview: "cwd: /synthetic/root\nargv: codex exec",
-      selectedSessions: [], createdAt: "2026-08-20T07:00:00.000Z", expiresAt: "2026-08-20T07:00:01.000Z",
-    };
-    render(<ChatView state={state} conversation={{ id: "one", title: "t", thinkingLevel: "medium", busy: false, messages: [{ id: "m", role: "tool", parts: [{ type: "overnight-plan", text: "", overnightPlanId: plan.id, overnightPlan: plan }] }] }} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} />);
-
-    expect(screen.getByRole("button", { name: "Review & run in Overnight" })).toBeInTheDocument();
-    expect(screen.getByText(/Expires at/)).toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1_100));
-    expect(screen.queryByRole("button", { name: "Review & run in Overnight" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("EXPIRED");
-    fireEvent.click(screen.getByRole("button", { name: "Prepare again" }));
-    expect(screen.getByRole("textbox")).toHaveValue("Prepare the expired overnight plan again with the same content.");
-  });
-
-  it("expires a hidden chat plan without starting a background view transition", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-20T07:00:00.000Z"));
-    const plan = {
-      id: "hidden-plan-expiry", status: "draft" as const, title: "Finish tests", outcome: "All green", verification: "npm test",
-      executor: "codex" as const, executorLabel: "Codex CLI · codex exec", commandPreview: "cwd: /synthetic/root\nargv: codex exec",
-      selectedSessions: [], createdAt: "2026-08-20T07:00:00.000Z", expiresAt: "2026-08-20T07:00:01.000Z",
-    };
-    const conversation: ConversationDetail = { id: "one", title: "t", thinkingLevel: "medium", busy: false, messages: [{ id: "m", role: "tool", parts: [{ type: "overnight-plan", text: "", overnightPlanId: plan.id, overnightPlan: plan }] }] };
-    const callbacks = { onSend: vi.fn(), onAbort: vi.fn(), onApproval: vi.fn(), onModel: vi.fn(), onThinking: vi.fn(), onOpenSettings: vi.fn() };
-    const originalStartViewTransition = document.startViewTransition;
-    const startViewTransition = vi.fn((update: () => void) => {
-      update();
-      return {
-        ready: Promise.resolve(),
-        updateCallbackDone: Promise.resolve(),
-        finished: Promise.resolve(),
-        skipTransition: vi.fn(),
-      } as unknown as ViewTransition;
-    });
-    Object.defineProperty(document, "startViewTransition", {
-      configurable: true,
-      value: startViewTransition,
-    });
-
-    try {
-      const { rerender } = render(<ChatView hidden state={state} conversation={conversation} {...callbacks} />);
-
-      act(() => vi.advanceTimersByTime(1_100));
-      expect(startViewTransition).not.toHaveBeenCalled();
-
-      rerender(<ChatView state={state} conversation={conversation} {...callbacks} />);
-      expect(screen.queryByRole("button", { name: "Review & run in Overnight" })).not.toBeInTheDocument();
-      expect(screen.getByRole("status")).toHaveTextContent("EXPIRED");
-      expect(screen.getByRole("button", { name: "Prepare again" })).toBeInTheDocument();
-    } finally {
-      Object.defineProperty(document, "startViewTransition", {
-        configurable: true,
-        value: originalStartViewTransition,
-      });
-    }
   });
 
   it("offers the Pi minimal and max thinking levels for reasoning models", () => {

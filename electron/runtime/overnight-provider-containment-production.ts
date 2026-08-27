@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { link, lstat, mkdir, mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import {
   createOvernightProviderContainmentVerifier,
   validateVerifiedOvernightProviderCapabilityAttestation,
@@ -44,11 +44,8 @@ export const MACOS_PRODUCTION_PROVIDER_SURFACES = Object.freeze({
   codex: "wrapper-to-vendor-native",
   claude: "vendor-native",
   grok: "vendor-native",
-  cursor: "script-runtime",
   pi: "embedded-sdk",
-  hermes: "script-runtime",
-  openclaw: "script-runtime",
-} as const satisfies Record<LocalSessionProvider, MacOsProductionProviderSurface>);
+} as const satisfies Record<OvernightExecutionProvider, MacOsProductionProviderSurface>);
 
 export interface MacOsProductionSandboxProfile {
   /** Public bounded policy label; never a local path or account identifier. */
@@ -61,7 +58,7 @@ export interface MacOsProductionSandboxProfile {
 
 export interface MacOsProductionSandboxProfileInput {
   phase: "attestation" | "binding";
-  provider: Extract<LocalSessionProvider, "codex" | "claude" | "grok">;
+  provider: Extract<OvernightExecutionProvider, "codex" | "claude" | "grok">;
   fixedRoot: string;
   runtimeDirectory: string;
   canonicalNativeExecutable: string;
@@ -148,7 +145,7 @@ export type MacOsProductionCanaryRunner = (
 ) => ReturnType<OvernightProviderContainmentHost["runCanary"]>;
 
 export type MacOsProductionProviderRoutes = Partial<
-  Record<LocalSessionProvider, MacOsProductionProviderRoute>
+  Record<OvernightExecutionProvider, MacOsProductionProviderRoute>
 >;
 
 export type MacOsProductionContainmentHostFactory = (
@@ -166,7 +163,7 @@ export interface MacOsProductionContainmentOptions {
 }
 
 export interface MacOsProductionContainmentAttestationStore {
-  read(provider: LocalSessionProvider): Promise<VerifiedOvernightProviderCapabilityAttestation | undefined>;
+  read(provider: OvernightExecutionProvider): Promise<VerifiedOvernightProviderCapabilityAttestation | undefined>;
   save(attestation: Readonly<VerifiedOvernightProviderCapabilityAttestation>): Promise<void>;
 }
 
@@ -176,7 +173,7 @@ export interface MacOsProductionContainmentAttestorOptions extends MacOsProducti
 }
 
 export interface MacOsProductionContainmentAttestationInput {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   executable: string;
   ttlMs?: number;
 }
@@ -186,7 +183,7 @@ export type MacOsProductionContainmentAttestor = (
 ) => Promise<OvernightProviderContainmentAttestationDecision>;
 
 export interface MacOsProductionProviderSupport {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   surface: MacOsProductionProviderSurface;
   verifier: "vendor-native" | "unavailable";
   reason?: "script_identity_not_proven"
@@ -496,12 +493,9 @@ export function createCodexMacOsNativeExecutableResolver(
 }
 
 export function macOsProductionProviderSupport(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
 ): MacOsProductionProviderSupport {
   const surface = MACOS_PRODUCTION_PROVIDER_SURFACES[provider];
-  if (surface === "script-runtime") {
-    return { provider, surface, verifier: "unavailable", reason: "script_identity_not_proven" };
-  }
   if (surface === "embedded-sdk") {
     return { provider, surface, verifier: "unavailable", reason: "embedded_sdk_not_contained" };
   }
@@ -521,7 +515,7 @@ export function macOsProductionProviderSupport(
 export function createMacOsProductionContainmentAttestor(
   options: MacOsProductionContainmentAttestorOptions,
 ): MacOsProductionContainmentAttestor {
-  const inFlight = new Map<LocalSessionProvider, {
+  const inFlight = new Map<OvernightExecutionProvider, {
     key: string;
     promise: Promise<OvernightProviderContainmentAttestationDecision>;
   }>();
@@ -564,7 +558,7 @@ async function attestProductionProvider(
   if (support.verifier !== "vendor-native" || !isVendorNativeProvider(input.provider)) {
     return blocked("invalid_request");
   }
-  const nativeProvider: Extract<LocalSessionProvider, "codex" | "claude" | "grok"> = input.provider;
+  const nativeProvider: Extract<OvernightExecutionProvider, "codex" | "claude" | "grok"> = input.provider;
   const route = options.routes[input.provider];
   if (!route
     || typeof route.runCanary !== "function"
@@ -904,7 +898,7 @@ async function denyPlanningCanary(): Promise<never> {
 }
 
 function bindProviderCanary(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   credentialSentinelPath: string,
   runCanary: MacOsProductionCanaryRunner,
 ) {
@@ -1187,8 +1181,8 @@ function exactWholeRootWriteScopes(value: readonly string[] | undefined): value 
 }
 
 function isVendorNativeProvider(
-  provider: LocalSessionProvider,
-): provider is Extract<LocalSessionProvider, "codex" | "claude" | "grok"> {
+  provider: OvernightExecutionProvider,
+): provider is Extract<OvernightExecutionProvider, "codex" | "claude" | "grok"> {
   return provider === "codex" || provider === "claude" || provider === "grok";
 }
 

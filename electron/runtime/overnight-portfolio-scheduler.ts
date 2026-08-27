@@ -1,8 +1,8 @@
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 
 export interface OvernightPortfolioScheduleItem {
   id: string;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   capacityPool: string;
   workspaceKey: string;
   isolation: "isolated" | "shared";

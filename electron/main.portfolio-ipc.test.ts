@@ -174,11 +174,6 @@ describe("portfolio IPC boundary", () => {
     ]);
   });
 
-  it("keeps the earlier-version singular start IPC read-only", async () => {
-    await expect(testState.handlers.get("morrow:start-overnight")!(trustedEvent(), "legacy-plan"))
-      .rejects.toThrow(/stored history only/i);
-  });
-
   it("stops only the exact bounded portfolio run ID", async () => {
     await expect(testState.handlers.get("morrow:stop-overnight-portfolio")!(trustedEvent(), "run-1")).resolves.toBeUndefined();
     expect(testState.morrow?.stopOvernightPortfolio).toHaveBeenCalledWith("run-1");

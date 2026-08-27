@@ -27,8 +27,10 @@ const state: BootstrapState = {
       warnings: [],
       methodology: "synthetic test",
     },
-    plans: [],
-    runs: [],
+    providerRoutes: [],
+    portfolioAssessments: [],
+    portfolioPlans: [],
+    portfolioRuns: [],
   },
 };
 

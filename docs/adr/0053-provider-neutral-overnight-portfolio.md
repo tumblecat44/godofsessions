@@ -74,17 +74,17 @@ in the candidate ledger and can enter a revised plan through Morrow. A concrete
 goal is not capped at three, and the dependency closure of a selected outcome
 is always included even when that makes the plan larger.
 
-### Advertise seven routes and prove readiness separately
+### Separate evidence sources from four execution routes
 
-The advertised Overnight routes are:
+New Overnight execution supports exactly:
 
-- Codex
 - Claude Code
+- Codex
 - Grok Build
-- Cursor
 - Pi Agent
-- Hermes
-- OpenClaw
+
+Cursor, Hermes, and OpenClaw may contribute bounded read-only session evidence,
+but cannot be selected or launched for a new Overnight.
 
 Installation and authentication do not prove execution safety. A route is
 `Ready` only when every operating-system containment and capability canary
@@ -191,9 +191,8 @@ verification, bounded report, failure or skip, and remaining risk. A provider
 exit or final answer does not prove completion. Verification that failed, was
 skipped, or cannot be observed remains unverified or failed.
 
-The legacy singular recommendation, plan, run, and board remain readable only
-for stored-history compatibility. They cannot prepare or authorize new
-Overnight work.
+The singular implementation superseded by this ADR was removed before the
+first public release. The portfolio is the only Overnight authority and UI.
 
 ## Consequences
 
@@ -209,5 +208,5 @@ Overnight work.
   components remain editable and blocked until result lineage is proven.
 - Morning Review can report partial success honestly and recover it after app
   restart.
-- Singular Overnight records remain accessible without defining the current
-  product.
+- A date renders one flat collection of zero or more purpose cards regardless
+  of status; internal scheduler-run grouping does not create another UI mode.

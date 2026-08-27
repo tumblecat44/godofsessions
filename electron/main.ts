@@ -28,13 +28,8 @@ const overnightProviders = new Set<OvernightExecutionProvider>(OVERNIGHT_EXECUTI
 const MAX_PORTFOLIO_ITEMS = 10_000;
 
 const activePortfolioRunStatuses = new Set(["starting", "running", "stopping", "unknown"]);
-const activeLegacyRunStatuses = new Set(["starting", "running", "stopping", "unknown"]);
-
 function hasActiveOvernight(snapshot: OrchestrationSnapshot) {
-  return Boolean(
-    snapshot.portfolioRuns?.some((run) => activePortfolioRunStatuses.has(run.status))
-      || snapshot.runs.some((run) => activeLegacyRunStatuses.has(run.status)),
-  );
+  return Boolean(snapshot.portfolioRuns?.some((run) => activePortfolioRunStatuses.has(run.status)));
 }
 
 export function syncOvernightPowerProtection(snapshot: OrchestrationSnapshot) {
@@ -245,10 +240,6 @@ function registerIpc() {
     await service().stopOvernightPortfolio(boundedId(value, "overnight portfolio run id"));
     await orchestrationSnapshotWithPowerProtection();
   });
-  handle("morrow:start-overnight", () => {
-    throw new Error("Earlier-version Overnight plans are stored history only. Prepare a current portfolio instead.");
-  });
-  handle("morrow:stop-overnight", (_event, value) => service().stopOvernight(text(value, "overnight run id", 100)));
   handle("morrow:open-external", (_event, value) => {
     const parsed = new URL(text(value, "external URL", 8_192));
     if (parsed.protocol !== "https:" || !allowedExternalUrls.has(parsed.toString())) throw new Error("This link was not issued by the active provider connection.");
@@ -334,7 +325,6 @@ if (!primaryInstance) {
     morrow = new MorrowService({
       root,
       dataDir: join(userDataDirectory, "pi"),
-      workerPath: join(currentDir, "overnight-worker.js"),
       providerHostPath,
       initialLanguage: app.getLocale().toLowerCase().startsWith("ko") ? "ko" : "en",
       contextHome: dogfoodContextHome,

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import type { OvernightCandidateOrigin } from "../../src/shared/contracts";
 import {
   overnightScheduleItemsConflict,
@@ -37,7 +37,7 @@ export interface FrozenOvernightPortfolio {
 
 export interface OvernightItemReceipt {
   itemId: string;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   status: "completed" | "failed" | "skipped";
   providerReceiptId?: string;
   report?: string;

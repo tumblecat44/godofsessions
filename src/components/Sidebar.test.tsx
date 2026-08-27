@@ -71,26 +71,26 @@ describe("V2 navigation", () => {
   it("keeps a running or attention-needed Overnight visible outside its page", () => {
     const { rerender } = render(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="running" activePortfolioItemCount={3} {...noop} />);
 
-    expect(screen.getByRole("button", { name: "Overnight · 3 Overnights active" })).toHaveTextContent("3 ACTIVE");
+    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("3 ACTIVE");
     rerender(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="starting" activePortfolioItemCount={3} {...noop} />);
-    expect(screen.getByRole("button", { name: "Overnight · 3 Overnights starting" })).toHaveTextContent("3 STARTING");
+    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("3 STARTING");
     rerender(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="stopping" activePortfolioItemCount={2} {...noop} />);
-    expect(screen.getByRole("button", { name: "Overnight · 2 Overnights stopping" })).toHaveTextContent("STOPPING");
+    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("STOPPING");
     rerender(<Sidebar view="settings" language="en" conversations={[]} overnightStatus="attention" {...noop} />);
-    expect(screen.getByRole("button", { name: "Overnight · attention needed" })).toHaveTextContent("! CHECK");
+    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("! CHECK");
   });
 
   it("uses a generic portfolio status when the active item count is unavailable", () => {
     render(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="running" {...noop} />);
 
-    expect(screen.getByRole("button", { name: "Overnight · active" })).toHaveTextContent("ACTIVE");
+    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("ACTIVE");
     expect(screen.queryByText("1 RUNNING")).not.toBeInTheDocument();
   });
 
   it("uses Overnight as the Korean destination without adding a calendar to the sidebar", () => {
     render(<Sidebar view="chat" language="ko" conversations={[]} overnightStatus="running" activePortfolioItemCount={4} {...noop} />);
 
-    expect(screen.getByRole("button", { name: "Overnight · 4개 진행 중" })).toHaveTextContent("4 ACTIVE");
+    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("4 ACTIVE");
     expect(screen.queryByLabelText("Overnight 날짜 선택")).not.toBeInTheDocument();
   });
 });

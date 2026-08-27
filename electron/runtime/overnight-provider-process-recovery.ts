@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import {
   overnightProviderEnvironmentSha256,
   overnightProviderLaunchCapabilitySha256,
@@ -60,7 +60,7 @@ export interface OvernightProviderResumeCleanupInput {
   deadlineAt: string;
   runningItems: ReadonlyArray<{
     itemId: string;
-    provider: LocalSessionProvider;
+    provider: OvernightExecutionProvider;
     invocation: Readonly<OvernightProviderAdapterInvocation>;
     containmentProof: Readonly<VerifiedOvernightProviderContainmentProof>;
     invocationIdentityVersion: typeof OVERNIGHT_PROVIDER_PROCESS_IDENTITY_VERSION;

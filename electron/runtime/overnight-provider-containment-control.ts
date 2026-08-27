@@ -1,4 +1,4 @@
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 
 /**
  * Product control plane for containment. Planning uses only the two read-only
@@ -7,13 +7,13 @@ import type { LocalSessionProvider } from "../../src/shared/contracts";
  */
 
 export interface StaticProviderIdentity {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   executableSha256: string;
   identitySha256: string;
 }
 
 export interface PathFreeProviderAttestation {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   executableSha256: string;
   /** Digest of the complete static runtime identity, not only executable bytes. */
   identitySha256: string;
@@ -28,19 +28,19 @@ export type StoredAttestationObservation =
   | { status: "verified"; attestation: PathFreeProviderAttestation };
 
 export interface ExplicitVerificationToken {
-  readonly provider: LocalSessionProvider;
+  readonly provider: OvernightExecutionProvider;
 }
 
 export interface ContainmentAttestationStorePort {
   /** Must be a strictly read-only observation. */
-  read(provider: LocalSessionProvider): Promise<StoredAttestationObservation>;
-  beginExplicitReverification(provider: LocalSessionProvider): Promise<ExplicitVerificationToken>;
+  read(provider: OvernightExecutionProvider): Promise<StoredAttestationObservation>;
+  beginExplicitReverification(provider: OvernightExecutionProvider): Promise<ExplicitVerificationToken>;
   recordVerified(token: ExplicitVerificationToken, attestation: PathFreeProviderAttestation): Promise<void>;
   recordBlocked(token: ExplicitVerificationToken, reason: string): Promise<void>;
 }
 
 export interface DisposableCanaryPort {
-  run(provider: LocalSessionProvider, identity: StaticProviderIdentity): Promise<
+  run(provider: OvernightExecutionProvider, identity: StaticProviderIdentity): Promise<
     | { status: "verified"; attestation: PathFreeProviderAttestation }
     | { status: "blocked"; reason: string }
   >;
@@ -50,7 +50,7 @@ export interface PrivateApprovedLaunchInput {
   planId: string;
   runId: string;
   itemId: string;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   approvalClaimSha256: string;
   fixedRoot: string;
   worktreeKey: string;
@@ -80,17 +80,17 @@ export interface PrivateLaunchBindingPort<TBinding> {
 }
 
 export type ProviderPlanningInspection =
-  | { status: "ready"; provider: LocalSessionProvider; executableSha256: string; identitySha256: string; attestationSha256: string; expiresAt: string }
-  | { status: "setup"; provider: LocalSessionProvider; reason: string }
-  | { status: "blocked"; provider: LocalSessionProvider; reason: string };
+  | { status: "ready"; provider: OvernightExecutionProvider; executableSha256: string; identitySha256: string; attestationSha256: string; expiresAt: string }
+  | { status: "setup"; provider: OvernightExecutionProvider; reason: string }
+  | { status: "blocked"; provider: OvernightExecutionProvider; reason: string };
 
 export type ExplicitVerificationResult =
-  | { status: "verified"; provider: LocalSessionProvider; attestationSha256: string; expiresAt: string }
-  | { status: "blocked"; provider: LocalSessionProvider; reason: string };
+  | { status: "verified"; provider: OvernightExecutionProvider; attestationSha256: string; expiresAt: string }
+  | { status: "blocked"; provider: OvernightExecutionProvider; reason: string };
 
 export interface PreparedApprovedLaunch<TBinding> {
   status: "verified";
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   attestationSha256: string;
   /** The concrete binding is exposed only to the immediate launch handoff. */
   withPrivateBinding<T>(consumer: (binding: TBinding) => Promise<T>): Promise<T>;
@@ -99,21 +99,21 @@ export interface PreparedApprovedLaunch<TBinding> {
 
 export type ApprovedLaunchResult<TBinding> = PreparedApprovedLaunch<TBinding> | {
   status: "blocked";
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   reason: string;
 };
 
 export interface OvernightProviderContainmentControl<TBinding> {
   inspect(
-    provider: LocalSessionProvider,
+    provider: OvernightExecutionProvider,
     execution?: Readonly<{ writeScopes?: readonly string[] }>,
   ): Promise<ProviderPlanningInspection>;
-  explicitlyVerify(provider: LocalSessionProvider): Promise<ExplicitVerificationResult>;
+  explicitlyVerify(provider: OvernightExecutionProvider): Promise<ExplicitVerificationResult>;
   prepareApprovedLaunch(input: PrivateApprovedLaunchInput): Promise<ApprovedLaunchResult<TBinding>>;
 }
 
 export interface CreateContainmentControlOptions<TBinding> {
-  observeStaticIdentity(provider: LocalSessionProvider): Promise<StaticProviderIdentity | undefined>;
+  observeStaticIdentity(provider: OvernightExecutionProvider): Promise<StaticProviderIdentity | undefined>;
   store: ContainmentAttestationStorePort;
   canary: DisposableCanaryPort;
   approvalClaims: ApprovedLaunchClaimPort;
@@ -128,9 +128,9 @@ export function createOvernightProviderContainmentControl<TBinding>(
   options: CreateContainmentControlOptions<TBinding>,
 ): OvernightProviderContainmentControl<TBinding> {
   const now = options.now ?? (() => new Date());
-  const verificationInFlight = new Map<LocalSessionProvider, Promise<ExplicitVerificationResult>>();
+  const verificationInFlight = new Map<OvernightExecutionProvider, Promise<ExplicitVerificationResult>>();
 
-  async function observe(provider: LocalSessionProvider) {
+  async function observe(provider: OvernightExecutionProvider) {
     try {
       return await options.observeStaticIdentity(provider);
     } catch {
@@ -138,7 +138,7 @@ export function createOvernightProviderContainmentControl<TBinding>(
     }
   }
 
-  async function inspect(provider: LocalSessionProvider): Promise<ProviderPlanningInspection> {
+  async function inspect(provider: OvernightExecutionProvider): Promise<ProviderPlanningInspection> {
     let stored: StoredAttestationObservation;
     let identity: StaticProviderIdentity | undefined;
     try {
@@ -161,7 +161,7 @@ export function createOvernightProviderContainmentControl<TBinding>(
     };
   }
 
-  function explicitlyVerify(provider: LocalSessionProvider): Promise<ExplicitVerificationResult> {
+  function explicitlyVerify(provider: OvernightExecutionProvider): Promise<ExplicitVerificationResult> {
     const existing = verificationInFlight.get(provider);
     if (existing) return existing;
     const pending = runExplicitVerification(provider).finally(() => verificationInFlight.delete(provider));
@@ -169,7 +169,7 @@ export function createOvernightProviderContainmentControl<TBinding>(
     return pending;
   }
 
-  async function runExplicitVerification(provider: LocalSessionProvider): Promise<ExplicitVerificationResult> {
+  async function runExplicitVerification(provider: OvernightExecutionProvider): Promise<ExplicitVerificationResult> {
     let token: ExplicitVerificationToken;
     try {
       token = await options.store.beginExplicitReverification(provider);
@@ -270,7 +270,7 @@ export function createOvernightProviderContainmentControl<TBinding>(
   return { inspect, explicitlyVerify, prepareApprovedLaunch };
 }
 
-function blocked(provider: LocalSessionProvider, reason: string): ApprovedLaunchResult<never> {
+function blocked(provider: OvernightExecutionProvider, reason: string): ApprovedLaunchResult<never> {
   return { status: "blocked", provider, reason };
 }
 
@@ -278,7 +278,7 @@ function safeReason(reason: string) {
   return SAFE_REASON.test(reason) ? reason : "verification_failed";
 }
 
-function validIdentity(identity: StaticProviderIdentity, provider: LocalSessionProvider) {
+function validIdentity(identity: StaticProviderIdentity, provider: OvernightExecutionProvider) {
   return identity.provider === provider && SHA256.test(identity.executableSha256) && SHA256.test(identity.identitySha256);
 }
 

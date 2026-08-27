@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, FilePenLine, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.svg";
 import { cn } from "../lib/cn";
-import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightPlanSummary, ThinkingLevel } from "../shared/contracts";
+import type { ApprovalRequest, BootstrapState, ConversationDetail, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
 import { Button } from "./ui/Button";
 import { Surface } from "./ui/Surface";
@@ -22,10 +22,7 @@ interface ChatViewProps {
   onModel(provider: string, modelId: string): Promise<void>;
   onThinking(level: ThinkingLevel): Promise<void>;
   onOpenSettings(): void;
-  onReviewOvernight?(): Promise<void> | void;
-  overnightPlanAuthoritySuspended?: boolean;
 }
-
 const FOLLOW_BOTTOM_THRESHOLD = 80;
 
 export function ChatView(props: ChatViewProps) {
@@ -45,7 +42,6 @@ export function ChatView(props: ChatViewProps) {
   const ko = props.state.language === "ko";
   const draft = props.draft ?? localDraft;
   const setDraft = props.onDraftChange ?? setLocalDraft;
-  const proposeDraft = (text: string) => { setDraft(text); textareaRef.current?.focus(); };
 
   if (knownMessages.current.conversationId !== props.conversation?.id) {
     knownMessages.current = {
@@ -129,11 +125,7 @@ export function ChatView(props: ChatViewProps) {
                 <div className="message-avatar grid size-[34px] place-items-center overflow-hidden rounded-[11px] border border-amber/20 bg-surface"><img className="size-full object-cover saturate-[0.8]" src={morrowImage} alt="Morrow" /><span className="sr-only">MORROW</span></div>
               ) : <span className="message-author mr-1 font-mono text-[9px] tracking-[0.12em] text-ink-faint">{message.role === "user" ? (ko ? "나" : "YOU") : "TOOL"}</span>}
               <div className={cn("message-body text-[15.5px] leading-7 text-[#d8d2c6]", message.role === "user" && "rounded-[16px_16px_5px_16px] border border-[#344055] bg-[#202938] px-4 py-3 text-ink shadow-control")}>
-                {message.parts.map((part, index) => part.type === "overnight-plan" ? (
-                  <OvernightPlanCard key={index} plan={props.state.orchestration.plans.find((plan) => plan.id === part.overnightPlanId) ?? part.overnightPlan} ko={ko} authoritySuspended={Boolean(props.overnightPlanAuthoritySuspended)} onReview={() => props.onReviewOvernight?.()} onReprepare={proposeDraft} />
-                ) : part.type === "overnight-run" ? (
-                  <div className="overnight-run-inline" key={index}><span><i />{ko ? "Overnight 실행이 시작됐어요" : "Overnight run started"}</span><small>{ko ? "Overnight에서 진행 상황을 볼 수 있어요." : "Watch progress in Overnight."}</small></div>
-                ) : part.type === "tool" ? (
+                {message.parts.map((part, index) => part.type === "tool" ? (
                   <div className={`tool-event tool-event--${part.state ?? "done"}`} key={index}>
                     {part.toolName === "edit" || part.toolName === "write" ? <FilePenLine size={15} /> : <TerminalSquare size={15} />}
                     <span><strong>{part.toolName}</strong><small>{part.text}</small></span>
@@ -175,58 +167,6 @@ export function ChatView(props: ChatViewProps) {
         </footer>
       </section>
     </main>
-  );
-}
-
-function OvernightPlanCard({ plan, ko, authoritySuspended, onReview, onReprepare }: { plan?: OvernightPlanSummary; ko: boolean; authoritySuspended: boolean; onReview(): Promise<void> | void; onReprepare(draft: string): void }) {
-  const [now, setNow] = useState(Date.now());
-  const reprepareDraft = ko ? "방금 만료된 Overnight 계획을 같은 내용으로 다시 준비해줘." : "Prepare the expired overnight plan again with the same content.";
-  const planId = plan?.id;
-  const planStatus = plan?.status;
-  const expiresAt = plan?.expiresAt;
-  useEffect(() => {
-    const currentTime = Date.now();
-    setNow(currentTime);
-    if (!expiresAt || planStatus !== "draft") return;
-    const expiryTime = new Date(expiresAt).getTime();
-    if (!Number.isFinite(expiryTime) || expiryTime <= currentTime) return;
-    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(expiryTime - currentTime + 25, 2_147_483_647));
-    return () => window.clearTimeout(timer);
-  }, [planId, planStatus, expiresAt]);
-  if (!plan) {
-    return (
-      <div className="overnight-plan-missing">
-        <span>{ko ? "이 계획은 앱 재시작 후 만료됐어요." : "This plan expired after the app restarted."}</span>
-        <button type="button" onClick={() => onReprepare(reprepareDraft)}>{ko ? "다시 준비" : "Prepare again"}</button>
-      </div>
-    );
-  }
-  const expired = plan.status === "expired" || now >= new Date(plan.expiresAt).getTime();
-  const runnable = plan.status === "draft" && !expired;
-  const expires = new Date(plan.expiresAt).toLocaleTimeString(ko ? "ko" : "en", { hour: "2-digit", minute: "2-digit" });
-  const durationMinutes = plan.durationMinutes ?? 420;
-  const duration = durationMinutes % 60 === 0
-    ? (ko ? `최대 ${durationMinutes / 60}시간` : `Up to ${durationMinutes / 60}h`)
-    : (ko ? `최대 ${Math.floor(durationMinutes / 60)}시간 ${durationMinutes % 60}분` : `Up to ${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`);
-  return (
-    <section className="overnight-plan-card" aria-label={ko ? "Overnight 계획" : "Overnight plan"}>
-      <header><span><i />OVERNIGHT PLAN</span><em role="status">{runnable ? (ko ? "승인 대기" : "AWAITING YOUR SAY") : expired && plan.status === "draft" ? (ko ? "만료됨" : "EXPIRED") : plan.status.toUpperCase()}</em></header>
-      <div className="overnight-plan-card__body">
-        <h3>{plan.title}</h3>
-        <p className="overnight-plan-card__summary">{ko ? "정확한 실행 계약이 준비됐어요. 세부 내용은 Overnight에서 한 번에 검토합니다." : "The exact execution contract is ready. Review its full details together in Overnight."}</p>
-        <div className="overnight-plan-brief">
-          <div><span>{ko ? "작업자" : "Worker"}</span><strong>{plan.executorLabel}</strong></div>
-          <div><span>{ko ? "시간" : "Window"}</span><strong>{duration}</strong></div>
-          <div><span>{ko ? "참고 세션" : "Context"}</span><strong>{ko ? `${plan.selectedSessions.length}개` : `${plan.selectedSessions.length} session${plan.selectedSessions.length === 1 ? "" : "s"}`}</strong></div>
-        </div>
-      </div>
-      <footer>
-        <small>{ko ? `완료 기준·검증·위험·실행 인자는 Overnight에서 확인하고 승인합니다. ${expires}에 만료됩니다.` : `Review the outcome, verification, risks, and invocation in Overnight before approval. Expires at ${expires}.`}</small>
-        {expired
-          ? <button type="button" onClick={() => onReprepare(reprepareDraft)}>{ko ? "다시 준비" : "Prepare again"}</button>
-          : <button type="button" disabled={authoritySuspended} onClick={() => { if (!authoritySuspended) void onReview(); }}>{runnable ? (ko ? "Overnight에서 검토·실행" : "Review & run in Overnight") : (ko ? "Overnight에서 보기" : "View in Overnight")}</button>}
-      </footer>
-    </section>
   );
 }
 

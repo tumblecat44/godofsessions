@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type {
-  LocalSessionProvider,
   OvernightExecutionProvider,
   OvernightProviderVerificationSummary,
 } from "../../src/shared/contracts";
@@ -487,7 +486,7 @@ function oneShotPreparedLaunch(
   };
 }
 
-function blockedLaunch(provider: LocalSessionProvider, reason: string) {
+function blockedLaunch(provider: OvernightExecutionProvider, reason: string) {
   return { status: "blocked" as const, provider, reason };
 }
 

@@ -1,24 +1,22 @@
 import { ChevronRight, MoonStar, ShieldCheck, TriangleAlert } from "lucide-react";
-import type { AppLanguage, OvernightPortfolioRunSummary, OvernightRunSummary } from "../shared/contracts";
+import type { AppLanguage, OvernightPortfolioRunSummary } from "../shared/contracts";
 
 interface OvernightPulseProps {
   language: AppLanguage;
   portfolioRun?: OvernightPortfolioRunSummary;
-  legacyRun?: OvernightRunSummary;
   onOpen(): void;
 }
 
-export function OvernightPulse({ language, portfolioRun, legacyRun, onOpen }: OvernightPulseProps) {
+export function OvernightPulse({ language, portfolioRun, onOpen }: OvernightPulseProps) {
   const ko = language === "ko";
-  if (!portfolioRun && !legacyRun) return null;
+  if (!portfolioRun) return null;
 
-  const attention = portfolioRun?.status === "unknown" || legacyRun?.status === "unknown";
-  const total = portfolioRun?.items.length ?? 1;
-  const completed = portfolioRun?.items.filter((item) => item.status === "completed").length
-    ?? (legacyRun?.status === "completed" ? 1 : 0);
-  const current = portfolioRun?.items.find((item) => item.status === "running")
-    ?? portfolioRun?.items.find((item) => item.status === "queued" || item.status === "unknown");
-  const currentLabel = current?.outcome ?? current?.title ?? legacyRun?.outcome ?? legacyRun?.title;
+  const attention = portfolioRun.status === "unknown";
+  const total = portfolioRun.items.length;
+  const completed = portfolioRun.items.filter((item) => item.status === "completed").length;
+  const current = portfolioRun.items.find((item) => item.status === "running")
+    ?? portfolioRun.items.find((item) => item.status === "queued" || item.status === "unknown");
+  const currentLabel = current?.outcome ?? current?.title;
 
   return (
     <button

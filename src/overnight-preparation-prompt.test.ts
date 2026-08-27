@@ -24,9 +24,9 @@ describe("Overnight preparation request", () => {
     expect(prompt).toMatch(/parallel|병렬/i);
     expect(prompt).toMatch(/serially|순차/i);
     expect(prompt).toMatch(/retain every candidate|모든 후보와 편집 필요 이유를 남겨/i);
-    expect(prompt).toMatch(/three high-value morning outcomes|결과 3개를 중심/i);
-    expect(prompt).toMatch(/preserve every other runnable result|나머지 실행 가능한 결과도/i);
-    expect(prompt).toMatch(/do not treat three as an artificial maximum|3개를 인위적 상한으로 쓰지 마/i);
+    expect(prompt).toMatch(/every runnable outcome|모든 실행 가능한 결과/i);
+    expect(prompt).toMatch(/zero outcomes as valid|0개도 유효한 결과/i);
+    expect(prompt).toMatch(/arbitrary default count or maximum|임의의 기본값이나 상한/i);
   });
 
   it.each(["ko", "en"] as const)("keeps the same gates around an explicit %s goal", (language) => {

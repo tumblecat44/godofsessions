@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import type { LocalSessionProvider, OvernightExecutor } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider, OvernightExecutor } from "../../src/shared/contracts";
 import {
   DEFAULT_OVERNIGHT_EXECUTOR_INVOCATION_MODE,
   overnightExecutorInvocation,
@@ -9,7 +9,7 @@ import {
 import { overnightProviderRoute } from "./overnight-provider-registry";
 
 export interface OvernightProviderAdapterInvocation {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   label: string;
   adapterKind: "cli" | "embedded-sdk" | "acp";
   executableName?: string;
@@ -26,7 +26,7 @@ export interface OvernightProviderLaunchCapability {
   version: 1;
   runId: string;
   itemId: string;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   proofSha256: string;
   invocationSha256: string;
   /** Ephemeral bearer secret. Never persist this value in a ledger. */
@@ -37,7 +37,7 @@ export const OVERNIGHT_PROVIDER_ADAPTER_IDENTITY_VERSION = 1 as const;
 
 export interface OvernightProviderAdapterIdentity {
   version: typeof OVERNIGHT_PROVIDER_ADAPTER_IDENTITY_VERSION;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   adapterKind: OvernightProviderAdapterInvocation["adapterKind"];
   promptTransport: OvernightProviderAdapterInvocation["promptTransport"];
   /**
@@ -74,7 +74,7 @@ export function overnightProviderAdapterIdentity(
 }
 
 export function overnightProviderAdapterInvocation(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   root: string,
   runtimeDir: string,
   executablePath?: string,
@@ -130,7 +130,7 @@ export function overnightProviderAdapterInvocation(
 }
 
 function assertProviderInvocationMode(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   invocationMode: OvernightExecutorInvocationMode,
 ) {
   if (invocationMode !== "pre-proof" && invocationMode !== "macos-outer-verified") {
@@ -166,14 +166,6 @@ export function overnightProviderEffectiveEnvironment(
   };
   if (invocation.provider === "codex") environment.CODEX_HOME = join(runtimeDirectory, "codex-home");
   if (invocation.provider === "claude") environment.CLAUDE_CONFIG_DIR = join(runtimeDirectory, "claude-config");
-  if (invocation.provider === "hermes") Object.assign(environment, {
-    TERMINAL_ENV: "docker",
-    TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE: "true",
-    TERMINAL_DOCKER_NETWORK: "false",
-    TERMINAL_CONTAINER_PERSISTENT: "false",
-    TERMINAL_DOCKER_FORWARD_ENV: "[]",
-    TERMINAL_SANDBOX_DIR: join(runtimeDirectory, "hermes-sandbox"),
-  });
   for (const [key, value] of Object.entries(invocation.environment)) {
     environment[key] = value.replaceAll("$MORROW_RUNTIME", runtimeDirectory);
   }
@@ -201,49 +193,29 @@ export function overnightProviderLaunchCapabilitySha256(
 }
 
 function acpInvocation(
-  provider: Exclude<LocalSessionProvider, "codex" | "claude" | "pi">,
+  provider: "grok",
   runtimeDir: string,
 ): { args: string[]; environment: Record<string, string> } {
-  if (provider === "grok") {
-    return {
-      args: [
-        "--sandbox", "strict",
-        "--permission-mode", "default",
-        "--disable-web-search",
-        "agent", "--no-leader", "stdio",
-      ],
-      environment: {
-        // The ACP subcommand does not inherit the headless-only --tools or
-        // --no-subagents switches. Process-level feature gates are the
-        // supported non-persistent boundary for this route.
-        GROK_SUBAGENTS: "0",
-        GROK_MEMORY: "0",
-        GROK_DISABLE_AUTOUPDATER: "1",
-        // The launch host may provision this exact transient auth file. It is
-        // never copied from ambient user state; an absent binding therefore
-        // leaves the isolated ACP process unauthenticated and fail-closed.
-        GROK_HOME: "$MORROW_RUNTIME/grok-home",
-        GROK_AUTH_PATH: "$MORROW_RUNTIME/grok-home/auth.json",
-      },
-    };
-  }
-  if (provider === "cursor") {
-    return {
-      args: ["acp"],
-      environment: {},
-    };
-  }
-  if (provider === "hermes") {
-    return {
-      // Only terminal honors TERMINAL_ENV=docker. File and code_execution may
-      // touch the host directly, so they stay unavailable to Overnight.
-      args: ["--ignore-rules", "--toolsets", "terminal", "acp"],
-      environment: {},
-    };
-  }
   return {
-    args: ["acp", "--no-prefix-cwd", "--provenance", "meta+receipt"],
-    environment: {},
+    args: [
+      "--sandbox", "strict",
+      "--permission-mode", "default",
+      "--disable-web-search",
+      "agent", "--no-leader", "stdio",
+    ],
+    environment: {
+      // The ACP subcommand does not inherit the headless-only --tools or
+      // --no-subagents switches. Process-level feature gates are the
+      // supported non-persistent boundary for this route.
+      GROK_SUBAGENTS: "0",
+      GROK_MEMORY: "0",
+      GROK_DISABLE_AUTOUPDATER: "1",
+      // The launch host may provision this exact transient auth file. It is
+      // never copied from ambient user state; an absent binding therefore
+      // leaves the isolated ACP process unauthenticated and fail-closed.
+      GROK_HOME: "$MORROW_RUNTIME/grok-home",
+      GROK_AUTH_PATH: "$MORROW_RUNTIME/grok-home/auth.json",
+    },
   };
 }
 

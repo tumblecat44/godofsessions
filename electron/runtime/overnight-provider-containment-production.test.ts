@@ -975,7 +975,7 @@ describe("production macOS containment resolver", () => {
     expect(route.runCanary).not.toHaveBeenCalled();
   });
 
-  it("keeps every audited script or embedded surface blocked even if an interpreter resolver and canary are injected", async () => {
+  it("keeps the embedded Pi surface blocked even if a resolver and canary are injected", async () => {
     const createHost = vi.fn<MacOsProductionContainmentHostFactory>();
     const resolveNativeExecutable = vi.fn(async () => ({ nativeExecutable: "/usr/local/bin/node" }));
     const materializeSandboxProfile = vi.fn(async () => ({
@@ -997,39 +997,29 @@ describe("production macOS containment resolver", () => {
     };
     const verify = createMacOsProductionContainmentResolver({
       providerHostPath: "/input/overnight-provider-host.js",
-      routes: {
-        cursor: unsafeRoute,
-        hermes: unsafeRoute,
-        openclaw: unsafeRoute,
-        pi: unsafeRoute,
-      },
+      routes: { pi: unsafeRoute },
       attestationStore: memoryAttestationStore().store,
       platform: "darwin",
       createHost,
     });
 
-    for (const provider of ["cursor", "hermes", "openclaw", "pi"] as const) {
-      await expect(verify({ ...INPUT, provider })).resolves.toEqual({
-        status: "blocked",
-        provider,
-        reason: "invalid_request",
-      });
-    }
+    await expect(verify({ ...INPUT, provider: "pi" })).resolves.toEqual({
+      status: "blocked",
+      provider: "pi",
+      reason: "invalid_request",
+    });
     expect(createHost).not.toHaveBeenCalled();
     expect(resolveNativeExecutable).not.toHaveBeenCalled();
     expect(materializeSandboxProfile).not.toHaveBeenCalled();
     expect(runCanary).not.toHaveBeenCalled();
   });
 
-  it("keeps the seven-route surface classification explicit and provider-aware", () => {
+  it("keeps the four execution-route surface classification explicit", () => {
     expect(MACOS_PRODUCTION_PROVIDER_SURFACES).toEqual({
       codex: "wrapper-to-vendor-native",
       claude: "vendor-native",
       grok: "vendor-native",
-      cursor: "script-runtime",
       pi: "embedded-sdk",
-      hermes: "script-runtime",
-      openclaw: "script-runtime",
     });
     expect(macOsProductionProviderSupport("codex")).toEqual({
       provider: "codex",
@@ -1047,12 +1037,6 @@ describe("production macOS containment resolver", () => {
       surface: "vendor-native",
       verifier: "unavailable",
       reason: "profile_compiler_not_proven",
-    });
-    expect(macOsProductionProviderSupport("cursor")).toEqual({
-      provider: "cursor",
-      surface: "script-runtime",
-      verifier: "unavailable",
-      reason: "script_identity_not_proven",
     });
     expect(macOsProductionProviderSupport("pi")).toEqual({
       provider: "pi",

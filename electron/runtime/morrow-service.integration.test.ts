@@ -940,7 +940,6 @@ describe("Morrow service dogfood", () => {
 
     await service.sendMessage("돌리기");
     expect((await service.bootstrap()).orchestration.portfolioRuns).toHaveLength(0);
-    await expect(service.startOvernight("legacy-plan")).rejects.toThrow(/기록 조회용/);
 
     expect(await service.replanOvernightPortfolio({
       planId: overnightSnapshot.portfolioPlans![0].id,

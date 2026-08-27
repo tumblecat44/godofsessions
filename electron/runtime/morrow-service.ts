@@ -30,7 +30,6 @@ import type {
   OvernightExecutionProvider,
   OvernightProviderRouteSummary,
   OvernightProviderVerificationSummary,
-  OvernightRunSummary,
   ThinkingLevel,
   TranscriptMessage,
   TranscriptPart,
@@ -70,7 +69,6 @@ import {
 import { OvernightProviderResumeCleanupGuard } from "./overnight-provider-process-recovery";
 import { createOvernightPiRunner } from "./overnight-pi-runner";
 import { defaultOvernightProviderHostPath, OvernightProviderRunner } from "./overnight-provider-runner";
-import { OvernightService, type OvernightServiceOptions } from "./overnight-service";
 
 const MORROW_PROMPT = `You are Morrow, a warm and capable conversational operator inside God of Sessions.
 Conversation is your default. Answer normally and do not inspect files, run commands, or edit anything merely because tools are available.
@@ -127,7 +125,7 @@ function transcriptParts(content: unknown, completedToolCalls: ReadonlySet<strin
   });
 }
 
-function serializeMessages(messages: readonly unknown[], getOvernightPlan: (planId: string) => TranscriptPart["overnightPlan"]): TranscriptMessage[] {
+function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
   const completedToolCalls = new Set(messages.flatMap((message) => {
     if (!message || typeof message !== "object") return [];
     const value = message as Record<string, unknown>;
@@ -143,7 +141,7 @@ function serializeMessages(messages: readonly unknown[], getOvernightPlan: (plan
     const value = message as Record<string, unknown>;
     const role = value.role;
     if (role !== "user" && role !== "assistant" && role !== "toolResult") return [];
-    const special = role === "toolResult" ? specialToolResult(value.content, getOvernightPlan) : undefined;
+    const special = role === "toolResult" ? specialToolResult(value.content) : undefined;
     const parts = special ? [special] : transcriptParts(value.content, completedToolCalls, failedToolCalls);
     if (parts.length === 0) return [];
     return [{
@@ -157,7 +155,7 @@ function serializeMessages(messages: readonly unknown[], getOvernightPlan: (plan
   });
 }
 
-function specialToolResult(content: unknown, getOvernightPlan: (planId: string) => TranscriptPart["overnightPlan"]): TranscriptPart | undefined {
+function specialToolResult(content: unknown): TranscriptPart | undefined {
   const raw = textFromContent(content);
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
@@ -171,19 +169,6 @@ function specialToolResult(content: unknown, getOvernightPlan: (planId: string) 
           : "오늘 밤 실행할 Overnight 후보가 없습니다. 판단 근거는 Overnight에서 확인할 수 있습니다.",
         state: "done",
       };
-    }
-    if ((value.morrowType === "overnight-plan" || value.morrowType === "overnight-recommendation") && typeof value.planId === "string") {
-      const plan = getOvernightPlan(value.planId);
-      return { type: "overnight-plan", text: "Overnight 계획이 준비되었습니다.", overnightPlanId: value.planId, overnightPlan: plan, state: "done" };
-    }
-    if (value.morrowType === "overnight-recommendation" && typeof value.disposition === "string") {
-      const text = value.disposition === "clarify"
-        ? "Overnight를 계획하기 전에 결정이 더 필요합니다."
-        : "오늘 밤은 실행하지 않는 편이 낫다는 판단입니다.";
-      return { type: "tool", toolName: "prepare_overnight", text, state: "done" };
-    }
-    if (value.morrowType === "overnight-run" && typeof value.runId === "string") {
-      return { type: "overnight-run", text: "Overnight 실행을 시작했습니다.", overnightRunId: value.runId, state: "done" };
     }
   } catch {
     // Ordinary tool output is rendered through the normal tool transcript path.
@@ -298,13 +283,11 @@ type MorrowOvernightContextEvaluator = (
 export interface MorrowServiceOptions {
   root: string;
   dataDir: string;
-  workerPath?: string;
   providerHostPath?: string;
   sendEvent: SendEvent;
   configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
   initialLanguage?: AppLanguage;
   contextHome?: string;
-  overnightCommandAvailable?: OvernightServiceOptions["commandAvailable"];
   dailyContextBuilder?: typeof collectDailyContextForEvaluation;
   overnightContextEvaluator?: MorrowOvernightContextEvaluator;
   overnightContextModelPort?: OvernightContextModelPort;
@@ -335,7 +318,6 @@ export class MorrowService {
   private readonly sendEvent: SendEvent;
   private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
   private readonly contextHome?: string;
-  private readonly overnight: OvernightService;
   private readonly overnightPortfolio: MorrowPortfolioService;
   private readonly overnightPortfolioReadiness: OvernightPortfolioReadiness;
   private readonly overnightProviderVerification?: OvernightProviderVerificationPort;
@@ -377,12 +359,6 @@ export class MorrowService {
     this.dailyContextBuilder = options.dailyContextBuilder ?? collectDailyContextForEvaluation;
     this.overnightContextEvaluator = options.overnightContextEvaluator ?? evaluateOvernightContext;
     this.overnightContextModelPort = options.overnightContextModelPort;
-    this.overnight = new OvernightService({
-      root: options.root,
-      dataDir: options.dataDir,
-      workerPath: options.workerPath ?? join(options.dataDir, "overnight-worker.js"),
-      commandAvailable: options.overnightCommandAvailable,
-    });
     const portfolioLedger = new OvernightPortfolioLedger({ dataDir: options.dataDir });
     const providerControlPlane = options.overnightProviderControlPlane?.create({
       approvalClaims: {
@@ -767,7 +743,7 @@ export class MorrowService {
       id: this.session.sessionId,
       path: this.session.sessionFile,
       title: this.session.sessionName || sessionTitle(firstUser ? textFromContent(firstUser.content) : ""),
-      messages: serializeMessages(this.session.messages, (planId) => this.overnight.getPlan(planId)),
+      messages: serializeMessages(this.session.messages),
       model: this.session.model ? { provider: this.session.model.provider, id: this.session.model.id, name: this.session.model.name } : undefined,
       thinkingLevel: this.session.thinkingLevel as ThinkingLevel,
       busy: this.session.isStreaming,
@@ -951,15 +927,6 @@ export class MorrowService {
     await this.overnightPortfolio.stop(runId);
   }
 
-  async startOvernight(planId: string): Promise<OvernightRunSummary> {
-    void planId;
-    throw new Error("이전 버전 Overnight 계획은 기록 조회용이며 실행할 수 없습니다. 현재 포트폴리오를 새로 준비해 주세요.");
-  }
-
-  async stopOvernight(runId: string) {
-    await this.overnight.stop(runId);
-  }
-
   private async combinedOrchestrationSnapshot(refreshRoutes: boolean): Promise<OrchestrationSnapshot> {
     const routePromise = refreshRoutes
       ? this.overnightPortfolioReadiness.inspectAll().then((readiness) => Promise.all(readiness.map(async ({ provider, label, status, reason }) => ({
@@ -973,8 +940,7 @@ export class MorrowService {
           ...route,
           verification: await this.observeProviderVerification(route.provider, route.verification),
         })));
-    const [legacy, assessments, plans, runs, routes] = await Promise.all([
-      this.overnight.snapshot(this.dailyContext),
+    const [assessments, plans, runs, routes] = await Promise.all([
       this.overnightPortfolio.snapshotAssessments(),
       this.overnightPortfolio.snapshotPlans(),
       this.overnightPortfolio.snapshotRuns(),
@@ -983,15 +949,14 @@ export class MorrowService {
     if (refreshRoutes) this.portfolioRoutes = routes;
     const context = this.dailyContextAssessmentUnavailable
       ? {
-          ...legacy.context,
+          ...this.dailyContext.summary,
           warnings: [...new Set([
-            ...legacy.context.warnings,
+            ...this.dailyContext.summary.warnings,
             dailyContextUnavailableWarning(this.dailyContextAssessmentUnavailable),
           ])],
         }
-      : legacy.context;
+      : this.dailyContext.summary;
     return {
-      ...legacy,
       context,
       providerRoutes: routes,
       portfolioAssessments: assessments.map(portfolioAssessmentSummary),

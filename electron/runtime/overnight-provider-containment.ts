@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, sep } from "node:path";
-import type { LocalSessionProvider } from "../../src/shared/contracts";
+import type { OvernightExecutionProvider } from "../../src/shared/contracts";
 import {
   overnightProviderAdapterIdentity,
   overnightProviderAdapterInvocation,
@@ -18,7 +18,7 @@ export const MACOS_PROVIDER_CONTAINMENT_POLICY = Object.freeze({
 } as const);
 
 export interface OvernightProviderContainmentRequest {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   fixedRoot: string;
   runtimeDirectory: string;
   executable: string;
@@ -60,7 +60,7 @@ export interface MacOsProviderLaunchArtifactObservation {
 }
 
 export interface MacOsProviderCanaryRequest {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   fixedRoot: string;
   runtimeDirectory: string;
   executable: string;
@@ -181,7 +181,7 @@ export type OvernightProviderContainmentBlockedReason =
 
 export interface VerifiedOvernightProviderCapabilityAttestation {
   version: 1;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   attestationSha256: string;
   platform: "darwin";
   verifiedAt: string;
@@ -245,7 +245,7 @@ export interface OvernightProviderContainmentBindingRequest extends OvernightPro
 
 export interface VerifiedOvernightProviderContainmentProof {
   version: 2;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   proofSha256: string;
   platform: "darwin";
   verifiedAt: string;
@@ -314,7 +314,7 @@ export interface VerifiedOvernightProviderContainmentProof {
  */
 export interface VerifiedOvernightProviderLaunchBinding {
   version: 1;
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   proofBindingSha256: string;
   canonicalNativeExecutable: string;
   providerHostPath: string;
@@ -329,25 +329,25 @@ export interface VerifiedOvernightProviderLaunchBinding {
 export type OvernightProviderContainmentDecision =
   | {
       status: "verified";
-      provider: LocalSessionProvider;
+      provider: OvernightExecutionProvider;
       proof: VerifiedOvernightProviderContainmentProof;
       launchBinding: VerifiedOvernightProviderLaunchBinding;
     }
   | {
       status: "blocked";
-      provider: LocalSessionProvider;
+      provider: OvernightExecutionProvider;
       reason: OvernightProviderContainmentBlockedReason;
     };
 
 export type OvernightProviderContainmentAttestationDecision =
   | {
       status: "verified";
-      provider: LocalSessionProvider;
+      provider: OvernightExecutionProvider;
       attestation: VerifiedOvernightProviderCapabilityAttestation;
     }
   | {
       status: "blocked";
-      provider: LocalSessionProvider;
+      provider: OvernightExecutionProvider;
       reason: OvernightProviderContainmentBlockedReason;
     };
 
@@ -865,7 +865,7 @@ async function canonicalCapabilityScope(
 }
 
 function containmentAdapterContract(
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   fixedRoot: string,
   runtimeDirectory: string,
   executable: string,
@@ -929,7 +929,7 @@ function safeHostNow(host: OvernightProviderContainmentHost) {
 
 export function validateVerifiedOvernightProviderCapabilityAttestation(
   attestation: Readonly<VerifiedOvernightProviderCapabilityAttestation>,
-  provider: LocalSessionProvider,
+  provider: OvernightExecutionProvider,
   now: Date,
 ): OvernightProviderContainmentBlockedReason | undefined {
   try {
@@ -1023,7 +1023,7 @@ function boundedVersion(value: unknown) {
 }
 
 function containmentBindingSha256(input: {
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   fixedRoot: string;
   runtimeDirectory: string;
   executable: string;
@@ -1175,7 +1175,7 @@ export function verifiedOvernightProviderContainmentMatchesInvocation(
 
 export function containmentProofIdentitySha256(proof: Readonly<{
   attestation?: { version: 1; sha256: string; expiresAt: string };
-  provider: LocalSessionProvider;
+  provider: OvernightExecutionProvider;
   scope: {
     bindingSha256: string;
     writeScopesSha256?: string;

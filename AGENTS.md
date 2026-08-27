@@ -51,8 +51,9 @@ forbidden from spawning its own subagents. It is not a cloud service.
 - A route is Ready only after local installation, authentication, and every OS
   containment and capability canary required by that route are verified.
   Otherwise keep it Setup or Blocked with the reason visible.
-- Keep the legacy singular Overnight board only for stored-history
-  compatibility; new work uses the provider-neutral portfolio path.
+- This pre-release codebase has one Overnight model: a date contains zero or
+  more purpose cards, each with one Kanban. Do not add singular legacy or
+  stored-history compatibility branches.
 
 ## Working rules
 

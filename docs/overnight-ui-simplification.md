@@ -1,162 +1,97 @@
-# Overnight portfolio user interface
+# Overnight user interface
 
 - Status: current product contract
 - Baseline date: 2026-08-26
-- Architecture: [ADR 0053: Provider-neutral Overnight portfolio](adr/0053-provider-neutral-overnight-portfolio.md)
+- Architecture: [ADR 0054: Four Overnight execution routes](adr/0054-four-overnight-execution-routes.md)
 
-This document defines the current Orchestrate experience for newly prepared
-Overnight portfolios. Singular recommendations, plans, runs, and worker boards
-appear only when the app renders stored legacy history.
+## Mental model
 
-## Page truth for new portfolios
+A calendar date contains zero or more Overnights. One Overnight is one purpose
+the user wants achieved between leaving work and returning, and each Overnight
+has one Kanban. Several Overnights may run under one internal approval or
+scheduler run, but the interface never exposes that internal grouping as a
+second user concept.
 
-**User:** One operator returning to work spread across local artificial
-intelligence (AI) agents.
+The calendar is a button inside the Overnight page. It is not a sidebar item and
+not a separate page.
 
-**Arrival context:** They want Morrow to find worthwhile unattended work, show
-which agents can run it safely, and preserve evidence for each result.
+## Stable page
 
-**Primary job:** Turn the selected date's session evidence into one editable
-portfolio, approve its exact schedule once, and review every item after the run.
+The page keeps the same structure for zero, one, or many Overnights and for
+draft, queued, running, completed, failed, stopped, and timed-out states:
 
-**Success state:** The operator can tell which items are recommended, blocked,
-or waiting for an answer. During execution, they can see each item's provider
-and state. Morning Review separates completed, failed, skipped, timed-out, and
-unverified results.
+1. Overnight header with the calendar button and refresh action.
+2. Today's optional goal composer. Past dates omit only this composer.
+3. One date-labelled `Overnights` surface containing zero or more cards.
+4. A collapsed drawer for Morrow's candidate reasoning.
+5. A collapsed drawer for the four execution-route readiness states.
 
-**Internal-only information:** Raw transcripts, prompt excerpts, ranking
-internals, durable ledger payloads, process identifiers, capability-probe
-output, and approval hash inputs stay outside the default interface.
+Status changes content inside an Overnight card. Status never replaces the page,
+creates a Morning Review mode, or switches to a separate run page.
 
-## User flow
+## Draft Overnight
 
-The product uses five visible stages:
+Each draft card shows the purpose and opens in place. The expanded card exposes
+the selected worker, approved verification, exact command preview, and write
+scope before approval. Include/exclude and worker changes create a new exact
+plan; they never mutate earlier approval authority.
 
-1. **Review recommendations:** Show every candidate with its disposition,
-   evidence, provider choice, risks, questions, and exclusion reason.
-2. **Edit the portfolio:** Let the operator include or exclude runnable items
-   and choose only verified alternative providers.
-3. **Approve the exact plan:** Show the revalidated items, schedule, conflicts,
-   roots, write scopes, verification, 450-minute window, and expiry before one
-   single-use approval.
-4. **Follow scheduled execution:** Show queued, running, completed, failed,
-   skipped, stopped, timed-out, and unknown items without inventing a completion
-   percentage.
-5. **Review morning evidence:** Show each provider receipt, bounded report,
-   approved verification result, remaining risk, and honest partial failure.
+The only execution action approves the visible selected Overnights once and
+starts them. An empty selection has no approval or execution authority.
 
-The interface creates no approval action when the edited selection is empty or
-invalid. A cross-worktree dependent component without proven result handoff, a
-blocked provider, or a schedule over 450 minutes returns to editing with the
-reason visible. Independent components remain in the runnable plan, while
-same-worktree dependencies may run sequentially.
+## Running and finished Overnight
 
-## Current section responsibilities
+Each running or historical purpose is one card with one Kanban. The Kanban shows
+only stored states and evidence:
 
-| Visible section | Role | Required content |
-| --- | --- | --- |
-| Recommendation summary | DECISION | Portfolio disposition and why work is or is not runnable |
-| Candidate list | EDIT | Include or exclude controls, evidence, questions, risks, and provider readiness |
-| Provider readiness | SAFETY | All seven routes with `Ready`, `Setup`, or `Blocked` and the reason |
-| Schedule summary | APPROVAL | Parallel groups, serialized conflicts, capacity, dependencies, and makespan |
-| Exact portfolio approval | AUTHORITY | Frozen items, providers, roots, write scopes, outcome, verification, deadline, and expiry |
-| Active portfolio | STATUS | Item count, provider, queued or active state, stop state, and attention signals |
-| Morning Review | EVIDENCE | Itemized receipts, reports, verification, failures, skips, and remaining risks |
-| Stored legacy run | COMPATIBILITY | Historical singular outcome and evidence, clearly labeled as legacy history |
+- waiting
+- working
+- checking
+- done
 
-Conflicts, capacity, and provider alternatives stay visible because they change
-which work can run and when. Internal route inventories and probe output remain
-hidden; the user sees the resulting readiness state and reason.
+The board does not invent percentages, tokens, or step counts from silence.
+Provider receipt, bounded worker report, verification evidence, error, and
+result location remain attached to the same card after completion.
 
-## First viewport by state
+While any Overnight is active, a small app-wide pulse answers whether work is
+still running and opens the same Overnight page. Power protection is described
+truthfully: the app may request system-sleep prevention while work is active,
+but it must not promise that a closed laptop lid will keep the machine awake.
 
-Before recommendation:
+## Providers
 
-```text
-Orchestrate
-Choose a goal or ask Morrow to assess the selected date's sessions.
+New Overnight execution supports exactly four routes:
 
-[Recommend from sessions]  [Assess this goal]
+- Claude Code
+- Codex
+- Grok Build
+- Pi Agent
 
-Seven local agent routes
-Ready · Setup · Blocked
-```
+Claude, Codex, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw session records
+may all contribute bounded read-only evidence. Cursor, Hermes, and OpenClaw are
+not execution choices and have no execution readiness cards.
 
-During portfolio editing:
+A route is `Ready` only after installation, authentication, containment, and
+required capability evidence are verified. Otherwise it remains `Setup` or
+`Blocked` with a reason.
 
-```text
-Recommended portfolio
+## First-release boundary
 
-[x] Item A · provider · evidence · verification
-[x] Item B · provider · conflict and timing
-[ ] Item C · clarification or blocked reason
-
-Schedule: parallel groups · serialized conflicts · 450-minute maximum
-
-[Rebuild exact portfolio]
-```
-
-After revalidation:
-
-```text
-Exact portfolio approval
-
-Items · providers · roots · scopes · schedule · deadline · expiry
-
-[Approve this portfolio once]
-```
-
-During and after execution:
-
-```text
-3 ACTIVE
-Item A · running · ready agent A
-Item B · queued · ready agent B
-Item C · completed · provider receipt
-
-Morning Review
-Item-by-item verification, failure, skip, and remaining risk
-```
-
-## Provider readiness in the interface
-
-The page advertises Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes,
-and OpenClaw. A route is `Ready` only when its required installation,
-authentication, operating-system containment, and capability canaries pass.
-Otherwise the route is `Setup` or `Blocked` with a specific reason.
-
-A successful executable lookup, help command, authentication check, or process
-exit cannot produce a green readiness state. The interface never suggests that
-one provider runs through another provider's route.
-
-## Stored singular history compatibility
-
-The legacy surface may render a historical singular plan or run that was
-created under ADR 0051. That surface follows these rules:
-
-- Label the record as legacy stored history
-- Preserve its original worker, outcome, verification, timestamps, and receipt
-- Do not offer a new recommendation, edit, approval, retry, or dispatch action
-- Do not mix the historical worker into the current portfolio item count
-- Link new work to the provider-neutral portfolio entry point
-
-Compatibility fixtures may keep singular records to test reading and rendering.
-They do not define the current product flow.
+As of the 2026-08-26 baseline, the product has not had a public release. The
+current portfolio model is the only Overnight model. There is no legacy
+singular UI, bridge, worker, test path, or stored-history compatibility branch.
 
 ## Acceptance criteria
 
-- Every candidate remains visible as recommended, clarification needed, or not
-  runnable.
-- The operator can edit included items and verified provider alternatives before
-  approval.
-- Replanning creates a new exact authority and revalidates dependencies,
-  conflicts, capacity, roots, write scopes, readiness, and 450-minute makespan.
-- One single-use approval covers only the visible edited portfolio.
-- The active sidebar shows the portfolio item count instead of a fixed singular
-  label.
-- The active view shows item states and schedule evidence without a completion
-  percentage.
-- Morning Review preserves provider-native receipts and verification per item.
-- Partial failure and restart recovery never rerun completed items.
-- Legacy singular records remain readable but cannot authorize new work.
-- Chat can open Orchestrate but cannot start a portfolio directly.
+- The page skeleton and `Overnights` surface keep their identity across every
+  count and status transition.
+- A date may contain zero or many Overnights.
+- Multiple internal runs on one date render as one flat collection.
+- One purpose renders as one card and one Kanban.
+- The calendar stays inside the Overnight page as a button.
+- Refresh keeps stale content visible and read-only.
+- Approval freezes only the visible selected items, workers, scope,
+  verification, schedule, and deadline.
+- Only the four execution providers can enter a new plan.
+- Active status never claims unsupported closed-lid behavior or invented
+  progress.
