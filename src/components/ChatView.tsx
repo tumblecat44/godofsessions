@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, FilePenLine, MoonStar, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.png";
+import { cn } from "../lib/cn";
+import { transitionState } from "../lib/motion";
 import type { ApprovalRequest, BootstrapState, ConversationDetail, DailyContextSummary, DailySessionSummary, OvernightPlanSummary, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
+import { Button } from "./ui/Button";
+import { Surface } from "./ui/Surface";
 
 interface ChatViewProps {
+  hidden?: boolean;
   state: BootstrapState;
   conversation?: ConversationDetail;
   approval?: ApprovalRequest;
@@ -18,25 +23,43 @@ interface ChatViewProps {
   onModel(provider: string, modelId: string): Promise<void>;
   onThinking(level: ThinkingLevel): Promise<void>;
   onOpenSettings(): void;
-  onStartOvernight(planId: string): Promise<void>;
+  onReviewOvernight?(): Promise<void> | void;
+  overnightPlanAuthoritySuspended?: boolean;
 }
+
+const FOLLOW_BOTTOM_THRESHOLD = 80;
 
 export function ChatView(props: ChatViewProps) {
   const [localDraft, setLocalDraft] = useState("");
   const [modelOpen, setModelOpen] = useState(false);
   const [remember, setRemember] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followBottom = useRef(true);
+  const scrollConversationId = useRef(props.conversation?.id);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const knownMessages = useRef({
+    conversationId: props.conversation?.id,
+    ids: new Set(props.conversation?.messages.map((message) => message.id) ?? []),
+  });
   const ko = props.state.language === "ko";
   const draft = props.draft ?? localDraft;
   const setDraft = props.onDraftChange ?? setLocalDraft;
   const proposeDraft = (text: string) => { setDraft(text); textareaRef.current?.focus(); };
 
+  if (knownMessages.current.conversationId !== props.conversation?.id) {
+    knownMessages.current = {
+      conversationId: props.conversation?.id,
+      ids: new Set(props.conversation?.messages.map((message) => message.id) ?? []),
+    };
+  }
+
   useEffect(() => {
     if (!modelOpen) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !modelPickerRef.current?.contains(event.target as Node)) setModelOpen(false);
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !modelPickerRef.current?.contains(event.target as Node)) {
+        setModelOpen(false);
+      }
     };
     window.addEventListener("mousedown", close);
     window.addEventListener("keydown", close);
@@ -44,8 +67,17 @@ export function ChatView(props: ChatViewProps) {
   }, [modelOpen]);
 
   useEffect(() => {
+    if (scrollConversationId.current !== props.conversation?.id) {
+      scrollConversationId.current = props.conversation?.id;
+      followBottom.current = true;
+    }
+    if (props.hidden) return;
     const viewport = scrollRef.current;
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+    if (viewport && followBottom.current) viewport.scrollTop = viewport.scrollHeight;
+  }, [props.hidden, props.conversation?.id, props.conversation?.messages]);
+
+  useEffect(() => {
+    props.conversation?.messages.forEach((message) => knownMessages.current.ids.add(message.id));
   }, [props.conversation?.messages]);
 
   const connectedProviders = useMemo(() => new Set(props.state.providers.filter((item) => item.connected).map((item) => item.id)), [props.state.providers]);
@@ -76,23 +108,31 @@ export function ChatView(props: ChatViewProps) {
   };
 
   return (
-    <main className="chat-workspace">
-      <section className="chat-main">
-        <header className="morrow-chat-head"><div><OperatorMark size={32} active={props.conversation?.busy} /><span><strong>MORROW</strong><small>{props.conversation?.busy ? (ko ? "생각하는 중" : "THINKING WITH YOU") : (ko ? "대화 준비됨" : "READY TO TALK")}</small></span></div><span className="root-chip" title="Fixed execution root">ROOT · {props.state.rootName}</span></header>
+    <main className="chat-workspace h-dvh min-w-0 overflow-hidden bg-night text-ink" hidden={props.hidden}>
+      <section className="chat-main grid h-dvh grid-rows-[86px_minmax(0,1fr)_auto_auto] overflow-hidden">
+        <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-[clamp(28px,4vw,54px)] pt-2"><div className="flex items-center gap-3"><OperatorMark size={32} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><span className="root-chip" title={props.state.rootPath} aria-label={ko ? `파일 작업 폴더: ${props.state.rootPath}` : `File working folder: ${props.state.rootPath}`}><strong>{ko ? "파일 작업 폴더" : "FILE WORKING FOLDER"}</strong><code>{props.state.rootName}</code></span></header>
 
-        <div className="chat-transcript" ref={scrollRef}>
+        <div className="chat-transcript flex min-h-0 flex-col overflow-y-auto px-[clamp(32px,9vw,150px)] pb-8 pt-10 before:mt-auto before:content-[''] max-[900px]:px-8" ref={scrollRef} onScroll={() => {
+          const viewport = scrollRef.current;
+          if (viewport) followBottom.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= FOLLOW_BOTTOM_THRESHOLD;
+        }}>
           {props.error && <FriendlyError message={props.error} ko={ko} />}
           {props.notice && <div className="chat-notice" role="status"><Sparkles size={15} /><span>{props.notice}</span></div>}
           {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} context={props.state.orchestration.context} onContinueSession={continueOvernight} /> : props.conversation.messages.map((message) => (
-            <article className={`morrow-message morrow-message--${message.role}`} key={message.id}>
+            <article className={cn(
+              `morrow-message morrow-message--${message.role}`,
+              "my-3",
+              message.role === "user" ? "ml-auto flex w-fit max-w-[min(58%,620px)] flex-col items-end gap-2 rounded-none border-0 bg-transparent p-0 shadow-none" : "grid w-full max-w-[800px] grid-cols-[34px_minmax(0,1fr)] gap-4",
+              knownMessages.current.ids.has(message.id) ? "" : "is-entering",
+            )} key={message.id}>
               {message.role === "assistant" ? (
-                <div className="message-avatar"><img src={morrowImage} alt="Morrow" /><span>MORROW</span></div>
-              ) : <span className="message-author">{message.role === "user" ? (ko ? "나" : "YOU") : "TOOL"}</span>}
-              <div className="message-body">
+                <div className="message-avatar grid size-[34px] place-items-center overflow-hidden rounded-[11px] border border-amber/20 bg-surface"><img className="size-full object-cover saturate-[0.8]" src={morrowImage} alt="Morrow" /><span className="sr-only">MORROW</span></div>
+              ) : <span className="message-author mr-1 font-mono text-[9px] tracking-[0.12em] text-ink-faint">{message.role === "user" ? (ko ? "나" : "YOU") : "TOOL"}</span>}
+              <div className={cn("message-body text-[15.5px] leading-7 text-[#d8d2c6]", message.role === "user" && "rounded-[16px_16px_5px_16px] border border-[#344055] bg-[#202938] px-4 py-3 text-ink shadow-control")}>
                 {message.parts.map((part, index) => part.type === "overnight-plan" ? (
-                  <OvernightPlanCard key={index} plan={props.state.orchestration.plans.find((plan) => plan.id === part.overnightPlanId) ?? part.overnightPlan} ko={ko} onStart={props.onStartOvernight} onReprepare={proposeDraft} />
+                  <OvernightPlanCard key={index} plan={props.state.orchestration.plans.find((plan) => plan.id === part.overnightPlanId) ?? part.overnightPlan} ko={ko} authoritySuspended={Boolean(props.overnightPlanAuthoritySuspended)} onReview={() => props.onReviewOvernight?.()} onReprepare={proposeDraft} />
                 ) : part.type === "overnight-run" ? (
-                  <div className="overnight-run-inline" key={index}><span><i />{ko ? "Overnight 실행이 시작됐어요" : "Overnight run started"}</span><small>{ko ? "오케스트레이트에서 진행 상황을 볼 수 있어요." : "Watch progress in Orchestrate."}</small></div>
+                  <div className="overnight-run-inline" key={index}><span><i />{ko ? "Overnight 실행이 시작됐어요" : "Overnight run started"}</span><small>{ko ? "Overnight 관리 화면에서 진행 상황을 볼 수 있어요." : "Watch progress in Orchestrate."}</small></div>
                 ) : part.type === "tool" ? (
                   <div className={`tool-event tool-event--${part.state ?? "done"}`} key={index}>
                     {part.toolName === "edit" || part.toolName === "write" ? <FilePenLine size={15} /> : <TerminalSquare size={15} />}
@@ -105,32 +145,32 @@ export function ChatView(props: ChatViewProps) {
               </div>
             </article>
           ))}
-          {props.conversation?.busy && <div className="morrow-thinking"><i /><i /><i /><span>{ko ? "Morrow가 답을 이어 쓰고 있어요" : "Morrow is shaping the next thought"}</span></div>}
+          <div className={`morrow-thinking ${props.conversation?.busy ? "is-visible" : ""}`} role={props.conversation?.busy ? "status" : undefined} aria-hidden={!props.conversation?.busy}><i /><i /><i /><span>{ko ? "Morrow가 답을 이어 쓰고 있어요" : "Morrow is shaping the next thought"}</span></div>
         </div>
 
         {props.approval && (
-          <section className="approval-card" aria-live="assertive">
+          <Surface className="approval-card mx-[clamp(24px,5vw,70px)] mb-3 grid grid-cols-[42px_minmax(0,1fr)_auto] gap-4 border-amber/25 bg-amber/[0.045] p-4" aria-live="assertive">
             <div className="approval-card__icon"><ShieldCheck size={21} /></div>
             <div><span className="eyebrow">YOUR SAY, ALWAYS</span><h3>{props.approval.title}</h3><code>{props.approval.detail}</code>{props.approval.rememberable && <label><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />{approvalMemoryLabel(props.approval, ko)}</label>}</div>
-            <div className="approval-actions"><button type="button" onClick={() => void props.onApproval(false, false)}><X size={14} />{ko ? "허용 안 함" : "Not now"}</button><button className="primary" type="button" onClick={() => void props.onApproval(true, remember)}><Check size={14} />{ko ? "허용" : "Allow"}</button></div>
-          </section>
+            <div className="approval-actions flex items-end gap-2"><Button size="sm" onClick={() => void props.onApproval(false, false)}><X size={14} />{ko ? "허용 안 함" : "Not now"}</Button><Button variant="primary" size="sm" className="primary" onClick={() => void props.onApproval(true, remember)}><Check size={14} />{ko ? "허용" : "Allow"}</Button></div>
+          </Surface>
         )}
 
         {!canChat && (
-          <section className="chat-provider-needed" aria-live="polite">
+          <Surface className="chat-provider-needed mx-auto mb-3 grid w-[min(820px,calc(100%-48px))] grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-3 border-teal/20 bg-teal/[0.035] px-4 py-3 shadow-none" aria-live="polite">
             <ShieldCheck size={17} />
-            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{ko ? "설정에서 공급자에 연결하면 이 입력 내용은 그대로 보존돼요." : "Connect a provider in Settings. Anything you typed here will stay put."}</small></span>
-            <button type="button" onClick={props.onOpenSettings}><Settings size={14} />{ko ? "모델 연결" : "Connect model"}</button>
-          </section>
+            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{ko ? "설정에서 AI 서비스를 연결해도 이 입력 내용은 그대로 보존돼요." : "Connect an AI service in Settings. Anything you typed here will stay put."}</small></span>
+            <Button size="sm" onClick={props.onOpenSettings}><Settings size={14} />{ko ? "모델 연결" : "Connect model"}</Button>
+          </Surface>
         )}
 
-        <footer className="chat-composer">
-          <textarea value={draft} rows={2} placeholder={ko ? "Morrow에게 무엇이든 말해보세요…" : "Talk to Morrow about anything…"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} ref={textareaRef} />
-          <div className="composer-bar">
-            <div className="model-picker" ref={modelPickerRef}><button type="button" disabled={!availableModels.length} onClick={() => setModelOpen((value) => !value)}><span className={`model-dot ${canChat ? "" : "is-offline"}`} />{selectedModel?.name ?? (ko ? "모델 연결 필요" : "Connect a model")}<ChevronDown size={13} /></button>{modelOpen && <div className="model-menu" role="listbox">{availableModels.map((model) => { const isSelected = selectedModel?.id === model.id && selectedModel.provider === model.provider; return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "is-selected" : ""} key={`${model.provider}:${model.id}`} onClick={() => { setModelOpen(false); void props.onModel(model.provider, model.id); }}><strong>{model.name}</strong><small>{model.provider}</small>{isSelected && <Check size={13} />}</button>; })}</div>}</div>
-            <select aria-label="Thinking level" disabled={!canChat || !supportsThinking} value={supportsThinking ? (props.conversation?.thinkingLevel ?? props.state.thinkingLevel) : "off"} onChange={(event) => void props.onThinking(event.target.value as ThinkingLevel)}><option value="off">{ko ? "사고 없음" : "Thinking off"}</option><option value="minimal">{ko ? "사고 최소" : "Thinking minimal"}</option><option value="low">{ko ? "사고 낮게" : "Thinking low"}</option><option value="medium">{ko ? "사고 보통" : "Thinking medium"}</option><option value="high">{ko ? "사고 높게" : "Thinking high"}</option><option value="xhigh">{ko ? "사고 매우 높게" : "Thinking xhigh"}</option><option value="max">{ko ? "사고 최대" : "Thinking max"}</option></select>
+        <footer className="chat-composer mx-auto mb-4 w-[min(820px,calc(100%-48px))] overflow-visible rounded-panel border border-line bg-night-raised/88 shadow-panel backdrop-blur-xl">
+          <textarea className="block min-h-[58px] w-full resize-none border-0 bg-transparent px-4 pb-2 pt-3.5 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-faint" value={draft} rows={2} placeholder={ko ? "Morrow에게 무엇이든 말해보세요…" : "Talk to Morrow about anything…"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} ref={textareaRef} />
+          <div className="composer-bar flex min-h-10 items-center gap-2 border-t border-line-soft px-2 py-1.5">
+            <div className="model-picker" ref={modelPickerRef}><button type="button" aria-expanded={modelOpen} disabled={!availableModels.length} onClick={() => setModelOpen((value) => !value)}><span className={`model-dot ${canChat ? "" : "is-offline"}`} />{selectedModel?.name ?? (ko ? "모델 연결 필요" : "Connect a model")}<ChevronDown size={13} /></button><div className={`model-menu ${modelOpen ? "is-open" : ""}`} role="listbox" aria-hidden={!modelOpen} inert={!modelOpen || undefined}>{availableModels.map((model) => { const isSelected = selectedModel?.id === model.id && selectedModel.provider === model.provider; return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "is-selected" : ""} key={`${model.provider}:${model.id}`} onClick={() => { setModelOpen(false); void props.onModel(model.provider, model.id); }}><strong>{model.name}</strong><small>{model.provider}</small>{isSelected && <Check size={13} />}</button>; })}</div></div>
+            <select aria-label={ko ? "답변 깊이" : "Response depth"} disabled={!canChat || !supportsThinking} value={supportsThinking ? (props.conversation?.thinkingLevel ?? props.state.thinkingLevel) : "off"} onChange={(event) => void props.onThinking(event.target.value as ThinkingLevel)}><option value="off">{ko ? "답변 깊이 · 사용 안 함" : "Response depth · off"}</option><option value="minimal">{ko ? "답변 깊이 · 아주 짧게" : "Response depth · minimal"}</option><option value="low">{ko ? "답변 깊이 · 간단히" : "Response depth · light"}</option><option value="medium">{ko ? "답변 깊이 · 균형 있게" : "Response depth · balanced"}</option><option value="high">{ko ? "답변 깊이 · 깊게" : "Response depth · deep"}</option><option value="xhigh">{ko ? "답변 깊이 · 매우 깊게" : "Response depth · very deep"}</option><option value="max">{ko ? "답변 깊이 · 최대로" : "Response depth · maximum"}</option></select>
             <span className="composer-spacer" />
-            {props.conversation?.busy ? <button className="send-button is-stop" aria-label="Stop" type="button" onClick={() => void props.onAbort()}><CircleStop size={17} /></button> : <button className="send-button" aria-label="Send" type="button" disabled={!draft.trim() || !canChat} onClick={() => void submit()}><ArrowUp size={18} /></button>}
+            <Button variant={props.conversation?.busy ? "danger" : "primary"} size="icon" className={`send-button size-9 min-h-0 ${props.conversation?.busy ? "is-stop" : ""}`} aria-label={props.conversation?.busy ? (ko ? "답변 중지" : "Stop response") : (ko ? "메시지 보내기" : "Send message")} disabled={!props.conversation?.busy && (!draft.trim() || !canChat)} onClick={() => props.conversation?.busy ? void props.onAbort() : void submit()}><span className={`state-icon-swap ${props.conversation?.busy ? "is-active" : ""}`} aria-hidden="true"><span className="state-icon-swap__active"><CircleStop size={17} /></span><span className="state-icon-swap__inactive"><ArrowUp size={18} /></span></span></Button>
           </div>
         </footer>
       </section>
@@ -138,9 +178,7 @@ export function ChatView(props: ChatViewProps) {
   );
 }
 
-function OvernightPlanCard({ plan, ko, onStart, onReprepare }: { plan?: OvernightPlanSummary; ko: boolean; onStart(planId: string): Promise<void>; onReprepare(draft: string): void }) {
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string>();
+function OvernightPlanCard({ plan, ko, authoritySuspended, onReview, onReprepare }: { plan?: OvernightPlanSummary; ko: boolean; authoritySuspended: boolean; onReview(): Promise<void> | void; onReprepare(draft: string): void }) {
   const [now, setNow] = useState(Date.now());
   const reprepareDraft = ko ? "방금 만료된 Overnight 계획을 같은 내용으로 다시 준비해줘." : "Prepare the expired overnight plan again with the same content.";
   const planId = plan?.id;
@@ -166,28 +204,34 @@ function OvernightPlanCard({ plan, ko, onStart, onReprepare }: { plan?: Overnigh
   const expired = plan.status === "expired" || now >= new Date(plan.expiresAt).getTime();
   const runnable = plan.status === "draft" && !expired;
   const expires = new Date(plan.expiresAt).toLocaleTimeString(ko ? "ko" : "en", { hour: "2-digit", minute: "2-digit" });
+  const durationMinutes = plan.durationMinutes ?? 420;
+  const duration = durationMinutes % 60 === 0
+    ? (ko ? `최대 ${durationMinutes / 60}시간` : `Up to ${durationMinutes / 60}h`)
+    : (ko ? `최대 ${Math.floor(durationMinutes / 60)}시간 ${durationMinutes % 60}분` : `Up to ${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`);
   return (
     <section className="overnight-plan-card" aria-label={ko ? "Overnight 계획" : "Overnight plan"}>
       <header><span><i />OVERNIGHT PLAN</span><em role="status">{runnable ? (ko ? "승인 대기" : "AWAITING YOUR SAY") : expired && plan.status === "draft" ? (ko ? "만료됨" : "EXPIRED") : plan.status.toUpperCase()}</em></header>
       <div className="overnight-plan-card__body">
         <h3>{plan.title}</h3>
-        <dl><div><dt>{ko ? "완료 기준" : "Outcome"}</dt><dd>{plan.outcome}</dd></div><div><dt>{ko ? "검증" : "Verification"}</dt><dd>{plan.verification}</dd></div></dl>
-        <div className="overnight-plan-sessions"><span>{ko ? `선택한 오늘 세션 ${plan.selectedSessions.length}개` : `${plan.selectedSessions.length} sessions selected`}</span>{plan.selectedSessions.map((session) => <strong key={session.id}>{session.provider.toUpperCase()} · {session.title}</strong>)}</div>
-        <div className="overnight-executor"><span>{ko ? "실행기" : "Executor"}</span><strong>{plan.executorLabel}</strong><code aria-label={ko ? "고정 작업 디렉터리와 실행 인자" : "Fixed working directory and execution arguments"}>{plan.commandPreview}</code></div>
-        {error && <p className="overnight-plan-error">{error}</p>}
+        <p className="overnight-plan-card__summary">{ko ? "정확한 실행 계약이 준비됐어요. 세부 내용은 관리 화면에서 한 번에 검토합니다." : "The exact execution contract is ready. Review its full details together in Orchestrate."}</p>
+        <div className="overnight-plan-brief">
+          <div><span>{ko ? "작업자" : "Worker"}</span><strong>{plan.executorLabel}</strong></div>
+          <div><span>{ko ? "시간" : "Window"}</span><strong>{duration}</strong></div>
+          <div><span>{ko ? "참고 대화" : "Context"}</span><strong>{ko ? `${plan.selectedSessions.length}개` : `${plan.selectedSessions.length} conversation${plan.selectedSessions.length === 1 ? "" : "s"}`}</strong></div>
+        </div>
       </div>
       <footer>
-        <small>{ko ? `정확히 이 계획을 한 번만 실행합니다. ${expires}에 만료됩니다.` : `Runs this exact plan once. Expires at ${expires}.`}</small>
-        {expired || error
+        <small>{ko ? `완료 기준·검증·위험·실행 인자는 Overnight 관리에서 확인하고 승인합니다. ${expires}에 만료됩니다.` : `Review the outcome, verification, risks, and invocation in Orchestrate before approval. Expires at ${expires}.`}</small>
+        {expired
           ? <button type="button" onClick={() => onReprepare(reprepareDraft)}>{ko ? "다시 준비" : "Prepare again"}</button>
-          : <button type="button" disabled={!runnable || starting} onClick={async () => { setStarting(true); setError(undefined); try { await onStart(plan.id); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setStarting(false); } }}>{starting ? (ko ? "시작하는 중…" : "Starting…") : runnable ? (ko ? "돌리기" : "Run overnight") : (ko ? "이미 시작됨" : "Already started")}</button>}
+          : <button type="button" disabled={authoritySuspended} onClick={() => { if (!authoritySuspended) void onReview(); }}>{runnable ? (ko ? "관리 화면에서 검토·실행" : "Review & run in Orchestrate") : (ko ? "관리 화면에서 보기" : "View in Orchestrate")}</button>}
       </footer>
     </section>
   );
 }
 
 function approvalMemoryLabel(approval: ApprovalRequest, ko: boolean) {
-  if (approval.scope === "write-in-root") return ko ? "이 대화 동안 실행 루트 안의 파일 변경 허용" : "Allow file changes inside this root for this conversation";
+  if (approval.scope === "write-in-root") return ko ? "이 대화 동안 파일 작업 폴더 안의 변경 허용" : "Allow changes inside the file working folder for this conversation";
   if (approval.scope.startsWith("bash:")) return ko ? "이 대화 동안 이 정확한 명령 기억" : "Remember this exact command for this conversation";
   return ko ? "이 대화 동안 이 승인 기억" : "Remember this approval for this conversation";
 }
@@ -196,8 +240,8 @@ const briefingProviderLabels: Record<DailySessionSummary["provider"], string> = 
 
 function continueDraft(session: DailySessionSummary, ko: boolean) {
   return ko
-    ? `오늘 ${briefingProviderLabels[session.provider]} 세션 "${session.title}"을 밤새 이어가는 Overnight를 준비해줘.`
-    : `Prepare an overnight that continues today's ${briefingProviderLabels[session.provider]} session "${session.title}".`;
+    ? `오늘 ${briefingProviderLabels[session.provider]} 대화 "${session.title}"에서 하던 일을 밤새 이어갈 계획을 준비해줘.`
+    : `Prepare overnight work that continues today's ${briefingProviderLabels[session.provider]} conversation "${session.title}".`;
 }
 
 function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; context: DailyContextSummary; onContinueSession(draft: string): void }) {
@@ -205,9 +249,9 @@ function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; contex
   if (!context.sessions.length) {
     return (
       <div className="morrow-empty">
-        <div className="morrow-empty__portrait"><img src={morrowImage} alt="Morrow waiting beside a small light" /><span><i />MORROW IS HERE</span></div>
+        <div className="morrow-empty__portrait"><img src={morrowImage} alt="Morrow waiting beside a small light" /><span><i />{ko ? "MORROW가 기다리고 있어요" : "MORROW IS HERE"}</span></div>
         <div>
-          <span className="eyebrow">A QUIET PLACE TO THINK</span>
+          <span className="eyebrow">{ko ? "그냥 이야기해도 되는 곳" : "A QUIET PLACE TO THINK"}</span>
           <h1>{ko ? "무엇부터 같이 풀어볼까요?" : "What shall we untangle together?"}</h1>
           <p>{ko ? "그냥 이야기해도 좋아요. 파일이나 명령은 부탁할 때만 사용하고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. I only reach for files or commands when you ask—and I pause before changing anything."}</p>
           {context.warnings.length > 0 && <small className="briefing-warning">{context.warnings[0]}</small>}
@@ -224,13 +268,13 @@ function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; contex
       <header>
         <img src={morrowImage} alt="Morrow" />
         <div>
-          <span className="eyebrow">{context.date} · TODAY WITH YOUR AGENTS</span>
-          <h1>{ko ? `오늘 AI 세션 ${context.totalSessions}개를 작업하셨네요.` : `You worked ${context.totalSessions} AI sessions today.`}</h1>
-          <p>{ko ? "도구를 골라 오늘 세션을 살펴보고, 밤새 이어갈 작업을 고르세요. 정확한 계획을 먼저 보여드리고 승인 후에만 시작해요." : "Pick a tool to browse today's sessions, then choose one to continue overnight. I show the exact plan first and start only after you approve."}</p>
+          <span className="eyebrow">{context.date} · {ko ? "오늘의 AI 대화" : "TODAY'S AI CONVERSATIONS"}</span>
+          <h1>{ko ? `오늘 AI 대화 ${context.totalSessions}개를 불러왔어요.` : `I found ${context.totalSessions} AI conversations from today.`}</h1>
+          <p>{ko ? "AI 서비스를 골라 오늘 대화를 살펴보고, 밤새 이어갈 일을 고르세요. 결과와 확인 방법, 파일 범위를 먼저 보여드리고 승인 후에만 시작해요." : "Choose an AI service to browse today's conversations, then pick work to continue overnight. I show the outcome, verification, and file scope first and start only after you approve."}</p>
         </div>
       </header>
       <div className="provider-deck" role="tablist" aria-label={ko ? "오늘 사용한 도구" : "Tools used today"}>
-        <button type="button" role="tab" aria-selected={selectedProvider === "all"} className={selectedProvider === "all" ? "is-selected" : ""} onClick={() => setSelectedProvider("all")}>
+        <button type="button" role="tab" aria-selected={selectedProvider === "all"} className={selectedProvider === "all" ? "is-selected" : ""} onClick={() => transitionState(() => setSelectedProvider("all"))}>
           <strong>{ko ? "전체" : "All"}</strong>
           <em>{context.totalSessions}</em>
           <small />
@@ -238,7 +282,7 @@ function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; contex
         {providers.map(({ provider, sessions }) => {
           const latest = sessions.map((session) => session.updatedAt).filter(Boolean).sort().at(-1);
           return (
-            <button type="button" role="tab" aria-selected={selectedProvider === provider} key={provider} className={selectedProvider === provider ? "is-selected" : ""} onClick={() => setSelectedProvider(provider)}>
+            <button type="button" role="tab" aria-selected={selectedProvider === provider} key={provider} className={selectedProvider === provider ? "is-selected" : ""} onClick={() => transitionState(() => setSelectedProvider(provider))}>
               <strong>{briefingProviderLabels[provider]}</strong>
               <em>{sessions.length}</em>
               <small>{latest ? new Date(latest).toLocaleTimeString(ko ? "ko" : "en", { hour: "2-digit", minute: "2-digit" }) : ""}</small>
@@ -246,11 +290,7 @@ function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; contex
           );
         })}
       </div>
-      <div className="session-dashboard" role="tabpanel" aria-label={selectedProvider === "all" ? (ko ? "전체 세션" : "All sessions") : `${briefingProviderLabels[selectedProvider]} sessions`}>
-        <header>
-          <strong>{selectedProvider === "all" ? (ko ? "전체" : "All") : briefingProviderLabels[selectedProvider]}</strong>
-          <span>{ko ? `오늘 세션 ${visibleSessions.length}개` : `${visibleSessions.length} sessions today`}</span>
-        </header>
+      <div className="session-dashboard" role="tabpanel" aria-label={selectedProvider === "all" ? (ko ? "전체 대화" : "All conversations") : `${briefingProviderLabels[selectedProvider]} conversations`}>
         <div className="session-dashboard__grid">
           {visibleSessions.map((session) => (
             <article key={session.id}>
@@ -259,7 +299,6 @@ function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; contex
                 <small>
                   <span className="briefing-provider">{briefingProviderLabels[session.provider]}</span>
                   {session.updatedAt && <span>{new Date(session.updatedAt).toLocaleTimeString(ko ? "ko" : "en", { hour: "2-digit", minute: "2-digit" })}</span>}
-                  <span>{ko ? `발췌 ${session.excerptCount}개` : `${session.excerptCount} excerpts`}</span>
                 </small>
                 <p>{session.summary}</p>
               </div>
@@ -268,7 +307,7 @@ function FriendlyEmpty({ ko, context, onContinueSession }: { ko: boolean; contex
           ))}
         </div>
       </div>
-      <small className="briefing-footnote"><ShieldCheck size={12} />{ko ? "로컬 세션의 사용자·최종 응답만 읽어요. 그냥 대화를 시작해도 좋아요." : "Only user and final answers are read locally. You can also just start talking."}</small>
+      <small className="briefing-footnote"><ShieldCheck size={12} />{ko ? "각 AI 대화에서 사용자가 쓴 내용과 마지막 답변만 참고합니다. 그냥 대화를 시작해도 좋아요." : "Only what you wrote and the final answer from each AI conversation are used. You can also just start talking."}</small>
     </div>
   );
 }
@@ -283,7 +322,7 @@ function FriendlyError({ message, ko }: { message: string; ko: boolean }) {
           <span className="eyebrow">ONE NIGHT · ONE OWNER</span>
           <h2>{ko ? "Overnight 하나가 이미 실행 중이에요." : "One Overnight is already working."}</h2>
           <p>{message}</p>
-          <small>{ko ? "Orchestrate에서 진행 상황을 보거나 중지한 뒤 새 계획을 준비하세요." : "Open Orchestrate to watch it or stop it before preparing another."}</small>
+          <small>{ko ? "Overnight 관리 화면에서 진행 상황을 보거나 중지한 뒤 새 계획을 준비하세요." : "Open Orchestrate to watch it or stop it before preparing another."}</small>
         </div>
       </div>
     );

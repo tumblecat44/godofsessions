@@ -73,10 +73,12 @@ their source assets are redistributable.
   shell approval may remember only exact argument-free `pwd` or `git status`;
   in-root file-write approval may be remembered for one active
   conversation.
-- Overnight is the narrow exception for unattended execution: planning is
-  read-only, then one explicit approval freezes one executor, fixed root,
-  selected redacted briefs, outcome, and verification before the local worker
-  may mutate in-root files. The approval expires and cannot be reused.
+- Overnight is the narrow exception for unattended execution: planning and
+  portfolio editing are read-only, then one explicit approval freezes every
+  selected item, its verified provider route, fixed root and write scope,
+  selected redacted briefs, outcome, verification, schedule, and common
+  deadline before any local worker may mutate in-root files. The approval
+  expires and cannot be reused.
 - Daily local-session briefs stay process-memory-only. Do not persist or commit
   provider transcripts, private paths, or raw context excerpts as a secondary
   Morrow archive.

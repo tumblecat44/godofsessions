@@ -1,5 +1,12 @@
 # Morrow V2 product language
 
+**GitHub Identity**
+The required first-run identity for the packaged app. It uses GitHub OAuth
+Device Flow without requested scopes and exposes only the account ID, login
+name, and connection state to the UI. It does not grant repository, code,
+organization, or email access and is separate from model provider login.
+_Avoid_: GitHub repository connection, license activation, provider connection
+
 **Morrow**
 The conversation-first operator inside God of Sessions. Morrow normally talks,
 reasons, and helps like a general assistant. Tool availability does not make a
@@ -48,13 +55,45 @@ other command, root escape, and high-risk command is never rememberable.
 _Avoid_: permanent blanket access, hidden confirmation
 
 **Overnight**
-A bounded unattended continuation prepared by Morrow from the ephemeral brief
-of local AI sessions for one absolute calendar date. Preparing creates an inert,
-five-minute plan that shows selected sessions, outcome, verification, executor,
-and command preview. A new single-use “Run” approval starts one local
-non-interactive Codex or Claude worker in the fixed execution root. Runs and
-bounded interpreted results are visible under **Orchestrate**. The newest
-terminal run becomes the primary morning review across app restarts, retaining
-the approved outcome and verification beside the worker's final report. Raw
-provider streams and tool inputs are not durable evidence.
-_Avoid_: hidden start, reusable approval, provider-session dispatch, cloud queue
+A provider-neutral portfolio prepared by Morrow from memory-only, redacted
+briefs for every discovered local AI session on one absolute local calendar
+date. Its seven advertised routes are Codex, Claude Code, Grok Build, Cursor,
+Pi Agent, Hermes, and OpenClaw.
+
+Morrow returns every candidate as `recommend`, `clarify`, or `no_run` and keeps
+independent work as separate items. The user can include or exclude recommended
+items and choose a verified alternative provider. Editing never mutates an
+earlier approval authority: it creates a new exact plan, fingerprint, schedule,
+and expiry after dependencies, write conflicts, provider capacity, isolation,
+and the 450-minute night window are checked again. An empty or invalid
+portfolio cannot be approved.
+
+One exact, expiring, single-use approval freezes every selected item, provider,
+redacted session brief, outcome, verification, approved root and write scope,
+schedule, and absolute deadline. The scheduler runs independent isolated items
+in parallel and serializes shared roots, overlapping scopes, explicit
+conflicts, dependencies, and provider-capacity contention. Each provider worker
+is prohibited from spawning its own subagents.
+
+A route is `Ready` only when its local installation, authentication, and every
+OS containment and capability canary required by that route are verified. A
+missing or failed proof is `Setup` or `Blocked` with the reason visible in
+Orchestrate. A successful executable lookup, help command, or authentication
+probe alone is not execution readiness. Unsupported provider limitations stay
+visible and fail closed.
+
+The durable authority and run ledgers keep bounded, redacted approval metadata,
+fingerprints, status, and provider-native receipt identifiers. Raw transcripts,
+daily excerpts, complete worker prompts, provider streams, tool inputs, command
+text, and reasoning do not become durable orchestration records. Restart
+recovery preserves completed item receipts and never dispatches them again; it
+resumes or honestly terminates only unfinished items.
+
+Morning Review shows every item's provider, receipt, report, approved
+verification result, failure or skip, and remaining risk separately. A provider
+exit or final report cannot claim completion when verification is missing or
+failed. The legacy singular plan and run board remains readable only for stored
+history compatibility; all newly prepared work uses the portfolio path.
+_Avoid_: hidden start, reusable approval, single-worker product definition,
+provider readiness inferred from installation alone, provider-worker
+subagents, cloud queue

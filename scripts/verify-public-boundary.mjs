@@ -78,7 +78,7 @@ const PRIVATE_EXACT_PATHS = new Set([
 const INTERNAL_CREDENTIAL_BASELINES = new Map([
   [
     "docs/dogfood/knowledge/evidence-ledger.jsonl",
-    "5a542646f40403f6e6defa5deee73e8403b51c580a23b3642d7cfafa93655be1",
+    "5692532a0b9ab0e6e7cea9ba0ee5075c957104a2cb813f78560299daea6464d4",
   ],
 ]);
 

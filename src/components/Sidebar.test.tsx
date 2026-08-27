@@ -43,5 +43,31 @@ describe("V2 navigation", () => {
     render(<Sidebar view="chat" language="en" conversations={[]} {...noop} />);
 
     expect(screen.getByText("Your first conversation will settle here.")).toBeInTheDocument();
+    expect(screen.queryByText("FILE WORKING FOLDER")).not.toBeInTheDocument();
+  });
+
+  it("keeps a running or attention-needed Overnight visible outside its page", () => {
+    const { rerender } = render(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="running" activePortfolioItemCount={3} {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Orchestrate · 3 tasks active" })).toHaveTextContent("3 ACTIVE");
+    rerender(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="starting" activePortfolioItemCount={3} {...noop} />);
+    expect(screen.getByRole("button", { name: "Orchestrate · 3 tasks starting" })).toHaveTextContent("3 STARTING");
+    rerender(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="stopping" activePortfolioItemCount={2} {...noop} />);
+    expect(screen.getByRole("button", { name: "Orchestrate · 2 tasks stopping" })).toHaveTextContent("STOPPING");
+    rerender(<Sidebar view="settings" language="en" conversations={[]} overnightStatus="attention" {...noop} />);
+    expect(screen.getByRole("button", { name: "Orchestrate · attention needed" })).toHaveTextContent("! CHECK");
+  });
+
+  it("uses a generic portfolio status when the active item count is unavailable", () => {
+    render(<Sidebar view="chat" language="en" conversations={[]} overnightStatus="running" {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Orchestrate · work active" })).toHaveTextContent("ACTIVE");
+    expect(screen.queryByText("1 RUNNING")).not.toBeInTheDocument();
+  });
+
+  it("names the Korean destination as Overnight management instead of transliterated jargon", () => {
+    render(<Sidebar view="chat" language="ko" conversations={[]} overnightStatus="running" activePortfolioItemCount={4} {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Overnight 관리 · 작업 4개 진행 중" })).toHaveTextContent("4 ACTIVE");
   });
 });

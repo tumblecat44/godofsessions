@@ -46,8 +46,8 @@ try {
   await page.getByRole("button", { name: "Orchestrate" }).click();
 
   const firstGoal = "Keep exactly one Overnight owner for this fixed root";
-  await page.getByRole("textbox", { name: "One thing to finish tonight" }).fill(firstGoal);
-  await page.getByRole("button", { name: "Prepare plan only" }).click();
+  await page.getByRole("textbox", { name: "What matters tonight (optional)" }).fill(firstGoal);
+  await page.getByRole("button", { name: "Assess this goal" }).click();
   const plan = page.getByRole("article", { name: "Overnight plan to approve" });
   await plan.waitFor();
   await assertVisibleText(plan, [firstGoal, "Prove a second route cannot prepare or launch while this run is active"]);
@@ -91,8 +91,8 @@ try {
   await page.getByRole("button", { name: "Plan another night" }).click();
   await page.getByRole("heading", { name: "The outcome you want by morning" }).waitFor();
   const secondGoal = "Prepare the next Overnight only after the prior run is terminal";
-  await page.getByRole("textbox", { name: "One thing to finish tonight" }).fill(secondGoal);
-  await page.getByRole("button", { name: "Prepare plan only" }).click();
+  await page.getByRole("textbox", { name: "What matters tonight (optional)" }).fill(secondGoal);
+  await page.getByRole("button", { name: "Assess this goal" }).click();
   await plan.waitFor();
   await assertVisibleText(plan, [secondGoal, "Prove a second route cannot prepare or launch while this run is active"]);
   capture = await readCapture(app);
@@ -140,22 +140,26 @@ async function installServiceBackedIpc(electronApp, paths) {
         fixture.launches += 1;
         return 4242;
       },
+      inspectWorkerProcess: async () => "match",
     });
     fixture = { service, context, dataDir, availabilityChecks: 0, launches: 0, prepareAttempts: 0 };
     globalThis.__morrowOneActiveRunDogfood = fixture;
 
     const channels = [
-      "morrow:bootstrap", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
+      "github:state",
+      "morrow:bootstrap", "morrow:overnight-snapshot", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
       "morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval",
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
       "morrow:refresh-daily-context", "morrow:start-overnight", "morrow:stop-overnight", "morrow:open-external",
     ];
     for (const channel of channels) ipcMain.removeHandler(channel);
+    ipcMain.handle("github:state", () => ({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } }));
     const clone = (value) => JSON.parse(JSON.stringify(value));
     const current = () => globalThis.__morrowOneActiveRunDogfood;
     const conversation = { id: "one-active-run-conversation", title: "One active run dogfood", thinkingLevel: "medium", busy: false, messages: [] };
     const bootstrap = async () => ({
       rootName: "synthetic-one-active-run",
+      rootPath: "/synthetic/workspace",
       onboardingComplete: true,
       providers: [{ id: "synthetic-provider", name: "Synthetic model", connected: true, authTypes: ["oauth"], authLabel: "Synthetic only" }],
       models: [{ id: "synthetic-model", provider: "synthetic-provider", name: "Synthetic planner", reasoning: true }],
@@ -166,11 +170,12 @@ async function installServiceBackedIpc(electronApp, paths) {
       orchestration: clone(await current().service.snapshot(current().context)),
     });
     ipcMain.handle("morrow:bootstrap", bootstrap);
+    ipcMain.handle("morrow:overnight-snapshot", async () => clone(await current().service.snapshot(current().context)));
     ipcMain.handle("morrow:start-conversation", () => clone(conversation));
     ipcMain.handle("morrow:open-conversation", () => clone(conversation));
     ipcMain.handle("morrow:send-message", async (_event, input) => {
       current().prepareAttempts += 1;
-      const match = String(input.text).match(/Outcome: ([^\n]+)/);
+      const match = String(input.text).match(/User goal: ([^\n]+)/);
       await current().service.prepare({
         title: "One active fixed-root owner",
         outcome: match?.[1] ?? String(input.text),

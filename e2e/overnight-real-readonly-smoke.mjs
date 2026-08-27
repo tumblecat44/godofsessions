@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import electronPath from "electron";
 import { _electron as electron } from "@playwright/test";
+import { buildDailyContext } from "../electron/runtime/daily-context.ts";
 
 const root = process.cwd();
 const sandbox = await mkdtemp(join(tmpdir(), "morrow-real-readonly-"));
 const userData = join(sandbox, "user-data");
 const artifacts = join(sandbox, "private-artifacts");
 await Promise.all([mkdir(userData), mkdir(artifacts)]);
+const dailyContext = await buildDailyContext();
 
 const app = await electron.launch({
   executablePath: electronPath,
@@ -20,12 +22,11 @@ const app = await electron.launch({
 
 try {
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "English" }).click();
-  for (let step = 0; step < 3; step += 1) await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: /Enter the room|Look around without a model/ }).click();
+  await installReadOnlyIpc(app, dailyContext.summary);
+  await page.reload();
   await page.getByRole("button", { name: "Orchestrate" }).click();
 
-  const field = page.getByRole("textbox", { name: "One thing to finish tonight" });
+  const field = page.getByRole("textbox", { name: "What matters tonight (optional)" });
   await field.waitFor();
   const goal = "Verify the direct Overnight entry without preparing or running a plan";
   await field.fill(goal);
@@ -41,6 +42,28 @@ try {
   process.stdout.write(`Real-context Electron read-only smoke passed. Private artifacts: ${artifacts}\n`);
 } finally {
   await app.close();
+}
+
+async function installReadOnlyIpc(electronApp, context) {
+  await electronApp.evaluate(({ ipcMain }, snapshotContext) => {
+    const state = {
+      rootName: "real-context-readonly",
+      rootPath: "/synthetic/workspace",
+      onboardingComplete: true,
+      providers: [],
+      models: [],
+      conversations: [],
+      thinkingLevel: "medium",
+      language: "en",
+      orchestration: { context: snapshotContext, plans: [], runs: [] },
+    };
+    for (const channel of ["github:state", "morrow:bootstrap", "morrow:overnight-snapshot", "morrow:refresh-daily-context"]) ipcMain.removeHandler(channel);
+    const clone = (value) => JSON.parse(JSON.stringify(value));
+    ipcMain.handle("github:state", () => ({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } }));
+    ipcMain.handle("morrow:bootstrap", () => clone(state));
+    ipcMain.handle("morrow:overnight-snapshot", () => clone(state.orchestration));
+    ipcMain.handle("morrow:refresh-daily-context", () => clone(state.orchestration));
+  }, context);
 }
 
 function sanitizedEnvironment() {

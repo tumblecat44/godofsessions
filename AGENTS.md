@@ -9,9 +9,12 @@ God of Sessions V2 is an MIT-licensed, local-first Electron home for
 conversations with Morrow. Electron embeds the Pi Agent SDK directly. Morrow is
 conversation-first and uses file or command tools only when the user explicitly
 asks for work that needs them. The app has one fixed launch root and no project
-picker or subagents. Its bounded Overnight runtime freezes one exact plan and
-launches a local non-interactive Codex or Claude worker only after a fresh,
-single-use approval. It is not a cloud service.
+picker. Overnight is a provider-neutral portfolio across seven official local
+routes: Codex, Claude Code, Grok Build, Cursor, Pi Agent, Hermes, and OpenClaw.
+Morrow recommends work, the user edits the portfolio, and one exact single-use
+approval freezes its items before conflict- and capacity-aware scheduling.
+Morning Review preserves evidence for every item. Each provider worker is
+forbidden from spawning its own subagents. It is not a cloud service.
 
 ## Public/private decisions
 
@@ -36,15 +39,19 @@ single-use approval. It is not a cloud service.
 
 - Keep Pi SessionManager records authoritative for Morrow conversations.
 - Preserve a fail-closed approval boundary before file mutations and commands.
-- Overnight planning is read-only. Its one-time approval freezes the executor,
-  selected daily-session briefs, outcome, verification, and fixed root before a
-  detached local worker starts.
+- Overnight planning and portfolio editing are read-only. Its one-time approval
+  freezes every selected item, provider, daily-session brief, outcome,
+  verification, fixed root, schedule, and deadline before detached local
+  workers start.
 - Only exact argument-free `pwd` or `git status` may be remembered for the
   active conversation. In-root file-write
   approval may also be remembered.
 - Use official provider runtimes for authentication and execution.
-- Keep provider-specific limitations visible instead of presenting an
-  unsupported route as ready.
+- A route is Ready only after local installation, authentication, and every OS
+  containment and capability canary required by that route are verified.
+  Otherwise keep it Setup or Blocked with the reason visible.
+- Keep the legacy singular Overnight board only for stored-history
+  compatibility; new work uses the provider-neutral portfolio path.
 
 ## Working rules
 

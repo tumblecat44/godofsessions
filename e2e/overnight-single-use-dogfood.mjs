@@ -37,8 +37,8 @@ try {
   await page.getByRole("button", { name: "Orchestrate" }).click();
 
   const goal = "Consume this exact approval once under simultaneous Run requests";
-  await page.getByRole("textbox", { name: "One thing to finish tonight" }).fill(goal);
-  await page.getByRole("button", { name: "Prepare plan only" }).click();
+  await page.getByRole("textbox", { name: "What matters tonight (optional)" }).fill(goal);
+  await page.getByRole("button", { name: "Assess this goal" }).click();
   const plan = page.getByRole("article", { name: "Overnight plan to approve" });
   await plan.waitFor();
   await assertVisibleText(plan, [goal, "Verify that exactly one worker launch and one run ledger exist"]);
@@ -64,9 +64,12 @@ try {
   await page.reload();
   await page.getByRole("button", { name: "Orchestrate" }).click();
   await page.getByRole("heading", { name: "Overnight in progress" }).waitFor();
-  await page.getByText("starting", { exact: true }).waitFor();
-  assert.equal(await page.locator(".run-list article").count(), 1, "the reloaded UI must show one active run");
-  await page.getByRole("heading", { name: "Atomic single-use approval" }).waitFor();
+  await page.locator(".active-run-signal").getByText("Starting", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("article", { name: "Current Overnight worker" }).count(), 1, "the reloaded UI must show one active run");
+  const activeWorker = page.getByRole("article", { name: "Current Overnight worker" });
+  if (await activeWorker.getByText("Atomic single-use approval", { exact: true }).count() === 0) {
+    throw new Error(`Reloaded active worker lost the frozen title. Visible UI:\n${await activeWorker.innerText()}`);
+  }
   await page.screenshot({ path: join(artifacts, "02-one-active-run-after-reload.png"), fullPage: true });
 
   process.stdout.write(`Electron single-use dogfood passed. Synthetic artifacts: ${artifacts}\n`);
@@ -109,22 +112,26 @@ async function installServiceBackedIpc(electronApp, paths) {
         fixture.runIds.push(request.runId);
         return 4242;
       },
+      inspectWorkerProcess: async () => "match",
     });
     fixture = { service, context, startPhase: false, availabilityChecks: 0, launches: 0, runIds: [] };
     globalThis.__morrowSingleUseDogfood = fixture;
 
     const channels = [
-      "morrow:bootstrap", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
+      "github:state",
+      "morrow:bootstrap", "morrow:overnight-snapshot", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
       "morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval",
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
       "morrow:refresh-daily-context", "morrow:start-overnight", "morrow:stop-overnight", "morrow:open-external",
     ];
     for (const channel of channels) ipcMain.removeHandler(channel);
+    ipcMain.handle("github:state", () => ({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } }));
     const clone = (value) => JSON.parse(JSON.stringify(value));
     const current = () => globalThis.__morrowSingleUseDogfood;
     const conversation = { id: "single-use-conversation", title: "Single-use dogfood", thinkingLevel: "medium", busy: false, messages: [] };
     const bootstrap = async () => ({
       rootName: "synthetic-single-use",
+      rootPath: "/synthetic/workspace",
       onboardingComplete: true,
       providers: [{ id: "synthetic-provider", name: "Synthetic model", connected: true, authTypes: ["oauth"], authLabel: "Synthetic only" }],
       models: [{ id: "synthetic-model", provider: "synthetic-provider", name: "Synthetic planner", reasoning: true }],
@@ -135,10 +142,11 @@ async function installServiceBackedIpc(electronApp, paths) {
       orchestration: clone(await current().service.snapshot(current().context)),
     });
     ipcMain.handle("morrow:bootstrap", bootstrap);
+    ipcMain.handle("morrow:overnight-snapshot", async () => clone(await current().service.snapshot(current().context)));
     ipcMain.handle("morrow:start-conversation", () => clone(conversation));
     ipcMain.handle("morrow:open-conversation", () => clone(conversation));
     ipcMain.handle("morrow:send-message", async (_event, input) => {
-      const match = String(input.text).match(/Outcome: ([^\n]+)/);
+      const match = String(input.text).match(/User goal: ([^\n]+)/);
       const outcome = match?.[1] ?? "Consume one exact approval once";
       await current().service.prepare({
         title: "Atomic single-use approval",

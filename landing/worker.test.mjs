@@ -68,7 +68,7 @@ test("accepts only the documented anonymous app schema", () => {
       install_id: installId,
       app_version: "0.1.0",
       platform: "macos",
-      repository: "/Users/private/project",
+      repository: "/Users/example/project",
     }),
     null,
   );
