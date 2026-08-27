@@ -21,10 +21,15 @@ The V2 alpha includes:
 - `.agents/skills` discovery from the execution root and the user's home
 - readable approval cards for writes and shell commands
 - image-led onboarding and empty states
-- only two top-level destinations: **Ask Morrow** and **Settings**
+- an ephemeral brief of useful user/final-assistant text from local Claude,
+  Codex, Grok, Cursor, Pi, Hermes, and OpenClaw sessions for the current
+  absolute calendar date
+- exact, expiring Overnight plans and a local non-interactive Codex/Claude worker
+- three top-level destinations: **Ask Morrow**, **Orchestrate**, and **Settings**
 
-It deliberately excludes project selection, subagents, the old provider
-session inbox, Control Board, and actual Overnight execution.
+It deliberately excludes project selection, subagents, and the old provider
+session inbox and Control Board. The V2 Overnight path is intentionally smaller
+than V1: Morrow chooses bounded context, freezes one plan, and runs it once.
 
 ## Runtime and trust
 
@@ -40,6 +45,14 @@ Permission defaults:
 - shell commands: ask; only the exact argument-free `pwd` or `git status` may
   be remembered for the active conversation, while every other command asks again
 - writes outside the root and destructive/publish/deploy/push commands: ask every time
+
+Overnight planning does not read the repository or execute commands. It uses a
+memory-only, redacted brief of the current date's local session records; system
+instructions, tool output, internal reasoning, and credential stores are
+excluded. The Run button is a fresh single-use approval for the exact visible
+plan. Its detached worker is limited to the fixed root and records only bounded
+status/log output in app data; the private prompt request is deleted as soon as
+the worker reads it.
 
 ## Development
 

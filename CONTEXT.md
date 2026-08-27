@@ -48,6 +48,10 @@ other command, root escape, and high-risk command is never rememberable.
 _Avoid_: permanent blanket access, hidden confirmation
 
 **Overnight**
-A V1 concept retained only as historical documentation. Actual Overnight
-execution and its navigation are outside the V2 alpha.
-_Avoid_: implying the current chat runs unattended
+A bounded unattended continuation prepared by Morrow from the ephemeral brief
+of local AI sessions for one absolute calendar date. Preparing creates an inert,
+five-minute plan that shows selected sessions, outcome, verification, executor,
+and command preview. A new single-use “Run” approval starts one local
+non-interactive Codex or Claude worker in the fixed execution root. Runs and
+bounded logs are visible under **Orchestrate**.
+_Avoid_: hidden start, reusable approval, provider-session dispatch, cloud queue

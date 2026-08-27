@@ -9,7 +9,9 @@ God of Sessions V2 is an MIT-licensed, local-first Electron home for
 conversations with Morrow. Electron embeds the Pi Agent SDK directly. Morrow is
 conversation-first and uses file or command tools only when the user explicitly
 asks for work that needs them. The app has one fixed launch root and no project
-picker, subagents, or active Overnight runtime. It is not a cloud service.
+picker or subagents. Its bounded Overnight runtime freezes one exact plan and
+launches a local non-interactive Codex or Claude worker only after a fresh,
+single-use approval. It is not a cloud service.
 
 ## Public/private decisions
 
@@ -34,6 +36,9 @@ picker, subagents, or active Overnight runtime. It is not a cloud service.
 
 - Keep Pi SessionManager records authoritative for Morrow conversations.
 - Preserve a fail-closed approval boundary before file mutations and commands.
+- Overnight planning is read-only. Its one-time approval freezes the executor,
+  selected daily-session briefs, outcome, verification, and fixed root before a
+  detached local worker starts.
 - Only exact argument-free `pwd` or `git status` may be remembered for the
   active conversation. In-root file-write
   approval may also be remembered.

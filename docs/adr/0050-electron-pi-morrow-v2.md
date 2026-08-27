@@ -26,7 +26,8 @@ directories. Pi extensions, prompt templates, and themes are disabled.
 
 - No Pi CLI, Pi RPC mode, local Pi server, Hermes gateway, or provider CLI is
   required by the active application.
-- V1's session inbox, Control Board, and Overnight runtime are removed.
+- V1's session inbox and Control Board are removed. The original removal of the
+  Overnight runtime is amended by ADR 0051's smaller, bounded local continuation.
 - Read-only tools run automatically. Writes and shell commands cross an app-owned
   approval boundary before Pi executes them. A session may remember in-root
   file-write approval or exact argument-free `pwd` or `git status`; all

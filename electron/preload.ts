@@ -14,6 +14,9 @@ const bridge: MorrowBridge & { openExternal(url: string): Promise<void> } = {
   answerAuthPrompt: (input) => ipcRenderer.invoke("morrow:answer-auth", input),
   disconnectProvider: (providerId) => ipcRenderer.invoke("morrow:disconnect-provider", providerId),
   finishOnboarding: (input) => ipcRenderer.invoke("morrow:finish-onboarding", input),
+  refreshDailyContext: () => ipcRenderer.invoke("morrow:refresh-daily-context"),
+  startOvernight: (planId) => ipcRenderer.invoke("morrow:start-overnight", planId),
+  stopOvernight: (runId) => ipcRenderer.invoke("morrow:stop-overnight", runId),
   openExternal: (url) => ipcRenderer.invoke("morrow:open-external", url),
   onEvent: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: MorrowEvent) => listener(payload);

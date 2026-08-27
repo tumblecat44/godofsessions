@@ -5,6 +5,7 @@ import { Onboarding } from "./components/Onboarding";
 import { OperatorMark } from "./components/OperatorMark";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
+import { OrchestrateView } from "./components/OrchestrateView";
 import { getMorrowBridge } from "./lib/bridge";
 import type {
   AppLanguage,
@@ -31,6 +32,8 @@ function App() {
   const [providerError, setProviderError] = useState<string>();
   const [replayOnboarding, setReplayOnboarding] = useState(false);
   const [draft, setDraft] = useState("");
+  const [orchestrateRefreshing, setOrchestrateRefreshing] = useState(false);
+  const [orchestrateError, setOrchestrateError] = useState<string>();
   const conversationRef = useRef<ConversationDetail | undefined>(undefined);
 
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
@@ -65,6 +68,14 @@ function App() {
     if (event.type === "error") event.sessionId ? setChatError(event.message) : setStartupError(event.message);
   }), []);
 
+  useEffect(() => {
+    if (view !== "orchestrate" || !state?.orchestration.runs.some((run) => ["starting", "running", "unknown", "stopping"].includes(run.status))) return;
+    const timer = window.setInterval(() => {
+      void bridge.bootstrap().then((next) => setState((current) => current ? { ...current, orchestration: next.orchestration } : next)).catch(() => undefined);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [view, state?.orchestration.runs]);
+
   if (!state) {
     return (
       <main className="startup-state">
@@ -81,6 +92,19 @@ function App() {
     setState((current) => current ? { ...current, onboardingComplete: true, language } : current);
     setReplayOnboarding(false);
     setView("chat");
+  };
+
+  const startOvernight = async (planId: string) => {
+    const run = await bridge.startOvernight(planId);
+    setState((current) => current ? {
+      ...current,
+      orchestration: {
+        ...current.orchestration,
+        plans: current.orchestration.plans.map((plan) => plan.id === planId ? { ...plan, status: "started" } : plan),
+        runs: [run, ...current.orchestration.runs.filter((item) => item.id !== run.id)],
+      },
+    } : current);
+    setView("orchestrate");
   };
 
   const authSurfaces = (
@@ -174,6 +198,32 @@ function App() {
             setState((current) => current ? { ...current, thinkingLevel: level } : current);
           }}
           onOpenSettings={() => setView("settings")}
+          onStartOvernight={startOvernight}
+        />
+      ) : view === "orchestrate" ? (
+        <OrchestrateView
+          language={state.language}
+          snapshot={state.orchestration}
+          refreshing={orchestrateRefreshing}
+          error={orchestrateError}
+          onRefresh={async () => {
+            setOrchestrateRefreshing(true);
+            setOrchestrateError(undefined);
+            try {
+              const orchestration = await bridge.refreshDailyContext();
+              setState((current) => current ? { ...current, orchestration } : current);
+            } catch (reason) {
+              setOrchestrateError(reason instanceof Error ? reason.message : String(reason));
+            } finally {
+              setOrchestrateRefreshing(false);
+            }
+          }}
+          onStart={startOvernight}
+          onStop={async (runId) => {
+            await bridge.stopOvernight(runId);
+            const next = await bridge.bootstrap();
+            setState((current) => current ? { ...current, orchestration: next.orchestration } : next);
+          }}
         />
       ) : (
         <SettingsView

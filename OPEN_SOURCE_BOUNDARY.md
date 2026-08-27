@@ -73,6 +73,13 @@ their source assets are redistributable.
   shell approval may remember only exact argument-free `pwd` or `git status`;
   in-root file-write approval may be remembered for one active
   conversation.
+- Overnight is the narrow exception for unattended execution: planning is
+  read-only, then one explicit approval freezes one executor, fixed root,
+  selected redacted briefs, outcome, and verification before the local worker
+  may mutate in-root files. The approval expires and cannot be reused.
+- Daily local-session briefs stay process-memory-only. Do not persist or commit
+  provider transcripts, private paths, or raw context excerpts as a secondary
+  Morrow archive.
 - Tests must use synthetic data unless a test is explicitly local-only and
   ignored by default.
 

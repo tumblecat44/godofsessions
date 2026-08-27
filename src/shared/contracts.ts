@@ -1,6 +1,66 @@
-export type AppView = "chat" | "settings";
+export type AppView = "chat" | "orchestrate" | "settings";
 export type AppLanguage = "ko" | "en";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type LocalSessionProvider = "grok" | "claude" | "codex" | "cursor" | "pi" | "hermes" | "openclaw";
+export type OvernightExecutor = "codex" | "claude";
+
+export interface DailySessionSummary {
+  id: string;
+  provider: LocalSessionProvider;
+  title: string;
+  workspace?: string;
+  updatedAt?: string;
+  summary: string;
+  excerptCount: number;
+}
+
+export interface DailyContextSummary {
+  date: string;
+  timeZone: string;
+  generatedAt: string;
+  totalSessions: number;
+  providerCounts: Partial<Record<LocalSessionProvider, number>>;
+  sessions: DailySessionSummary[];
+  warnings: string[];
+  methodology: string;
+}
+
+export interface OvernightPlanSummary {
+  id: string;
+  status: "draft" | "starting" | "started" | "expired";
+  title: string;
+  outcome: string;
+  verification: string;
+  executor: OvernightExecutor;
+  executorLabel: string;
+  commandPreview: string;
+  selectedSessions: DailySessionSummary[];
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface OvernightRunSummary {
+  id: string;
+  planId: string;
+  title: string;
+  executor: OvernightExecutor;
+  executorLabel: string;
+  status: "starting" | "running" | "completed" | "failed" | "stopping" | "stopped" | "unknown";
+  selectedSessions: DailySessionSummary[];
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  workerPid?: number;
+  exitCode?: number;
+  error?: string;
+  logTail: string[];
+}
+
+export interface OrchestrationSnapshot {
+  context: DailyContextSummary;
+  plans: OvernightPlanSummary[];
+  runs: OvernightRunSummary[];
+}
 
 export interface ProviderSummary {
   id: string;
@@ -27,10 +87,12 @@ export interface ConversationSummary {
 }
 
 export interface TranscriptPart {
-  type: "text" | "thinking" | "tool";
+  type: "text" | "thinking" | "tool" | "overnight-plan" | "overnight-run";
   text: string;
   toolName?: string;
   state?: "running" | "done" | "error";
+  overnightPlanId?: string;
+  overnightRunId?: string;
 }
 
 export interface TranscriptMessage {
@@ -59,6 +121,7 @@ export interface BootstrapState {
   selectedModel?: { provider: string; id: string };
   thinkingLevel: ThinkingLevel;
   language: AppLanguage;
+  orchestration: OrchestrationSnapshot;
 }
 
 export interface ApprovalRequest {
@@ -101,6 +164,9 @@ export interface MorrowBridge {
   answerAuthPrompt(input: { id: string; value?: string; cancelled?: boolean }): Promise<void>;
   disconnectProvider(providerId: string): Promise<void>;
   finishOnboarding(input: { language: AppLanguage }): Promise<void>;
+  refreshDailyContext(): Promise<OrchestrationSnapshot>;
+  startOvernight(planId: string): Promise<OvernightRunSummary>;
+  stopOvernight(runId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   onEvent(listener: (event: MorrowEvent) => void): () => void;
 }

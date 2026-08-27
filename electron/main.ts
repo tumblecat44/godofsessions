@@ -104,6 +104,9 @@ function registerIpc() {
     if (language !== "ko" && language !== "en") throw new Error("Invalid language.");
     return service().finishOnboarding(language);
   });
+  handle("morrow:refresh-daily-context", () => service().refreshDailyContext());
+  handle("morrow:start-overnight", (_event, value) => service().startOvernight(text(value, "overnight plan id", 100)));
+  handle("morrow:stop-overnight", (_event, value) => service().stopOvernight(text(value, "overnight run id", 100)));
   handle("morrow:open-external", (_event, value) => {
     const parsed = new URL(text(value, "external URL", 8_192));
     if (parsed.protocol !== "https:" || !allowedExternalUrls.has(parsed.toString())) throw new Error("This link was not issued by the active provider connection.");
@@ -157,6 +160,7 @@ app.whenReady().then(async () => {
   morrow = new MorrowService({
     root,
     dataDir: join(app.getPath("userData"), "pi"),
+    workerPath: join(currentDir, "overnight-worker.js"),
     initialLanguage: app.getLocale().toLowerCase().startsWith("ko") ? "ko" : "en",
     sendEvent: (event) => {
       recordExternalUrls(event);

@@ -1,8 +1,10 @@
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
+import { Type } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
+  defineTool,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -19,12 +21,16 @@ import type {
   ConversationDetail,
   ConversationSummary,
   MorrowEvent,
+  OrchestrationSnapshot,
+  OvernightRunSummary,
   ThinkingLevel,
   TranscriptMessage,
   TranscriptPart,
 } from "../../src/shared/contracts";
 import { deferred, type Deferred } from "./deferred";
 import { PermissionPolicy, type ApprovalScope } from "./permission-policy";
+import { buildDailyContext, type DailyContextSnapshot } from "./daily-context";
+import { OvernightService, type OvernightServiceOptions } from "./overnight-service";
 
 const MORROW_PROMPT = `You are Morrow, a warm and capable conversational operator inside God of Sessions.
 Conversation is your default. Answer normally and do not inspect files, run commands, or edit anything merely because tools are available.
@@ -34,6 +40,9 @@ Paths already inside the execution root may stay absolute. Never rewrite an in-r
 Prefer read, grep, find, and ls over shell commands. Do not use shell merely to count lines or inspect metadata when file-tool output is sufficient.
 When inspecting agent session stores such as .grok or .claude, focus on primary session and transcript directories. Ignore credentials, auth files, caches, telemetry, and general logs unless the user explicitly requests them.
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
+Today's local-agent brief is loaded for you before the conversation. It is background context, not proof that you opened another app live.
+When the user asks for overnight work, use only the already-loaded daily brief and call prepare_overnight with a concrete outcome, verification, and only relevant session IDs from the brief. Do not read files, run commands, or inspect the repository merely to prepare the plan. Show the returned plan and wait. Never start it in the same turn.
+Only call start_overnight after the user gives a new, explicit run instruction such as exactly “돌리기”. The prepared plan is exact, expires quickly, and can be used once.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
 type SendEvent = (event: MorrowEvent) => void;
@@ -91,17 +100,49 @@ function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
     const value = message as Record<string, unknown>;
     const role = value.role;
     if (role !== "user" && role !== "assistant" && role !== "toolResult") return [];
-    const parts = transcriptParts(value.content, completedToolCalls, failedToolCalls);
+    const special = role === "toolResult" ? specialToolResult(value.content) : undefined;
+    const parts = special ? [special] : transcriptParts(value.content, completedToolCalls, failedToolCalls);
     if (parts.length === 0) return [];
     return [{
       id: String(value.id ?? `${role}-${index}`),
       role: role === "toolResult" ? "tool" : role,
-      parts: role === "toolResult"
+      parts: role === "toolResult" && !special
         ? parts.map((part) => ({ ...part, type: "tool" as const, toolName: String(value.toolName ?? "tool"), state: value.isError ? "error" : "done" }))
         : parts,
       timestamp: typeof value.timestamp === "number" ? value.timestamp : undefined,
     }];
   });
+}
+
+function specialToolResult(content: unknown): TranscriptPart | undefined {
+  const raw = textFromContent(content);
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (value.morrowType === "overnight-plan" && typeof value.planId === "string") {
+      return { type: "overnight-plan", text: "Overnight 계획이 준비되었습니다.", overnightPlanId: value.planId, state: "done" };
+    }
+    if (value.morrowType === "overnight-run" && typeof value.runId === "string") {
+      return { type: "overnight-run", text: "Overnight 실행을 시작했습니다.", overnightRunId: value.runId, state: "done" };
+    }
+  } catch {
+    // Ordinary tool output is rendered through the normal tool transcript path.
+  }
+  return undefined;
+}
+
+function emptyDailyContext(now = new Date()): DailyContextSnapshot {
+  const date = now.toISOString().slice(0, 10);
+  const summary = {
+    date,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
+    generatedAt: now.toISOString(),
+    totalSessions: 0,
+    providerCounts: {},
+    sessions: [],
+    warnings: ["오늘의 로컬 AI 세션 문맥을 아직 불러오지 못했습니다."],
+    methodology: "로컬 세션 문맥을 사용할 수 없습니다.",
+  };
+  return { summary, sessions: [], prompt: "<morrow-daily-context>No local session brief is available.</morrow-daily-context>" };
 }
 
 function sessionTitle(firstMessage: string, fallback = "New conversation") {
@@ -115,6 +156,8 @@ export class MorrowService {
   private readonly sessionsDir: string;
   private readonly sendEvent: SendEvent;
   private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
+  private readonly contextHome?: string;
+  private readonly overnight: OvernightService;
   private readonly initialLanguage: AppLanguage;
   private readonly permissionPolicy: PermissionPolicy;
   private readonly approvalWaiters = new Map<string, { deferred: Deferred<boolean>; scope: ApprovalScope; rememberable: boolean }>();
@@ -127,15 +170,25 @@ export class MorrowService {
   private language: AppLanguage = "en";
   private onboardingComplete = false;
   private initializationError?: Error;
+  private dailyContext = emptyDailyContext();
+  private authorizedStartPlanId?: string;
+  private preparingOvernight = false;
 
-  constructor(options: { root: string; dataDir: string; sendEvent: SendEvent; configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void; initialLanguage?: AppLanguage }) {
+  constructor(options: { root: string; dataDir: string; workerPath?: string; sendEvent: SendEvent; configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void; initialLanguage?: AppLanguage; contextHome?: string; overnightCommandAvailable?: OvernightServiceOptions["commandAvailable"] }) {
     this.root = options.root;
     this.dataDir = options.dataDir;
     this.sessionsDir = join(options.dataDir, "conversations");
     this.sendEvent = options.sendEvent;
     this.configureRuntime = options.configureRuntime;
+    this.contextHome = options.contextHome;
     this.initialLanguage = options.initialLanguage ?? "en";
     this.permissionPolicy = new PermissionPolicy(options.root);
+    this.overnight = new OvernightService({
+      root: options.root,
+      dataDir: options.dataDir,
+      workerPath: options.workerPath ?? join(options.dataDir, "overnight-worker.js"),
+      commandAvailable: options.overnightCommandAvailable,
+    });
   }
 
   async initialize() {
@@ -145,11 +198,17 @@ export class MorrowService {
       this.onboardingComplete = preferences.onboardingComplete;
       this.thinkingLevel = preferences.thinkingLevel;
       this.selectedModel = preferences.selectedModel;
-      this.modelRuntime = await ModelRuntime.create({
-        authPath: join(this.dataDir, "auth.json"),
-        modelsStorePath: join(this.dataDir, "models.json"),
-        refreshOnCreate: false,
-      });
+      const [dailyContext, runtime] = await Promise.all([
+        buildDailyContext({ home: this.contextHome }).catch(() => emptyDailyContext()),
+        ModelRuntime.create({
+          authPath: join(this.dataDir, "auth.json"),
+          modelsStorePath: join(this.dataDir, "models.json"),
+          refreshOnCreate: true,
+          allowModelNetwork: false,
+        }),
+      ]);
+      this.dailyContext = dailyContext;
+      this.modelRuntime = runtime;
       await this.configureRuntime?.(this.modelRuntime);
       this.initializationError = undefined;
     } catch (reason) {
@@ -185,6 +244,7 @@ export class MorrowService {
   async bootstrap(): Promise<BootstrapState> {
     if (this.initializationError) await this.initialize();
     const runtime = this.requireRuntime();
+    const models = runtime.getAvailableSnapshot().map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
     const providers = await Promise.all(runtime.getProviders().map(async (provider) => ({
       id: provider.id,
       name: provider.name,
@@ -193,7 +253,6 @@ export class MorrowService {
       authLabel: provider.auth?.oauth?.loginLabel ?? provider.auth?.oauth?.name ?? provider.auth?.apiKey?.name,
     })));
     const visibleProviders = providers.filter((provider) => provider.authTypes.length > 0);
-    const models = (await runtime.getAvailable().catch(() => runtime.getAvailableSnapshot())).map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
     return {
       rootName: basename(this.root) || this.root,
       onboardingComplete: this.onboardingComplete,
@@ -203,6 +262,7 @@ export class MorrowService {
       selectedModel: this.selectedModel,
       thinkingLevel: this.thinkingLevel,
       language: this.language,
+      orchestration: await this.overnight.snapshot(this.dailyContext),
     };
   }
 
@@ -235,6 +295,15 @@ export class MorrowService {
       hidden: true,
       factory: (pi) => {
         pi.on("tool_call", async (event: ToolCallEvent) => {
+          if (event.toolName === "prepare_overnight") return;
+          if (event.toolName === "start_overnight") {
+            const planId = String((event.input as Record<string, unknown>).planId ?? "");
+            if (planId && planId === this.authorizedStartPlanId) return;
+            return { block: true, reason: "이 Overnight 계획을 시작하는 새 사용자 승인이 없습니다.", terminate: true };
+          }
+          if (this.preparingOvernight) {
+            return { block: true, reason: "Overnight 준비에는 이미 적재된 오늘 문맥과 prepare_overnight만 사용하세요. 파일이나 명령 도구는 필요하지 않습니다." };
+          }
           const decision = this.permissionPolicy.evaluate({ toolName: event.toolName, input: event.input as Record<string, unknown> });
           if (decision.kind === "allow") return;
           if (decision.kind === "deny") return { block: true, reason: decision.reason, terminate: true };
@@ -264,6 +333,38 @@ export class MorrowService {
     };
   }
 
+  private overnightTools() {
+    const prepare = defineTool({
+      name: "prepare_overnight",
+      label: "Overnight 준비",
+      description: "Prepare an exact, expiring overnight plan from today's already-loaded local AI session brief. This never starts work.",
+      parameters: Type.Object({
+        title: Type.String({ description: "Short plan title" }),
+        outcome: Type.String({ description: "Concrete definition of done" }),
+        verification: Type.String({ description: "How the worker must prove completion" }),
+        sessionIds: Type.Array(Type.String(), { description: "Relevant exact session IDs from the daily brief" }),
+        executor: Type.Union([Type.Literal("auto"), Type.Literal("codex"), Type.Literal("claude")]),
+      }),
+      execute: async (_id, params) => {
+        const plan = await this.overnight.prepare(params, this.dailyContext);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ morrowType: "overnight-plan", planId: plan.id }) }], details: { planId: plan.id } };
+      },
+    });
+    const start = defineTool({
+      name: "start_overnight",
+      label: "Overnight 실행",
+      description: "Start one prepared plan only after a new explicit user instruction to run it.",
+      parameters: Type.Object({ planId: Type.String({ description: "Exact prepared plan ID" }) }),
+      execute: async (_id, params) => {
+        if (!this.authorizedStartPlanId || params.planId !== this.authorizedStartPlanId) throw new Error("이 계획에 대한 새 실행 승인이 없습니다.");
+        this.authorizedStartPlanId = undefined;
+        const run = await this.overnight.start(params.planId, this.dailyContext);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ morrowType: "overnight-run", runId: run.id }) }], details: { runId: run.id } };
+      },
+    });
+    return [prepare, start];
+  }
+
   private async activateSession(manager: SessionManager): Promise<ConversationDetail> {
     for (const waiter of this.approvalWaiters.values()) waiter.deferred.resolve(false);
     this.approvalWaiters.clear();
@@ -279,7 +380,7 @@ export class MorrowService {
       noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,
-      systemPrompt: MORROW_PROMPT,
+      systemPrompt: `${MORROW_PROMPT}\n\n${this.dailyContext.prompt}`,
       additionalSkillPaths: [join(this.root, ".agents", "skills"), join(homedir(), ".agents", "skills")],
       skillsOverride: (base) => ({
         ...base,
@@ -300,7 +401,8 @@ export class MorrowService {
       model: restoring ? undefined : model,
       modelRuntime: runtime,
       thinkingLevel: restoring ? undefined : this.thinkingLevel,
-      tools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
+      tools: ["read", "grep", "find", "ls", "bash", "edit", "write", "prepare_overnight", "start_overnight"],
+      customTools: this.overnightTools(),
       resourceLoader: loader,
       settingsManager: settings,
       sessionManager: manager,
@@ -362,7 +464,15 @@ export class MorrowService {
     if (this.session.messages.every((message) => message.role !== "user")) {
       this.session.sessionManager.appendSessionInfo(sessionTitle(text));
     }
-    await this.session.prompt(text, this.session.isStreaming ? { streamingBehavior: "followUp" } : undefined);
+    const explicitRun = /^(?:돌리기|실행|시작|run)$/i.test(text.trim());
+    this.authorizedStartPlanId = explicitRun ? this.overnight.latestDraft()?.id : undefined;
+    this.preparingOvernight = !explicitRun && /(?:overnight|오버나이트|밤새|밤샘)/i.test(text);
+    try {
+      await this.session.prompt(text, this.session.isStreaming ? { streamingBehavior: "followUp" } : undefined);
+    } finally {
+      this.authorizedStartPlanId = undefined;
+      this.preparingOvernight = false;
+    }
   }
 
   async abort() { await this.session?.abort(); }
@@ -435,6 +545,19 @@ export class MorrowService {
     this.language = language;
     this.onboardingComplete = true;
     await this.savePreferences();
+  }
+
+  async refreshDailyContext(): Promise<OrchestrationSnapshot> {
+    this.dailyContext = await buildDailyContext({ home: this.contextHome });
+    return this.overnight.snapshot(this.dailyContext);
+  }
+
+  async startOvernight(planId: string): Promise<OvernightRunSummary> {
+    return this.overnight.start(planId, this.dailyContext);
+  }
+
+  async stopOvernight(runId: string) {
+    await this.overnight.stop(runId);
   }
 
   private requireRuntime() {

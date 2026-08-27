@@ -19,6 +19,7 @@ describe("Morrow provider onboarding", () => {
       conversations: [],
       thinkingLevel: "medium",
       language: "en",
+      orchestration: { context: { date: "2026-08-13", timeZone: "UTC", generatedAt: "2026-08-13T12:00:00.000Z", totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "test" }, plans: [], runs: [] },
     };
     const listeners = new Set<(event: MorrowEvent) => void>();
     let finishConnection!: () => void;
@@ -50,6 +51,9 @@ describe("Morrow provider onboarding", () => {
       answerAuthPrompt: vi.fn(),
       disconnectProvider: vi.fn(),
       finishOnboarding: vi.fn(),
+      refreshDailyContext: vi.fn(),
+      startOvernight: vi.fn(),
+      stopOvernight: vi.fn(),
       openExternal: vi.fn(),
       onEvent: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     };

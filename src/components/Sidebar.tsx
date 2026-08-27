@@ -1,4 +1,4 @@
-import { LockKeyhole, MessageCircle, Settings } from "lucide-react";
+import { Layers3, LockKeyhole, MessageCircle, Settings } from "lucide-react";
 import type { AppLanguage, AppView } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
 
@@ -13,6 +13,9 @@ export function Sidebar({ view, language, onChange }: { view: AppView; language:
       <nav className="workspace-nav" aria-label={ko ? "화면" : "Workspace"}>
         <button className={view === "chat" ? "is-selected" : ""} type="button" onClick={() => onChange("chat")}>
           <MessageCircle size={16} /><span>{ko ? "Morrow에게 묻기" : "Ask Morrow"}</span>
+        </button>
+        <button className={view === "orchestrate" ? "is-selected" : ""} type="button" onClick={() => onChange("orchestrate")}>
+          <Layers3 size={16} /><span>{ko ? "오케스트레이트" : "Orchestrate"}</span>
         </button>
         <button className={view === "settings" ? "is-selected" : ""} type="button" onClick={() => onChange("settings")}>
           <Settings size={16} /><span>{ko ? "설정" : "Settings"}</span>

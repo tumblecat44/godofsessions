@@ -30,11 +30,13 @@ describe("Morrow service dogfood", () => {
       const last = lastMessage(context);
       const text = messageText(last);
       if (last?.role === "toolResult") {
+        if (last.toolName === "prepare_overnight") return fauxAssistantMessage("실행하지 않고 정확한 Overnight 계획만 준비했어요.");
         if (last.toolName === "read") return fauxAssistantMessage("README 제목은 ‘Dogfood Room’이에요.");
         if (last.toolName === "write" && last.isError) return fauxAssistantMessage("승인하지 않은 변경은 하지 않았어요.");
         if (last.toolName === "write") return fauxAssistantMessage("요청한 내용을 notes.txt에 저장했어요.");
       }
       if (text.includes("README")) return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" });
+      if (text.includes("Overnight")) return fauxAssistantMessage(fauxToolCall("prepare_overnight", { title: "밤 점검", outcome: "모든 테스트가 통과한다", verification: "npm test 결과를 확인한다", sessionIds: [], executor: "auto" }), { stopReason: "toolUse" });
       if (text.includes("거절할 파일")) return fauxAssistantMessage(fauxToolCall("write", { path: "rejected.txt", content: "should not exist" }), { stopReason: "toolUse" });
       if (text.includes("두 파일")) return fauxAssistantMessage([
         fauxToolCall("write", { path: "first.txt", content: "first" }),
@@ -51,6 +53,8 @@ describe("Morrow service dogfood", () => {
     service = new MorrowService({
       root,
       dataDir,
+      contextHome: base,
+      overnightCommandAvailable: async () => true,
       initialLanguage: "ko",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
@@ -100,6 +104,10 @@ describe("Morrow service dogfood", () => {
     expect(rejectedTranscript).toContain('"state":"error"');
     await expect(readFile(join(root, "rejected.txt"), "utf8")).rejects.toThrow();
 
+    await service.sendMessage("Overnight를 준비해줘. 실행은 하지 마.");
+    expect(JSON.stringify(service.currentConversation().messages)).toContain("overnight-plan");
+    expect((await service.bootstrap()).orchestration.plans).toHaveLength(1);
+
     await service.setThinkingLevel("high");
     const saved = service.currentConversation();
     expect(saved.thinkingLevel).toBe("high");
@@ -111,6 +119,7 @@ describe("Morrow service dogfood", () => {
     const resumed = new MorrowService({
       root,
       dataDir,
+      contextHome: base,
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(resumeFaux.provider);
         await runtime.setRuntimeApiKey("morrow-dogfood", "test-only");
@@ -125,5 +134,6 @@ describe("Morrow service dogfood", () => {
     expect(restored.thinkingLevel).toBe("high");
     expect(restored.model).toMatchObject({ provider: "morrow-dogfood" });
     expect(resumeEvents.some((event) => event.type === "notice")).toBe(false);
+
   });
 });

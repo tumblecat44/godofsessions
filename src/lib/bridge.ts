@@ -37,6 +37,11 @@ const demoState: BootstrapState = {
     { id: "preview", path: "preview", title: demoConversation.title, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messageCount: 2 },
     { id: "second", path: "second", title: "A gentle launch checklist", createdAt: new Date().toISOString(), updatedAt: new Date(Date.now() - 86400000).toISOString(), messageCount: 6 },
   ],
+  orchestration: {
+    context: { date: new Date().toISOString().slice(0, 10), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, generatedAt: new Date().toISOString(), totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "Preview context" },
+    plans: [],
+    runs: [],
+  },
 };
 
 function previewBridge(): MorrowBridge {
@@ -54,6 +59,9 @@ function previewBridge(): MorrowBridge {
     answerAuthPrompt: async () => undefined,
     disconnectProvider: async () => undefined,
     finishOnboarding: async () => undefined,
+    refreshDailyContext: async () => demoState.orchestration,
+    startOvernight: async () => { throw new Error("Overnight runs are only available in the desktop app."); },
+    stopOvernight: async () => undefined,
     openExternal: async (url) => { window.open(url, "_blank", "noopener"); },
     onEvent: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
   };

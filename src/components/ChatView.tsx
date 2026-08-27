@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, Clock3, FilePenLine, Plus, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.png";
-import type { ApprovalRequest, BootstrapState, ConversationDetail, ThinkingLevel } from "../shared/contracts";
+import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightPlanSummary, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
 
 interface ChatViewProps {
@@ -20,6 +20,7 @@ interface ChatViewProps {
   onModel(provider: string, modelId: string): Promise<void>;
   onThinking(level: ThinkingLevel): Promise<void>;
   onOpenSettings(): void;
+  onStartOvernight(planId: string): Promise<void>;
 }
 
 export function ChatView(props: ChatViewProps) {
@@ -80,9 +81,15 @@ export function ChatView(props: ChatViewProps) {
           {props.notice && <div className="chat-notice" role="status"><Sparkles size={15} /><span>{props.notice}</span></div>}
           {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} /> : props.conversation.messages.map((message) => (
             <article className={`morrow-message morrow-message--${message.role}`} key={message.id}>
-              <span className="message-author">{message.role === "user" ? (ko ? "나" : "YOU") : message.role === "assistant" ? "MORROW" : "TOOL"}</span>
+              {message.role === "assistant" ? (
+                <div className="message-avatar"><img src={morrowImage} alt="Morrow" /><span>MORROW</span></div>
+              ) : <span className="message-author">{message.role === "user" ? (ko ? "나" : "YOU") : "TOOL"}</span>}
               <div className="message-body">
-                {message.parts.map((part, index) => part.type === "tool" ? (
+                {message.parts.map((part, index) => part.type === "overnight-plan" ? (
+                  <OvernightPlanCard key={index} plan={props.state.orchestration.plans.find((plan) => plan.id === part.overnightPlanId)} ko={ko} onStart={props.onStartOvernight} />
+                ) : part.type === "overnight-run" ? (
+                  <div className="overnight-run-inline" key={index}><span><i />{ko ? "Overnight 실행이 시작됐어요" : "Overnight run started"}</span><small>{ko ? "오케스트레이트에서 진행 상황을 볼 수 있어요." : "Watch progress in Orchestrate."}</small></div>
+                ) : part.type === "tool" ? (
                   <div className={`tool-event tool-event--${part.state ?? "done"}`} key={index}>
                     {part.toolName === "edit" || part.toolName === "write" ? <FilePenLine size={15} /> : <TerminalSquare size={15} />}
                     <span><strong>{part.toolName}</strong><small>{part.text}</small></span>
@@ -124,6 +131,26 @@ export function ChatView(props: ChatViewProps) {
         </footer>
       </section>
     </main>
+  );
+}
+
+function OvernightPlanCard({ plan, ko, onStart }: { plan?: OvernightPlanSummary; ko: boolean; onStart(planId: string): Promise<void> }) {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string>();
+  if (!plan) return <div className="overnight-plan-missing">{ko ? "이 계획은 앱 재시작 후 만료됐어요. Morrow에게 다시 준비해 달라고 해주세요." : "This plan expired after restart. Ask Morrow to prepare it again."}</div>;
+  const runnable = plan.status === "draft";
+  return (
+    <section className="overnight-plan-card" aria-label={ko ? "Overnight 계획" : "Overnight plan"}>
+      <header><span><i />OVERNIGHT PLAN</span><em>{plan.status === "draft" ? (ko ? "승인 대기" : "AWAITING YOUR SAY") : plan.status.toUpperCase()}</em></header>
+      <div className="overnight-plan-card__body">
+        <h3>{plan.title}</h3>
+        <dl><div><dt>{ko ? "완료 기준" : "Outcome"}</dt><dd>{plan.outcome}</dd></div><div><dt>{ko ? "검증" : "Verification"}</dt><dd>{plan.verification}</dd></div></dl>
+        <div className="overnight-plan-sessions"><span>{ko ? `선택한 오늘 세션 ${plan.selectedSessions.length}개` : `${plan.selectedSessions.length} sessions selected`}</span>{plan.selectedSessions.map((session) => <strong key={session.id}>{session.provider.toUpperCase()} · {session.title}</strong>)}</div>
+        <div className="overnight-executor"><span>{ko ? "실행기" : "Executor"}</span><strong>{plan.executorLabel}</strong><code>{plan.commandPreview}</code></div>
+        {error && <p className="overnight-plan-error">{error}</p>}
+      </div>
+      <footer><small>{ko ? "정확히 이 계획 한 번만 실행돼요. 5분 후에는 자동 만료됩니다." : "Runs this exact plan once. It expires after five minutes."}</small><button type="button" disabled={!runnable || starting} onClick={async () => { setStarting(true); setError(undefined); try { await onStart(plan.id); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setStarting(false); } }}>{starting ? (ko ? "시작하는 중…" : "Starting…") : runnable ? (ko ? "돌리기" : "Run overnight") : (ko ? "이미 시작됨" : "Already started")}</button></footer>
+    </section>
   );
 }
 
