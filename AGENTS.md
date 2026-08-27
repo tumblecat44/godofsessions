@@ -80,11 +80,12 @@ Compile passing and tests green is not done. A change is done when:
 
 - **Finish condition in PR.** The PR description states the finish condition a
   stranger can check without trusting the author.
-- **UI changes need action+result screenshot.** A screenshot of the final state
-  alone is incomplete. Capture the action that caused the state.
-- **Evidence survives cleanup.** Evidence must be written to `.verify/evidence/`
-  or another path that cleanup does not delete. Evidence only in `/tmp/` is not
-  durable.
+- **UI changes need action+result+GIF.** An action still, a result still, and a
+  GIF showing the transition. A final screenshot alone is incomplete.
+- **Embeds must render on the PR.** A stranger must see the pictures on GitHub
+  without cloning. Local-only or `/tmp/` evidence is not done. Gitignored paths
+  do not count. Commit evidence to a tracked path (e.g. `docs/verify/`) and
+  embed it in the PR body.
 - **Author is not the merge verifier.** The author of the PR does not declare
   the map honest. A second person runs the verification.
 - **Related feature-map entry must be driven.** If the change touches a mapped
