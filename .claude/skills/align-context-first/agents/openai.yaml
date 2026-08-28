@@ -1,4 +1,0 @@
-interface:
-  display_name: "Align Context First"
-  short_description: "Reconstruct shared context before taking action"
-  default_prompt: "Use $align-context-first to reconstruct my intent and information environment, align our decision model, and only then continue with the task."

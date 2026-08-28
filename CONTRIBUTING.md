@@ -26,6 +26,11 @@ npm run check
 npm run dev
 ```
 
+To drive the real Electron window after a UI or runtime change, follow
+[scripts/verify-god-of-sessions/SKILL.md](scripts/verify-god-of-sessions/SKILL.md).
+`npm run verify:ui` covers the synthetic renderer contract and is not a live
+Morrow or CLI proof.
+
 Live-provider tests are local-only, ignored by default, and must not be made a
 prerequisite for normal contributors. Never include credential values or live
 provider records in a test failure, fixture, screenshot, or pull request.

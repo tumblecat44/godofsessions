@@ -1,4 +1,0 @@
-interface:
-  display_name: "Execution Contract First"
-  short_description: "Define the execution contract before work"
-  default_prompt: "Use $execution-contract-first to clarify the target, verification plan, and completion contract before executing."

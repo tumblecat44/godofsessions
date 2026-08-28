@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context-Synced Dogfood Loop"
-  short_description: "Repeat real product trials with fresh evidence"
-  default_prompt: "Use $run-context-synced-dogfood to dogfood this product, synchronize current context, persist evidence, and repeat for my available work window."

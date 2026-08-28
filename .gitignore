@@ -23,3 +23,10 @@ docs/dogfood/raw/
 # Verification evidence (keep structure, ignore contents)
 .verify/evidence/*
 !.verify/evidence/.gitkeep
+
+# Maintainer agent workflows live in the operator home, not this repository.
+# Morrow still discovers Agent Skills from the launch root and ~/.agents/skills.
+/.agents/skills/
+/.claude/skills/
+/.grok/
+/skills/

@@ -84,6 +84,11 @@ forbidden from spawning its own subagents. It is not a cloud service.
 - Do not add a dependency or asset without checking its license and recording
   any required notice.
 
+## App verification
+
+After UI or Electron runtime changes, drive the real window with
+`scripts/verify-god-of-sessions/SKILL.md`. Vitest clicks are not that proof.
+
 ## Definition of Done
 
 Compile passing and tests green is not done. A change is done when:
@@ -100,7 +105,7 @@ Compile passing and tests green is not done. A change is done when:
   the map honest. A second person runs the verification.
 - **Related feature-map entry must be driven.** If the change touches a mapped
   feature, drive that feature before marking done. For features marked
-  "Live + synthetic required" in `.grok/skills/verify-god-of-sessions/features/`,
+  "Live + synthetic required" in `scripts/verify-god-of-sessions/features/`,
   a synthetic-only pass is incomplete.
 
 Live drive is: Launch → Doctor → Drive → Evidence → Cleanup → confirm evidence

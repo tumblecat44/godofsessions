@@ -15,6 +15,7 @@ The public repository may contain:
 - provider integration that uses Pi's documented SDK runtime;
 - generic, synthetic fixtures with no personal paths, transcripts, or secrets;
 - architecture decisions, public documentation, and reproducible examples;
+- contributor verification helpers that drive the app with synthetic data;
 - landing-page source and assets whose licenses permit redistribution;
 - release notes and issue/ pull-request templates.
 
@@ -38,6 +39,8 @@ before publication:
   unredacted logs;
 - absolute local paths, usernames, private repository names, and account IDs;
 - live dogfood notes, private evaluation evidence, and internal operator logs;
+- maintainer-only agent skills, personal workflow instructions, and
+  overnight dogfood loops (those belong in the operator home, not this tree);
 - release-account credentials, notarization data, update-server configuration,
   deployment account identifiers, generated deployment configuration, and
   other deployment secrets;
