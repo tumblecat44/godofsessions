@@ -8,12 +8,11 @@ import {
   type MorrowEvent,
   type OrchestrationSnapshot,
   type OvernightExecutionProvider,
-  type OvernightPortfolioEditInput,
   type ThinkingLevel,
 } from "../src/shared/contracts";
 import { GitHubAuthService } from "./runtime/github-auth";
 import { MorrowService } from "./runtime/morrow-service";
-import { createProductionOvernightProviderControlPlane } from "./runtime/overnight-provider-verification-production";
+import { createCommonSenseOvernightControlPlane } from "./runtime/overnight-provider-common-sense";
 
 const GITHUB_OAUTH_CLIENT_ID = "Ov23liaLA2GGS5ojU1zS";
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -22,12 +21,13 @@ let morrow: MorrowService | null = null;
 let morrowInitialization: Promise<void> | null = null;
 let githubAuth: GitHubAuthService | null = null;
 let overnightPowerSaveBlockerId: number | undefined;
+let overnightPowerMonitor: ReturnType<typeof setInterval> | undefined;
+let overnightPowerMonitorInFlight = false;
 const allowedExternalUrls = new Set<string>();
 const thinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const overnightProviders = new Set<OvernightExecutionProvider>(OVERNIGHT_EXECUTION_PROVIDERS);
-const MAX_PORTFOLIO_ITEMS = 10_000;
 
-const activePortfolioRunStatuses = new Set(["starting", "running", "stopping", "unknown"]);
+const activePortfolioRunStatuses = new Set(["starting", "running", "stopping"]);
 function hasActiveOvernight(snapshot: OrchestrationSnapshot) {
   return Boolean(snapshot.portfolioRuns?.some((run) => activePortfolioRunStatuses.has(run.status)));
 }
@@ -37,13 +37,29 @@ export function syncOvernightPowerProtection(snapshot: OrchestrationSnapshot) {
     if (overnightPowerSaveBlockerId === undefined || !powerSaveBlocker.isStarted(overnightPowerSaveBlockerId)) {
       overnightPowerSaveBlockerId = powerSaveBlocker.start("prevent-app-suspension");
     }
+    ensureOvernightPowerMonitor();
     return true;
   }
   if (overnightPowerSaveBlockerId !== undefined && powerSaveBlocker.isStarted(overnightPowerSaveBlockerId)) {
     powerSaveBlocker.stop(overnightPowerSaveBlockerId);
   }
   overnightPowerSaveBlockerId = undefined;
+  if (overnightPowerMonitor) clearInterval(overnightPowerMonitor);
+  overnightPowerMonitor = undefined;
   return false;
+}
+
+function ensureOvernightPowerMonitor() {
+  if (overnightPowerMonitor) return;
+  overnightPowerMonitor = setInterval(() => {
+    if (overnightPowerMonitorInFlight) return;
+    overnightPowerMonitorInFlight = true;
+    void service().orchestrationSnapshot()
+      .then(syncOvernightPowerProtection)
+      .catch(() => undefined)
+      .finally(() => { overnightPowerMonitorInFlight = false; });
+  }, 5_000);
+  overnightPowerMonitor.unref?.();
 }
 
 async function bootstrapWithPowerProtection(): Promise<BootstrapState> {
@@ -135,31 +151,6 @@ function boundedId(value: unknown, label: string) {
   return id;
 }
 
-function portfolioEditInput(value: unknown): OvernightPortfolioEditInput {
-  const input = plainRecord(value, "overnight portfolio edit");
-  const planId = boundedId(input.planId, "overnight portfolio plan id");
-  if (!Array.isArray(input.includedItemIds) || input.includedItemIds.length > MAX_PORTFOLIO_ITEMS) {
-    throw new Error("Invalid overnight portfolio included item IDs.");
-  }
-  const includedItemIds = input.includedItemIds.map((itemId) => boundedId(itemId, "overnight portfolio item id"));
-  const included = new Set(includedItemIds);
-  if (included.size !== includedItemIds.length) throw new Error("Duplicate overnight portfolio item ID.");
-
-  let providerByItem: OvernightPortfolioEditInput["providerByItem"];
-  if (input.providerByItem !== undefined) {
-    const providers = plainRecord(input.providerByItem, "overnight portfolio provider selection");
-    providerByItem = {};
-    for (const [itemId, provider] of Object.entries(providers)) {
-      if (!included.has(itemId)) throw new Error("Overnight portfolio provider selection references an excluded item.");
-      if (typeof provider !== "string" || !overnightProviders.has(provider as OvernightExecutionProvider)) {
-        throw new Error("Invalid overnight portfolio provider.");
-      }
-      providerByItem[itemId] = provider as OvernightExecutionProvider;
-    }
-  }
-  return { planId, includedItemIds, ...(providerByItem ? { providerByItem } : {}) };
-}
-
 function boolean(value: unknown, label: string) {
   if (typeof value !== "boolean") throw new Error(`Invalid ${label}.`);
   return value;
@@ -223,15 +214,21 @@ function registerIpc() {
     return service().finishOnboarding(language);
   });
   handle("morrow:refresh-daily-context", () => service().refreshDailyContext());
+  handle("morrow:prepare-overnight-portfolio", () => service().prepareOvernightPortfolio());
   handle("morrow:verify-overnight-provider", (_event, value) => {
     if (typeof value !== "string" || !overnightProviders.has(value as OvernightExecutionProvider)) {
       throw new Error("Invalid overnight provider.");
     }
     return service().verifyOvernightProvider(value as OvernightExecutionProvider);
   });
-  handle("morrow:replan-overnight-portfolio", (_event, value) => service().replanOvernightPortfolio(portfolioEditInput(value)));
-  handle("morrow:start-overnight-portfolio", async (_event, value) => {
-    const run = await service().startOvernightPortfolio(boundedId(value, "overnight portfolio plan id"));
+  handle("morrow:start-overnight-portfolio", async (_event, planId, itemIds) => {
+    const selected = Array.isArray(itemIds)
+      ? itemIds.slice(0, 8).map((item) => boundedId(item, "overnight item id"))
+      : undefined;
+    const run = await service().startOvernightPortfolio(
+      boundedId(planId, "overnight portfolio plan id"),
+      selected,
+    );
     const snapshot = await service().orchestrationSnapshot();
     syncOvernightPowerProtection(snapshot);
     return run;
@@ -320,7 +317,10 @@ if (!primaryInstance) {
       },
       openExternal: async (url) => { await shell.openExternal(url); },
     });
-    const githubState = await githubAuth.initialize();
+    let githubState = await githubAuth.initialize();
+    if (!app.isPackaged && process.env.MORROW_VERIFY_IDENTITY === "local" && githubState.status !== "authenticated") {
+      githubState = githubAuth.adoptLocalVerifyIdentity();
+    }
     registerIpc();
     morrow = new MorrowService({
       root,
@@ -328,8 +328,7 @@ if (!primaryInstance) {
       providerHostPath,
       initialLanguage: app.getLocale().toLowerCase().startsWith("ko") ? "ko" : "en",
       contextHome: dogfoodContextHome,
-      overnightProviderControlPlane: createProductionOvernightProviderControlPlane({
-        userDataDirectory,
+      overnightProviderControlPlane: createCommonSenseOvernightControlPlane({
         providerHostPath,
       }),
       sendEvent: (event) => {

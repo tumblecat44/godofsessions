@@ -27,7 +27,7 @@ describe("GitHubAuthService", () => {
 
     const authorization = await service.begin();
     expect(authorization.userCode).toBe("ABCD-EFGH");
-    expect(openExternal).toHaveBeenCalledWith(GITHUB_DEVICE_URL);
+    expect(openExternal).not.toHaveBeenCalled();
     expect(String(requests[0]?.init?.body)).not.toContain("scope=");
 
     await expect(service.complete()).resolves.toEqual({
@@ -97,6 +97,65 @@ describe("GitHubAuthService", () => {
     await expect(readFile(join(dataDir, "github-auth.json"), "utf8")).rejects.toThrow();
   });
 
+  it("keeps a stored identity file when decryption fails", async () => {
+    const dataDir = await temporaryDirectory();
+    const first = createService({
+      dataDir,
+      responses: [
+        json({ device_code: "device-code", user_code: "ABCD-EFGH", verification_uri: GITHUB_DEVICE_URL, expires_in: 900, interval: 5 }),
+        json({ access_token: ["cached", "identity"].join("-") }),
+        json({ id: 11, login: "kept-user" }),
+      ],
+    });
+    await first.begin();
+    await first.complete();
+
+    const locked = new GitHubAuthService({
+      dataDir,
+      clientId: "Ov23syntheticClientId",
+      encryptToken: encrypt,
+      decryptToken: () => {
+        throw new Error("keychain unavailable");
+      },
+      fetcher: vi.fn(async () => { throw new Error("should not call GitHub"); }),
+      wait: async () => undefined,
+    });
+
+    await expect(locked.initialize()).resolves.toEqual({ status: "unauthenticated" });
+    const stored = JSON.parse(await readFile(join(dataDir, "github-auth.json"), "utf8")) as { profile: { login: string } };
+    expect(stored.profile.login).toBe("kept-user");
+  });
+
+  it("refuses to persist when encryption does not round-trip", async () => {
+    const dataDir = await temporaryDirectory();
+    const service = createService({
+      dataDir,
+      decryptToken: () => "different-token",
+      responses: [
+        json({ device_code: "device-code", user_code: "ABCD-EFGH", verification_uri: GITHUB_DEVICE_URL, expires_in: 900, interval: 5 }),
+        json({ access_token: ["unpersistable", "credential"].join("-") }),
+        json({ id: 13, login: "roundtrip-user" }),
+      ],
+    });
+
+    await service.begin();
+    await expect(service.complete()).rejects.toThrow(/saved safely/);
+    await expect(readFile(join(dataDir, "github-auth.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("adopts an unpackaged local verify identity without writing github-auth.json", async () => {
+    const dataDir = await temporaryDirectory();
+    const service = createService({ dataDir, responses: [] });
+    await expect(service.initialize()).resolves.toEqual({ status: "unauthenticated" });
+    expect(service.adoptLocalVerifyIdentity()).toEqual({
+      status: "authenticated",
+      profile: { id: 1, login: "local-verify" },
+      offline: true,
+    });
+    expect(() => service.requireAuthenticated()).not.toThrow();
+    await expect(readFile(join(dataDir, "github-auth.json"), "utf8")).rejects.toThrow();
+  });
+
   it("rejects unexpected verification destinations", async () => {
     const dataDir = await temporaryDirectory();
     const service = createService({
@@ -105,14 +164,33 @@ describe("GitHubAuthService", () => {
     });
     await expect(service.begin()).rejects.toThrow(/unexpected verification URL/);
   });
+
+  it("does not auto-open the browser in begin() so the device code stays visible", async () => {
+    const dataDir = await temporaryDirectory();
+    const openExternal = vi.fn(async () => undefined);
+    const service = createService({
+      dataDir,
+      responses: [
+        json({ device_code: "device-code", user_code: "STAY-VISIBLE", verification_uri: GITHUB_DEVICE_URL, expires_in: 900, interval: 5 }),
+      ],
+      openExternal,
+    });
+
+    const authorization = await service.begin();
+    expect(authorization.userCode).toBe("STAY-VISIBLE");
+    expect(openExternal).not.toHaveBeenCalled();
+
+    await service.openDevicePage();
+    expect(openExternal).toHaveBeenCalledWith(GITHUB_DEVICE_URL);
+  });
 });
 
-function createService({ dataDir, responses, openExternal = async () => undefined, onRequest }: { dataDir: string; responses: Response[]; openExternal?: (url: string) => Promise<void>; onRequest?: (input: RequestInfo | URL, init?: RequestInit) => void }) {
+function createService({ dataDir, responses, openExternal = async () => undefined, onRequest, decryptToken = decrypt }: { dataDir: string; responses: Response[]; openExternal?: (url: string) => Promise<void>; onRequest?: (input: RequestInfo | URL, init?: RequestInit) => void; decryptToken?: (value: string) => string }) {
   return new GitHubAuthService({
     dataDir,
     clientId: "Ov23syntheticClientId",
     encryptToken: encrypt,
-    decryptToken: decrypt,
+    decryptToken,
     fetcher: vi.fn(async (input, init) => {
       onRequest?.(input, init);
       const response = responses.shift();

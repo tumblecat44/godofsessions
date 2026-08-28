@@ -74,7 +74,7 @@ describe("Overnight portfolio coordinator", () => {
     ]);
   });
 
-  it("waits for provider capacity and conflicting write scopes to clear", async () => {
+  it("waits for provider capacity and semantic conflicts to clear", async () => {
     const coordinator = new OvernightPortfolioCoordinator();
     const first = deferred<{ status: "completed" }>();
     const second = deferred<{ status: "completed" }>();
@@ -85,9 +85,9 @@ describe("Overnight portfolio coordinator", () => {
       return ({ first, second, third }[work.id] as typeof first).promise;
     };
     const plan = coordinator.prepare([
-      item("first", "codex", { writeScopes: ["src/api"] }),
-      item("second", "codex", { writeScopes: ["src/web"] }),
-      item("third", "claude", { writeScopes: ["src/api/handlers"] }),
+      item("first", "codex", { conflictKeys: ["api-contract"] }),
+      item("second", "codex", { conflictKeys: ["web-flow"] }),
+      item("third", "claude", { conflictKeys: ["api-contract"] }),
     ], {
       "provider:codex": 1,
       "provider:claude": 1,

@@ -69,13 +69,13 @@ describe("Morrow onboarding product contract", () => {
     renderOnboarding();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
 
-    const portfolioCopy = screen.getByText(/Morrow prepares safe work for Claude Code/);
+    const portfolioCopy = screen.getByText(/Morrow builds tonight's exact outcomes from whichever of Claude Code/);
     for (const agent of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) {
       expect(portfolioCopy).toHaveTextContent(agent);
     }
     expect(portfolioCopy).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
-    expect(screen.getByText(/shows Ready, Setup, or Blocked/)).toBeInTheDocument();
-    expect(screen.getByText(/Morning evidence by item/)).toBeInTheDocument();
+    expect(screen.getByText(/Only workers that passed install, sign-in, and safety checks enter the plan/)).toBeInTheDocument();
+    expect(screen.getByText(/Morning evidence by outcome/)).toBeInTheDocument();
   });
 
   it("explains the same readiness boundary in Korean", () => {
@@ -83,7 +83,7 @@ describe("Morrow onboarding product contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "야간 작업" }));
 
     expect(screen.getByText(/Claude Code, Codex, Grok Build, Pi Agent/)).toBeInTheDocument();
-    expect(screen.getByText(/준비, 설정 필요, 차단/)).toBeInTheDocument();
-    expect(screen.getByText("항목별 아침 근거")).toBeInTheDocument();
+    expect(screen.getByText(/설치·로그인·안전 확인이 끝난 작업자만 계획에 들어가고/)).toBeInTheDocument();
+    expect(screen.getByText("목적별 아침 근거")).toBeInTheDocument();
   });
 });

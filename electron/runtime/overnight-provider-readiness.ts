@@ -24,11 +24,6 @@ export interface OvernightProviderReadiness extends OvernightProviderRouteSummar
   };
 }
 
-export type OvernightReadinessCommandRunner = (
-  executable: string,
-  args: readonly string[],
-  environment?: Readonly<Record<string, string>>,
-) => Promise<string>;
 export type OvernightProviderContainmentResolver = (input: Readonly<{
   provider: OvernightExecutionProvider;
   root: string;
@@ -40,12 +35,8 @@ export type OvernightProviderContainmentResolver = (input: Readonly<{
 export interface OvernightProviderReadinessOptions {
   root: string;
   resolveExecutable?: (provider: OvernightExecutionProvider, executableNames: readonly string[]) => Promise<string | undefined>;
-  resolveCommand?: (name: string) => Promise<string | undefined>;
-  runCommand?: OvernightReadinessCommandRunner;
   runtimeDirectory?: string;
   verifyContainment?: OvernightProviderContainmentResolver;
-  piReady?: () => Promise<boolean>;
-  piCancellationReady?: () => Promise<boolean>;
   acpPermissionPolicyReady?: (provider: "grok") => Promise<boolean>;
 }
 

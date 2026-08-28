@@ -1,16 +1,19 @@
-import { ExternalLink, FolderLock, Github, LogOut, Send } from "lucide-react";
-import type { AppLanguage, BootstrapState, GitHubProfile } from "../shared/contracts";
+import { ExternalLink, FolderLock, Github, LogOut, Send, ShieldCheck } from "lucide-react";
+import { officialOvernightCliCards } from "../lib/overnight-cli";
+import type { AppLanguage, BootstrapState, GitHubProfile, OvernightExecutionProvider } from "../shared/contracts";
+import { CopyCommandButton } from "./CopyCommandButton";
 import { ProviderConnections } from "./ProviderConnections";
 import { Button } from "./ui/Button";
 import { Surface } from "./ui/Surface";
 
-export function SettingsView({ state, error, githubProfile, githubOffline, onConnect, onDisconnect, onLanguage, onManageGitHub, onLogoutGitHub }: {
+export function SettingsView({ state, error, githubProfile, githubOffline, onConnect, onDisconnect, onVerifyOvernightProvider, onLanguage, onManageGitHub, onLogoutGitHub }: {
   state: BootstrapState;
   error?: string;
   githubProfile?: GitHubProfile;
   githubOffline?: boolean;
   onConnect(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
   onDisconnect(providerId: string): Promise<void>;
+  onVerifyOvernightProvider(provider: OvernightExecutionProvider): Promise<void>;
   onLanguage(language: AppLanguage): Promise<void>;
   onManageGitHub(): Promise<void>;
   onLogoutGitHub(): Promise<void>;
@@ -23,7 +26,7 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
           <div>
             <span className="eyebrow font-mono text-[10px] font-semibold tracking-[0.16em] text-amber">MORROW · SETTINGS</span>
             <h1 className="mt-3 text-[clamp(38px,4vw,54px)] font-medium leading-[0.98] tracking-[-0.045em] text-ink">{ko ? "연결과 기본 설정" : "Connections & preferences"}</h1>
-            <p className="mt-3 max-w-[660px] text-sm leading-6 text-ink-muted">{ko ? "Morrow가 사용할 AI 서비스와 앱 언어, 파일 작업 범위를 확인합니다." : "Review Morrow’s AI services, app language, and file working boundary."}</p>
+            <p className="mt-3 max-w-[660px] text-sm leading-6 text-ink-muted">{ko ? "Morrow 대화 모델, Overnight CLI, 앱 언어, 파일 작업 범위를 확인합니다." : "Review Morrow’s conversation model, Overnight CLIs, app language, and file working boundary."}</p>
           </div>
         </header>
 
@@ -51,9 +54,21 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
         </Surface>
 
         <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
-          <div className="settings-section__intro"><h2 className="text-base font-semibold">{ko ? "AI 서비스" : "AI services"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "Morrow가 답변을 만들 때 사용할 AI 서비스를 연결합니다. 연결 정보는 각 서비스의 공식 로그인 또는 API key 흐름으로 관리됩니다." : "Connect the AI services Morrow can use for answers. Sign-in details are managed through each service’s official login or API key flow."}</p></div>
+          <div className="settings-section__intro" id="morrow-conversation-model"><h2 className="text-base font-semibold">{ko ? "Morrow 대화 모델" : "Morrow conversation model"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "하나를 연결하면 Morrow가 대화하고, 오늘 밤 카드 최대 3장을 고를 수 있습니다. 로그인은 각 서비스의 공식 흐름으로 이뤄집니다." : "Connect one so Morrow can talk and pick tonight’s 3 cards. Sign-in uses that service’s official login or API key flow."}</p></div>
           {error && <div className="settings-error mt-4 rounded-control border border-danger/25 bg-danger/[0.06] px-4 py-3 text-sm text-danger" role="alert">{ko ? "Morrow가 연결을 마치지 못했어요." : "Morrow couldn’t complete that connection."} <small className="block pt-1 opacity-80">{error}</small></div>}
-          <ProviderConnections state={state} language={state.language} onConnect={onConnect} onDisconnect={onDisconnect} />
+          <ProviderConnections state={state} language={state.language} compact onConnect={onConnect} onDisconnect={onDisconnect} />
+        </Surface>
+
+        <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
+          <div className="settings-section__intro"><h2 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck size={18} />{ko ? "Overnight CLI" : "Overnight CLIs"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "설치됨은 PATH에서 명령을 찾았다는 뜻입니다. 로그인 명령을 복사해 Terminal에서 실행하세요. 이 앱 안에서 Overnight 계정에 로그인하지 않습니다." : "Installed means the command is on PATH. Copy a login command and run it in Terminal. This app does not log into Overnight accounts."}</p></div>
+          <div className="mt-4 grid gap-2">{officialOvernightCliCards(state.orchestration.providerRoutes).map((cli) => {
+            return (
+              <div key={cli.provider} className="flex min-h-12 items-center justify-between gap-4 rounded-[12px] border border-line bg-surface/50 px-4 py-2.5">
+                <span className="min-w-0"><strong className="block text-sm">{cli.label}</strong><small className="block truncate text-[11px] text-ink-faint">{cli.installed ? (ko ? "설치됨 · Overnight에 사용 가능" : "Installed · ready for Overnight") : (ko ? "설치되지 않음 · PATH에 없음" : "Not installed · not on PATH")}</small><small className="mt-1 block font-mono text-[10px] text-ink-faint">{cli.loginCommand ?? (ko ? "Morrow에 포함됨" : "bundled with Morrow")}</small></span>
+                {cli.loginCommand && <CopyCommandButton command={cli.loginCommand} language={state.language} />}
+              </div>
+            );
+          })}</div>
         </Surface>
 
         <Surface className="settings-section settings-grid mt-0 flex items-center justify-between gap-6 rounded-t-none border-t-0 p-5 shadow-none">
@@ -72,3 +87,5 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
     </main>
   );
 }
+
+

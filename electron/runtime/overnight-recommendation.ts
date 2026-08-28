@@ -3,7 +3,7 @@ import type {
   DailySessionSummary,
   OvernightDisposition,
   OvernightExcludedSessionProposal,
-  OvernightExecutor,
+  OvernightCliExecutor,
   OvernightReasonCode,
   OvernightRequestKind,
 } from "../../src/shared/contracts";
@@ -27,7 +27,7 @@ export interface OvernightProposal {
   excludedSessions: OvernightExcludedSessionProposal[];
   outcome: string;
   verification: string;
-  executor: "auto" | OvernightExecutor;
+  executor: "auto" | OvernightCliExecutor;
   executorReason: string;
   risks: string[];
   questions: string[];
@@ -45,7 +45,7 @@ export interface OvernightAssessment {
   excludedSessions: OvernightExcludedSessionProposal[];
   outcome: string;
   verification: string;
-  executor?: OvernightExecutor;
+  executor?: OvernightCliExecutor;
   executorReason: string;
   risks: string[];
   questions: string[];
@@ -56,8 +56,8 @@ interface AssessOvernightProposalInput {
   proposal: OvernightProposal;
   context: DailyContextSnapshot;
   root: string;
-  executors: Record<OvernightExecutor, boolean>;
-  executorBlockers?: Partial<Record<OvernightExecutor, "unavailable" | "unauthenticated">>;
+  executors: Record<OvernightCliExecutor, boolean>;
+  executorBlockers?: Partial<Record<OvernightCliExecutor, "unavailable" | "unauthenticated">>;
 }
 
 const positiveReasons = new Set<OvernightReasonCode>([
@@ -589,7 +589,7 @@ function clarificationQuestions(
     korean: boolean;
     root: string;
     requestedExecutor: OvernightProposal["executor"];
-    executors: Record<OvernightExecutor, boolean>;
+    executors: Record<OvernightCliExecutor, boolean>;
     selectedSessionCount: number;
   },
 ) {
@@ -699,7 +699,7 @@ function topLevelNotRelevantHasEvidence(
     && priorityBriefIsRunnable(brief, summaries.get(brief.id), root));
 }
 
-function chooseExecutor(requested: OvernightProposal["executor"], executors: Record<OvernightExecutor, boolean>, taskText: string): OvernightExecutor | undefined {
+function chooseExecutor(requested: OvernightProposal["executor"], executors: Record<OvernightCliExecutor, boolean>, taskText: string): OvernightCliExecutor | undefined {
   if (requested !== "auto") return executors[requested] ? requested : undefined;
   if (executors.codex && executors.claude && writingAndReviewEvidence.test(taskText) && !repositoryImplementationEvidence.test(taskText)) return "claude";
   if (executors.codex) return "codex";
@@ -707,7 +707,7 @@ function chooseExecutor(requested: OvernightProposal["executor"], executors: Rec
   return undefined;
 }
 
-function executorReasonMatchesSelection(reason: string, executor: OvernightExecutor) {
+function executorReasonMatchesSelection(reason: string, executor: OvernightCliExecutor) {
   const mentionsCodex = /\b(?:gpt\s+)?codex\b/iu.test(reason);
   const mentionsClaude = /\bclaude(?:\s+code)?\b/iu.test(reason);
   if (!mentionsCodex && !mentionsClaude) return true;

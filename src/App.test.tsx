@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   BootstrapState,
   ConversationDetail,
   GitHubAuthState,
   MorrowBridge,
+  MorrowEvent,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
@@ -73,8 +74,8 @@ function morrowBridge(overrides: Partial<MorrowBridge> = {}): MorrowBridge {
     disconnectProvider: vi.fn(async () => undefined),
     finishOnboarding: vi.fn(async () => undefined),
     refreshDailyContext: vi.fn(async () => orchestration()),
+    prepareOvernightPortfolio: vi.fn(async () => orchestration()),
     verifyOvernightProvider: vi.fn(async () => orchestration()),
-    replanOvernightPortfolio: vi.fn(async () => undefined),
     startOvernightPortfolio: vi.fn(async () => { throw new Error("not prepared"); }),
     stopOvernightPortfolio: vi.fn(async () => undefined),
     openExternal: vi.fn(async () => undefined),
@@ -148,7 +149,7 @@ afterEach(() => {
 });
 
 describe("App Overnight integration", () => {
-  it("polls a portfolio run, keeps its cards, and clears the global running signal at completion", async () => {
+  it("uses the Kanban on Overnight and shows the global running signal only elsewhere", async () => {
     vi.useFakeTimers();
     const running = activeRun();
     const activeState = state({ orchestration: orchestration({ portfolioRuns: [running] }) });
@@ -172,22 +173,21 @@ describe("App Overnight integration", () => {
     render(<App />);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("2 ACTIVE");
     expect(screen.getByRole("button", { name: "View running Overnight progress" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
+    expect(screen.queryByRole("button", { name: "View running Overnight progress" })).not.toBeInTheDocument();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
 
-    expect(bridge.overnightSnapshot).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "View running Overnight progress" })).not.toBeInTheDocument();
+    expect(bridge.overnightSnapshot).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
-    expect(screen.getByRole("heading", { name: "UI works" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Copy is clear" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /Copy is clear/ })[0]);
+    expect(screen.getAllByRole("heading", { name: "Copy is clear" }).length).toBeGreaterThan(0);
     expect(screen.getByText("Copy review failed.")).toBeInTheDocument();
     expect(screen.queryByText(/Morning Review/i)).not.toBeInTheDocument();
   });
 
   it("uses only the portfolio stop boundary", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const running = activeRun();
     const activeState = state({ orchestration: orchestration({ portfolioRuns: [running] }) });
     const stop = vi.fn(async () => undefined);
@@ -197,51 +197,45 @@ describe("App Overnight integration", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stop this run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop now" }));
 
     await waitFor(() => expect(stop).toHaveBeenCalledWith(running.id));
   });
 
-  it("moves a focused draft purpose into Morrow without exposing execution details", async () => {
-    const item = planItem("ui-result", "Settings stay connected after restart");
-    const draftPlan = plan([item], { id: "plan-discuss" });
-    const appState = state({
-      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
-      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
-      selectedModel: { provider: "test", id: "model" },
-      orchestration: orchestration({
-        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
-        portfolioPlans: [draftPlan],
-      }),
+  it("keeps a failed stop honest without exposing bridge details", async () => {
+    const running = activeRun();
+    const activeState = state({ orchestration: orchestration({ portfolioRuns: [running] }) });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => activeState),
+      stopOvernightPortfolio: vi.fn(async () => { throw new Error("Error invoking remote method: private stop detail"); }),
     });
-    window.morrow = morrowBridge({ bootstrap: vi.fn(async () => appState) });
+    window.morrow = bridge;
     const { default: App } = await import("./App");
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
-    fireEvent.click(screen.getByLabelText(`Open details for ${item.outcome}`));
-    fireEvent.click(screen.getByRole("button", { name: "Revise this Overnight with Morrow" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop now" }));
 
-    const composer = screen.getByRole("textbox", { name: "" });
-    expect(composer).toHaveFocus();
-    expect((composer as HTMLTextAreaElement).value).toContain(`Outcome to focus on: ${item.outcome}`);
-    expect((composer as HTMLTextAreaElement).value).not.toContain("PRIVATE EXECUTION DETAILS");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Morrow could not confirm the stop. Work may still be running; check its status and try again.");
+    expect(screen.queryByText(/private stop detail/u)).not.toBeInTheDocument();
   });
 
-  it("keeps a newer goal while an earlier assessment is preparing", async () => {
+  it("prepares a read-only plan automatically after opening Overnight without writing into chat", async () => {
     const initial = state({
       providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
       models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
       selectedModel: { provider: "test", id: "model" },
+      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
     });
-    const item = planItem("goal-a", "Goal A is complete");
-    const prepared = state({
-      ...initial,
-      orchestration: orchestration({
+    const item = planItem("automatic", "Automatic plan is ready");
+    const prepared = orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready", verification: { state: "verified", canVerify: true } }],
         portfolioPlans: [plan([item])],
         portfolioAssessments: [{
-          id: "assessment-a",
-          requestKind: "goal",
+          id: "assessment-automatic",
+          requestKind: "discover",
           disposition: "recommend",
           planId: "plan-1",
           candidates: [{
@@ -267,28 +261,259 @@ describe("App Overnight integration", () => {
           createdAt: "2026-08-26T07:00:00.000Z",
           contextGeneratedAt: context.generatedAt,
         }],
-      }),
     });
-    let finishSend!: () => void;
-    const send = new Promise<void>((resolve) => { finishSend = resolve; });
-    let bootstrapCount = 0;
+    let finishPreparation!: (value: OrchestrationSnapshot) => void;
+    const preparation = new Promise<OrchestrationSnapshot>((resolve) => { finishPreparation = resolve; });
     const bridge = morrowBridge({
-      bootstrap: vi.fn(async () => bootstrapCount++ === 0 ? initial : prepared),
-      sendMessage: vi.fn(() => send),
+      bootstrap: vi.fn(async () => initial),
+      refreshDailyContext: vi.fn(async () => initial.orchestration),
+      prepareOvernightPortfolio: vi.fn(() => preparation),
     });
     window.morrow = bridge;
     const { default: App } = await import("./App");
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
-    const goal = screen.getByRole("textbox", { name: "What matters tonight (optional)" });
-    fireEvent.change(goal, { target: { value: "Goal A" } });
-    fireEvent.click(screen.getByRole("button", { name: "Assess this goal" }));
-    fireEvent.change(goal, { target: { value: "Goal B" } });
+    expect(await screen.findByRole("heading", { name: "Morrow is choosing tonight's work" })).toBeInTheDocument();
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
 
-    await act(async () => { finishSend(); });
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Goal A is complete" })).toBeInTheDocument());
-    expect(screen.getByRole("textbox", { name: "What matters tonight (optional)" })).toHaveValue("Goal B");
+    await act(async () => { finishPreparation(prepared); });
+    await waitFor(() => expect(screen.getAllByText("Automatic plan is ready").length).toBeGreaterThan(0));
+    expect(bridge.prepareOvernightPortfolio).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+  });
+
+  it("does not spend a planning turn when no Overnight worker can run it", async () => {
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      selectedModel: { provider: "test", id: "model" },
+      orchestration: orchestration({
+        providerRoutes: [
+          { provider: "codex", label: "Codex", status: "setup_required", verification: { state: "not_verified", canVerify: true } },
+          { provider: "grok", label: "Grok Build", status: "blocked", verification: { state: "unsupported", canVerify: false } },
+        ],
+      }),
+    });
+    const bridge = morrowBridge({ bootstrap: vi.fn(async () => initial) });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
+    expect(await screen.findByRole("heading", { name: "Put an Overnight CLI on this Mac" })).toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
+  });
+
+  it("puts conversation-model setup on Ask Morrow when Overnight CLIs are already installed", async () => {
+    const initial = state({
+      providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready", verification: { state: "verified", canVerify: true } }],
+      }),
+    });
+    const connect = vi.fn(async () => undefined);
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      connectProvider: connect,
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
+    expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
+    expect(screen.getByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
+  });
+
+  it("does not silently prepare the same context again after its Overnight completed", async () => {
+    const item = planItem("finished", "Finished outcome stays finished");
+    const finishedPlan = plan([item], { id: "plan-finished", status: "started" });
+    const finishedRun: OvernightPortfolioRunSummary = {
+      id: "run-finished",
+      planId: finishedPlan.id,
+      title: "Finished outcome",
+      status: "completed",
+      items: [{
+        itemId: item.id,
+        title: item.title,
+        outcome: item.outcome,
+        verification: item.verification,
+        provider: item.provider,
+        providerLabel: item.providerLabel,
+        status: "completed",
+        result: { status: "success", report: "Verified", warnings: [] },
+      }],
+      startedAt: "2026-08-26T07:10:00.000Z",
+      updatedAt: "2026-08-26T08:00:00.000Z",
+      completedAt: "2026-08-26T08:00:00.000Z",
+    };
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [finishedPlan],
+        portfolioRuns: [finishedRun],
+        portfolioAssessments: [{
+          id: "assessment-finished",
+          requestKind: "discover",
+          disposition: "recommend",
+          planId: finishedPlan.id,
+          candidates: [],
+          createdAt: "2026-08-26T07:00:00.000Z",
+          contextGeneratedAt: context.generatedAt,
+        }],
+      }),
+    });
+    const bridge = morrowBridge({ bootstrap: vi.fn(async () => initial) });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+
+    render(<App />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
+    expect(await screen.findByText("Finished outcome stays finished")).toBeInTheDocument();
+  });
+
+  it("keeps bridge internals out of a failed automatic preparation", async () => {
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
+    });
+    window.morrow = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      prepareOvernightPortfolio: vi.fn(async () => {
+        throw new Error("Error invoking remote method 'morrow:prepare-overnight-portfolio': private backend detail");
+      }),
+    });
+    const { default: App } = await import("./App");
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
+    expect(await screen.findByText("Morrow could not prepare the plan. Try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByText(/remote method|private backend detail/i)).not.toBeInTheDocument();
+  });
+
+  it("refreshes a failed start so a consumed plan cannot trap the retry button", async () => {
+    const item = planItem("consumed", "Consumed approval disappears");
+    const readyRoutes = [{ provider: "codex" as const, label: "Codex", status: "ready" as const }];
+    const initial = state({ orchestration: orchestration({ providerRoutes: readyRoutes, portfolioPlans: [plan([item])] }) });
+    const afterFailure = orchestration({ providerRoutes: readyRoutes });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      startOvernightPortfolio: vi.fn(async () => { throw new Error("approval was consumed before the run manifest was written"); }),
+      overnightSnapshot: vi.fn(async () => afterFailure),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start 1 selected" }));
+
+    await waitFor(() => expect(bridge.overnightSnapshot).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Consumed approval disappears" })).not.toBeInTheDocument());
+    expect(screen.queryByText(/approval was consumed/u)).not.toBeInTheDocument();
+  });
+
+  it("never swaps an expired visible plan for a different hidden approval", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T07:00:00.000Z"));
+    const item = planItem("exact", "Run only what I saw");
+    const visible = plan([item], { id: "visible-plan", expiresAt: "2026-08-26T07:00:01.000Z" });
+    const initial = state({ orchestration: orchestration({ portfolioPlans: [visible] }) });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      startOvernightPortfolio: vi.fn(async () => { throw new Error("approval expired"); }),
+      overnightSnapshot: vi.fn(async () => orchestration()),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const start = screen.getByRole("button", { name: "Start 1 selected" });
+    act(() => vi.advanceTimersByTime(1_100));
+    await act(async () => { fireEvent.click(start); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bridge.startOvernightPortfolio).toHaveBeenCalledWith("visible-plan", ["exact"]);
+    expect(bridge.startOvernightPortfolio).toHaveBeenCalledOnce();
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
+  });
+});
+
+describe("Korean language toggle", () => {
+  it("renders the complete shell with Korean language without blanking", async () => {
+    const koreanState = state({
+      language: "ko",
+      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
+    });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => koreanState),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overnight" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
+  });
+
+  it("switches to Korean in Settings and keeps the shell visible", async () => {
+    let currentLanguage = "en" as "en" | "ko";
+    const finishOnboarding = vi.fn(async (input: { language: "en" | "ko" }) => {
+      currentLanguage = input.language;
+    });
+    const getBootstrap = () => state({ language: currentLanguage });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => getBootstrap()),
+      finishOnboarding,
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    const { rerender } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "한국어" }));
+    await waitFor(() => expect(finishOnboarding).toHaveBeenCalledWith({ language: "ko" }));
+
+    expect(screen.getByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
+  });
+
+  it("survives a reload after Korean is persisted", async () => {
+    const koreanState = state({
+      language: "ko",
+      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
+    });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => koreanState),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    
+    const { unmount } = render(<App />);
+    expect(await screen.findByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    
+    unmount();
+    
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
   });
 });
 
@@ -314,5 +539,104 @@ describe("GitHub identity gate", () => {
 
     finishGitHub({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } });
     await waitFor(() => expect(bridge.bootstrap).toHaveBeenCalledOnce());
+  });
+});
+
+describe("Morrow revise tonight set", () => {
+  it("shows the newest draft after a revision turn and drops the old outcomes", async () => {
+    const oldItem = planItem("one", "Ship the login fix");
+    const newItem = planItem("new-1", "Replace the login work with a closer deadline");
+    const older = plan([oldItem], { id: "tonight-plan", createdAt: "2026-08-26T07:00:00.000Z" });
+    const newer = plan([newItem, planItem("new-2", "Ship the docs pass tonight")], {
+      id: "revised-plan",
+      createdAt: "2026-08-26T08:00:00.000Z",
+    });
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      conversations: [{ id: "conversation", path: "conversation", title: "Overnight planning", createdAt: "2026-08-26T07:00:00.000Z", updatedAt: "2026-08-26T07:00:00.000Z", messageCount: 0 }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [older],
+      }),
+    });
+    const revisedConversation: ConversationDetail = {
+      ...emptyConversation,
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "the first overnight isn't important, deadline in 2 weeks, recommend something else." }] },
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "I replaced tonight's set." }] },
+      ],
+      busy: false,
+    };
+    let emit: (event: MorrowEvent) => void = () => undefined;
+    const bootstrap = vi.fn(async () => initial);
+    const bridge = morrowBridge({
+      bootstrap,
+      openConversation: vi.fn(async () => emptyConversation),
+      onEvent: (listener) => {
+        emit = listener;
+        return () => undefined;
+      },
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    const tonight = await screen.findByLabelText("Tonight's overnights");
+    expect(tonight).toHaveTextContent("Ship the login fix");
+    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+
+    bootstrap.mockResolvedValue({
+      ...initial,
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [older, newer],
+      }),
+    });
+    await act(async () => {
+      emit({ type: "conversation", sessionId: revisedConversation.id, conversation: revisedConversation });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(bootstrap.mock.calls.length).toBeGreaterThan(1));
+    expect(tonight).toHaveTextContent("Replace the login work with a closer deadline");
+    expect(tonight).toHaveTextContent("Ship the docs pass tonight");
+    expect(tonight).not.toHaveTextContent("Ship the login fix");
+    expect(screen.getByRole("button", { name: "Start 2 selected" })).toBeInTheDocument();
+    expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
+  });
+
+  it("never starts Overnight from chat text such as 돌리기", async () => {
+    const item = planItem("one", "Ship the login fix");
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      conversations: [{ id: "conversation", path: "conversation", title: "Overnight planning", createdAt: "2026-08-26T07:00:00.000Z", updatedAt: "2026-08-26T07:00:00.000Z", messageCount: 0 }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [plan([item])],
+      }),
+    });
+    const sendMessage = vi.fn(async () => undefined);
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      openConversation: vi.fn(async () => emptyConversation),
+      sendMessage,
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Talk to Morrow about anything…"), { target: { value: "돌리기" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ text: "돌리기" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Talk to Morrow about anything…"), { target: { value: "start overnight" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ text: "start overnight" }));
+    expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
   });
 });

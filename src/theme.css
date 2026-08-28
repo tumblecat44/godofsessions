@@ -21,9 +21,6 @@
   --color-teal: #67c8b5;
   --color-danger: #e9918d;
 
-  --radius-panel: 18px;
-  --radius-control: 10px;
-
   --shadow-panel: 0 24px 80px rgb(0 3 8 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.025);
   --shadow-control: 0 8px 26px rgb(0 2 7 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.035);
 

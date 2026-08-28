@@ -17,7 +17,7 @@ test("centers the public slogan and the two conversion destinations", () => {
 test("puts a product surface directly inside the hero", () => {
   const hero = html.match(/<section class="hero"[\s\S]*?<div class="provider-strip"/)?.[0] ?? "";
   assert.match(hero, /app-window/);
-  assert.match(hero, /NIGHT PORTFOLIO/);
+  assert.match(hero, /TONIGHT'S OVERNIGHTS/);
   assert.match(hero, /MORNING REVIEW/);
   assert.match(hero, /PRODUCT UI · SYNTHETIC DATA/);
 });
@@ -26,7 +26,13 @@ test("names the four official execution routes without declaring universal readi
   for (const agent of agents) assert.match(html, new RegExp(agent, "i"));
   assert.doesNotMatch(html, /Cursor|Hermes|OpenClaw/i);
   assert.match(html, /ready agents only/i);
-  assert.match(html, /Nothing starts until you approve/i);
+  assert.match(html, /Start 3 selected/);
+  assert.match(html, /That one press starts only the checked cards/i);
+  assert.doesNotMatch(html, /Start Overnight/);
+  assert.doesNotMatch(html, /Open Overnight/);
+  assert.match(html, /4 routes visible/i);
+  assert.match(html, /0 Overnights is a valid answer/i);
+  assert.doesNotMatch(html, /(?:Claude Code|Grok Build|Pi Agent) · verified/i);
 });
 
 test("uses only the requested open-source trust line and explains the reference value below it", () => {

@@ -27,6 +27,8 @@ export function GitHubLogin({ language, onBegin, onComplete, onCancel, onOpenDev
       const next = await onBegin();
       if (attempt.current !== currentAttempt) return;
       setAuthorization(next);
+      // ponytail: open browser AFTER rendering device code so code stays visible
+      void onOpenDevicePage();
       const state = await onComplete();
       if (attempt.current === currentAttempt && state.status === "authenticated") onAuthenticated(state);
     } catch (reason) {
@@ -71,10 +73,12 @@ export function GitHubLogin({ language, onBegin, onComplete, onCancel, onOpenDev
   );
 }
 
-function signInError(reason: unknown, ko: boolean) {
+export function signInError(reason: unknown, ko: boolean) {
   const message = reason instanceof Error ? reason.message : String(reason);
   if (/cancel/i.test(message)) return ko ? "GitHub 로그인이 취소되었습니다." : "GitHub sign-in was cancelled.";
   if (/expired/i.test(message)) return ko ? "인증 코드가 만료되었습니다. 새 코드로 다시 시도하세요." : "The sign-in code expired. Try again with a new code.";
+  // ponytail: surface storage/encryption errors honestly instead of blaming network
+  if (/keychain|saved safely|encryption/i.test(message)) return message;
   return ko ? "인터넷 연결과 GitHub 상태를 확인한 뒤 다시 시도하세요." : "Check your internet connection and GitHub status, then try again.";
 }
 

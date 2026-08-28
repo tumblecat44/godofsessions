@@ -282,9 +282,8 @@ describe("Overnight provider runner", () => {
     }
   });
 
-  it("never calls the embedded Pi SDK from a synthetic typed proof", async () => {
-    const runPi = vi.fn(async () => ({ status: "completed" as const, providerReceiptId: "pi:session:pi-native", report: "The output contains verified." }));
-    const runner = new OvernightProviderRunner({ dataDir: "/private", runPi, now: () => new Date("2099-08-26T12:00:00.000Z") });
+  it("blocks embedded Pi execution even with a synthetic typed proof", async () => {
+    const runner = new OvernightProviderRunner({ dataDir: "/private", now: () => new Date("2099-08-26T12:00:00.000Z") });
 
     await expect(runner.run(contained({
       runId: "run",
@@ -293,7 +292,6 @@ describe("Overnight provider runner", () => {
       invocation: overnightProviderAdapterInvocation("pi", "/work/pi", "/private"),
       prompt: "PRIVATE PROMPT",
     }))).resolves.toMatchObject({ status: "failed", error: expect.stringMatching(/proof-bound OS sandbox/u) });
-    expect(runPi).not.toHaveBeenCalled();
   });
 
   it("fails closed when a provider exits without a native receipt", async () => {
@@ -474,15 +472,11 @@ describe("Overnight provider runner", () => {
     expect(launch).not.toHaveBeenCalled();
   });
 
-  it("stops every active child process while embedded Pi remains fail-closed", async () => {
+  it("stops every active child process while Pi remains fail-closed", async () => {
     const launched = stoppableProcess();
-    const runPi = vi.fn(({ signal }: { signal: AbortSignal }) => new Promise<{ status: "failed"; error: string }>((resolve) => {
-      signal.addEventListener("abort", () => resolve({ status: "failed", error: "stopped" }), { once: true });
-    }));
     const runner = new OvernightProviderRunner({
       dataDir: "/private",
       launchProcess: async () => launched,
-      runPi,
       now: () => new Date("2099-08-26T12:00:00.000Z"),
     });
     const codexRun = runner.run(contained({
@@ -500,7 +494,6 @@ describe("Overnight provider runner", () => {
       prompt: "PRIVATE PROMPT",
     }));
     await expect(piRun).resolves.toMatchObject({ status: "failed", error: expect.stringMatching(/proof-bound OS sandbox/u) });
-    expect(runPi).not.toHaveBeenCalled();
 
     await runner.stopRun("shared-run");
 

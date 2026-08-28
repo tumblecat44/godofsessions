@@ -10,26 +10,16 @@ interface SidebarProps {
   language: AppLanguage;
   conversations: ConversationSummary[];
   activeConversationId?: string;
-  overnightStatus?: "starting" | "running" | "stopping" | "attention";
-  activePortfolioItemCount?: number;
   onChange(view: AppView): void;
   onNewConversation(): void;
   onOpenConversation(path: string): void;
 }
 
-export function Sidebar({ view, language, conversations, activeConversationId, overnightStatus, activePortfolioItemCount, onChange, onNewConversation, onOpenConversation }: SidebarProps) {
+export function Sidebar({ view, language, conversations, activeConversationId, onChange, onNewConversation, onOpenConversation }: SidebarProps) {
   const [conversationQuery, setConversationQuery] = useState("");
   const ko = language === "ko";
   const relative = new Intl.RelativeTimeFormat(ko ? "ko" : "en", { numeric: "auto" });
-  const activeItems = typeof activePortfolioItemCount === "number" && Number.isInteger(activePortfolioItemCount) && activePortfolioItemCount > 0
-    ? activePortfolioItemCount
-    : undefined;
-  const orchestrateLabel = "Overnight";
-  const overnightBadge = overnightStatus === "starting"
-    ? activeItems ? `${activeItems} STARTING` : "STARTING"
-    : overnightStatus === "running"
-      ? activeItems ? `${activeItems} ACTIVE` : "ACTIVE"
-      : overnightStatus === "stopping" ? "STOPPING" : "! CHECK";
+  const overnightLabel = "Overnight";
   const normalizedQuery = conversationQuery.trim().toLocaleLowerCase(ko ? "ko" : "en");
   const visibleConversations = normalizedQuery
     ? conversations.filter((conversation) => conversation.title.toLocaleLowerCase(ko ? "ko" : "en").includes(normalizedQuery))
@@ -49,10 +39,9 @@ export function Sidebar({ view, language, conversations, activeConversationId, o
           {view === "chat" && <i className="workspace-nav__active" aria-hidden="true" />}
           <MessageCircle className={view === "chat" ? "text-amber" : ""} size={16} /><span className="max-[900px]:hidden">{ko ? "Morrow에게 묻기" : "Ask Morrow"}</span>
         </Button>
-        <Button variant="ghost" aria-label={orchestrateLabel} title={orchestrateLabel} className={navigationClass(view === "orchestrate")} onClick={() => onChange("orchestrate")}>
-          {view === "orchestrate" && <i className="workspace-nav__active" aria-hidden="true" />}
-          <Layers3 className={view === "orchestrate" ? "text-amber" : ""} size={16} /><span className="max-[900px]:hidden">Overnight</span>
-          {overnightStatus && <em className={`workspace-nav__overnight-status is-${overnightStatus} rounded-full border border-current/20 px-1.5 py-0.5 font-mono text-[8px] not-italic tracking-[0.08em] max-[900px]:hidden`} aria-hidden="true">{overnightBadge}</em>}
+        <Button variant="ghost" aria-label={overnightLabel} title={overnightLabel} className={navigationClass(view === "overnight")} onClick={() => onChange("overnight")}>
+          {view === "overnight" && <i className="workspace-nav__active" aria-hidden="true" />}
+          <Layers3 className={view === "overnight" ? "text-amber" : ""} size={16} /><span className="max-[900px]:hidden">Overnight</span>
         </Button>
         <Button variant="ghost" aria-label={ko ? "설정" : "Settings"} title={ko ? "설정" : "Settings"} className={navigationClass(view === "settings")} onClick={() => onChange("settings")}>
           {view === "settings" && <i className="workspace-nav__active" aria-hidden="true" />}

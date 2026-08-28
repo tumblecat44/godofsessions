@@ -1,4 +1,4 @@
-import type { OvernightExecutor } from "../../src/shared/contracts";
+import type { OvernightCliExecutor } from "../../src/shared/contracts";
 
 export interface OvernightExecutorInvocation {
   executorLabel: string;
@@ -117,7 +117,7 @@ export const CLAUDE_MACOS_OUTER_VERIFIED_SETTINGS = JSON.stringify({
 export const CLAUDE_MACOS_OUTER_VERIFIED_TOOLS = "Bash" as const;
 
 export function executorHelpSupportsOvernightInvocation(
-  executor: OvernightExecutor,
+  executor: OvernightCliExecutor,
   help: string,
   mode: OvernightExecutorInvocationMode = DEFAULT_OVERNIGHT_EXECUTOR_INVOCATION_MODE,
 ) {
@@ -141,7 +141,7 @@ export function executorHelpSupportsOvernightInvocation(
 }
 
 export function overnightExecutorInvocation(
-  executor: OvernightExecutor,
+  executor: OvernightCliExecutor,
   root: string,
   executablePath?: string,
   mode: OvernightExecutorInvocationMode = DEFAULT_OVERNIGHT_EXECUTOR_INVOCATION_MODE,
@@ -208,7 +208,7 @@ export function overnightExecutorInvocation(
 }
 
 export function overnightExecutorArgumentProbe(
-  executor: OvernightExecutor,
+  executor: OvernightCliExecutor,
   root: string,
   mode: OvernightExecutorInvocationMode = DEFAULT_OVERNIGHT_EXECUTOR_INVOCATION_MODE,
 ): OvernightExecutorCompatibilityProbe {
@@ -224,7 +224,7 @@ export function overnightExecutorArgumentProbe(
 }
 
 export function overnightExecutorCompatibilityProbe(
-  executor: OvernightExecutor,
+  executor: OvernightCliExecutor,
   root: string,
   mode: OvernightExecutorInvocationMode = DEFAULT_OVERNIGHT_EXECUTOR_INVOCATION_MODE,
 ): OvernightExecutorCompatibilityProbe {
@@ -242,7 +242,7 @@ export function overnightExecutorCompatibilityProbe(
   };
 }
 
-export function executorCompatibilityProbeOutputIsValid(executor: OvernightExecutor, output: string) {
+export function executorCompatibilityProbeOutputIsValid(executor: OvernightCliExecutor, output: string) {
   return executor !== "claude" || !/invalid settings/i.test(output);
 }
 

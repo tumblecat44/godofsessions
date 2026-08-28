@@ -17,6 +17,7 @@ import type {
 import { OvernightPortfolioCoordinator, type OvernightPortfolioItem } from "./overnight-portfolio-coordinator";
 import {
   OvernightPortfolioLedger,
+  overnightPrivatePathSha256,
   overnightFrozenBriefSha256,
   type OvernightPortfolioAssessmentRecord,
   type OvernightPortfolioExecutionAuthority,
@@ -42,7 +43,10 @@ import {
 import { overnightProviderHostRunId } from "./overnight-provider-process-recovery";
 import { OvernightProviderRunner } from "./overnight-provider-runner";
 import type { OvernightPortfolioCandidateProposal, OvernightPortfolioProposal } from "./overnight-portfolio-recommendation";
-import { MorrowService } from "./morrow-service";
+import {
+  MorrowService,
+  type MorrowOvernightProviderControlPlaneFactory,
+} from "./morrow-service";
 import type { EvaluateOvernightContextInput, OvernightContextEvaluationResult } from "./overnight-context-evaluator";
 
 function lastMessage(context: Context) {
@@ -134,7 +138,6 @@ function portfolioFixture(options: {
   const plans: OvernightPortfolioPlanSummary[] = [];
   const runs: OvernightPortfolioRunSummary[] = [...(options.runs ?? [])];
   let lastProposal: OvernightPortfolioProposal | undefined;
-  let lastReplan: { planId: string; input: unknown } | undefined;
   const stoppedRunIds: string[] = [];
   const resumedRunIds: string[] = [];
   const redispatchedItemIds: string[] = [];
@@ -186,10 +189,6 @@ function portfolioFixture(options: {
         requestKind: proposal.requestKind,
         disposition,
         planId: plan?.id,
-        selectionId: plan?.id,
-        editableItemIds: plan
-          ? candidates.filter((candidate) => candidate.disposition === "recommend").map((candidate) => candidate.stableKey)
-          : undefined,
         createdAt: "2026-08-26T18:00:00.000Z",
         contextGeneratedAt: "2026-08-26T17:59:00.000Z",
         candidates: candidates.map((candidate) => ({
@@ -198,11 +197,7 @@ function portfolioFixture(options: {
           resolvedProvider: candidate.preferredProvider === "auto" ? "codex" : candidate.preferredProvider,
         })),
       });
-      return { assessment: { disposition, candidates }, providerRoutes: routes, selectionId: plan?.id, plan };
-    },
-    replan: async (planId: string, input: unknown) => {
-      lastReplan = { planId, input };
-      return { status: "no_execution" as const, replacedPlanId: planId };
+      return { assessment: { disposition, candidates }, providerRoutes: routes, plan };
     },
     launch: async (planId: string) => {
       const run = {
@@ -253,7 +248,6 @@ function portfolioFixture(options: {
     readiness,
     routes,
     getLastProposal: () => lastProposal,
-    getLastReplan: () => lastReplan,
     stoppedRunIds,
     resumedRunIds,
     redispatchedItemIds,
@@ -402,9 +396,18 @@ async function persistedProviderRecoveryFixture(mode: "live" | "missing" | "mism
     items: items.map((item) => ({
       itemId: item.id,
       brief: frozenBrief(item.id),
-      invocation: invocations[item.id as keyof typeof invocations],
-      containmentProof: containments[item.id as keyof typeof containments].containmentProof,
-      allocation: { ...workspace, executionRoot: root, worktreeKey: root },
+      containmentAuthority: {
+        version: 3,
+        provider: item.provider,
+        executableSha256: containments[item.id as keyof typeof containments].containmentProof.executable.sha256,
+        identitySha256: containments[item.id as keyof typeof containments].containmentProof.invocation.sha256,
+        attestationSha256: containments[item.id as keyof typeof containments].containmentProof.attestation.sha256,
+        expiresAt: containments[item.id as keyof typeof containments].containmentProof.attestation.expiresAt,
+        executionRootSha256: overnightPrivatePathSha256("execution-root", root),
+        worktreeKeySha256: overnightPrivatePathSha256("worktree-key", root),
+        runtimeDirectorySha256: overnightPrivatePathSha256("runtime-directory", runtimeDirectory(item.id as keyof typeof invocations)),
+        writeScopes: ["*"],
+      },
     })),
   };
   const ledger = new OvernightPortfolioLedger({ dataDir });
@@ -454,7 +457,9 @@ async function persistedProviderRecoveryFixture(mode: "live" | "missing" | "mism
       invocationSha256: containments.running.containmentProof.invocation.sha256,
       token: "22222222-2222-4222-8222-222222222222",
     };
-    await ledger.issueLaunchCapability(launchCapability, startedAt);
+    await ledger.issueLaunchCapability(launchCapability, startedAt, {
+      attestationSha256: containments.running.containmentProof.attestation.sha256,
+    });
     const sourceRunner = new OvernightProviderRunner({ dataDir, providerHostPath });
     sourceRunPromise = sourceRunner.run({
       runId,
@@ -504,6 +509,47 @@ async function persistedProviderRecoveryFixture(mode: "live" | "missing" | "mism
       checks: { installation: "verified" as const, authentication: "verified" as const, containment: "verified" as const },
     }),
   };
+  const providerControlPlane = {
+    create: ({ approvalClaims }) => ({
+      verification: {
+        verify: async () => ({ state: "unsupported" as const, canVerify: false }),
+      },
+      readiness,
+      containmentControl: {
+        inspect: async (provider) => ({
+          status: "ready" as const,
+          provider,
+          executableSha256: containments.queued.containmentProof.executable.sha256,
+          identitySha256: containments.queued.containmentProof.invocation.sha256,
+          attestationSha256: containments.queued.containmentProof.attestation.sha256,
+          expiresAt: containments.queued.containmentProof.attestation.expiresAt,
+        }),
+        prepareApprovedLaunch: async (input) => {
+          const claim = await approvalClaims.consume(input);
+          if (!claim || !(input.itemId in containments)) {
+            return { status: "blocked" as const, provider: input.provider, reason: "synthetic_claim_rejected" };
+          }
+          const itemId = input.itemId as keyof typeof containments;
+          let available = true;
+          return {
+            status: "verified" as const,
+            provider: input.provider,
+            attestationSha256: containments[itemId].containmentProof.attestation.sha256,
+            async withPrivateBinding<T>(consumer: (binding: {
+              invocation: OvernightProviderAdapterInvocation;
+              containmentProof: VerifiedOvernightProviderContainmentProof;
+              launchBinding: VerifiedOvernightProviderLaunchBinding;
+            }) => Promise<T>) {
+              if (!available) throw new Error("synthetic launch binding was already consumed");
+              available = false;
+              return consumer({ invocation: invocations[itemId], ...containments[itemId] });
+            },
+            cleanup: async () => { available = false; },
+          };
+        },
+      },
+    }),
+  } satisfies MorrowOvernightProviderControlPlaneFactory;
   return {
     base,
     root,
@@ -514,6 +560,7 @@ async function persistedProviderRecoveryFixture(mode: "live" | "missing" | "mism
     runId,
     ledger,
     readiness,
+    providerControlPlane,
     livePids,
     async cleanup() {
       killSyntheticProcessGroup(providerHostPid);
@@ -712,12 +759,12 @@ describe("Morrow service dogfood", () => {
         })];
       } else if (userGoal?.includes("혼합 Overnight")) {
         candidates = [
-          portfolioCandidate("editable-second", { preferredProvider: "claude" }),
+          portfolioCandidate("safe-second", { preferredProvider: "claude" }),
           portfolioCandidate("question-only", {
             disposition: "clarify", reasonCodes: ["needs_user_decision"], outcome: "", verification: "",
             preferredProvider: "auto", providerReason: "", questions: ["Which bounded outcome should run?"],
           }),
-          portfolioCandidate("editable-first", { preferredProvider: "codex" }),
+          portfolioCandidate("safe-first", { preferredProvider: "codex" }),
           portfolioCandidate("already-done", {
             disposition: "no_run", reasonCodes: ["completed"], outcome: "", verification: "",
             preferredProvider: "auto", providerReason: "",
@@ -851,15 +898,11 @@ describe("Morrow service dogfood", () => {
     expect(observedSystemPrompt).toContain("Never rewrite an in-root absolute path as a ../ path");
     expect(observedSystemPrompt).toContain("Ignore credentials, auth files, caches, telemetry, and general logs");
     expect(observedSystemPrompt).toContain("private exact-coverage Overnight evaluator");
-    expect(observedSystemPrompt).toContain("A portfolio with no runnable candidate is valid");
     expect(observedSystemPrompt).toContain("Do not read files, run commands, inspect the repository, or synthesize candidate arrays");
-    expect(observedSystemPrompt).toContain("preserve every independent task");
     expect(observedSystemPrompt).toContain("Claude Code, Codex, Grok Build, and Pi Agent");
-    expect(observedSystemPrompt).toContain("Cursor, Hermes, and OpenClaw sessions may remain read-only evidence");
-    expect(observedSystemPrompt).toContain("instead of choosing an arbitrary item count or silently discarding work");
-    expect(observedSystemPrompt).toContain("direct the user to Overnight");
-    expect(observedSystemPrompt).toContain("“돌리기” is not execution approval");
-    expect(observedSystemPrompt).toContain("chat has no execution tool");
+    expect(observedSystemPrompt).toContain("Show up to three tonight recommendations");
+    expect(observedSystemPrompt).toContain("checked-card button is the start");
+    expect(observedSystemPrompt).toContain("Never start Overnight from chat text");
     expect(observedSystemPrompt).not.toContain("Choose exactly one");
     expect(observedSystemPrompt).not.toContain("current production Overnight executor is Codex");
     expect(observedToolNames).toContain("prepare_overnight");
@@ -920,7 +963,7 @@ describe("Morrow service dogfood", () => {
     await expect(readFile(join(root, "preparation-must-stay-read-only.txt"), "utf8")).rejects.toThrow();
 
     await service.sendMessage("Overnight를 준비해줘. 실행은 하지 마.");
-    expect(JSON.stringify(service.currentConversation().messages)).toContain("Overnight에서 항목과 실행기를 편집");
+    expect(JSON.stringify(service.currentConversation().messages)).toContain("Overnight에서 오늘의 정확한 안전 작업을 확인");
     const overnightSnapshot = (await service.bootstrap()).orchestration;
     expect(overnightSnapshot.portfolioPlans).toHaveLength(1);
     expect(overnightSnapshot.portfolioAssessments?.[0]).toMatchObject({
@@ -941,15 +984,6 @@ describe("Morrow service dogfood", () => {
     await service.sendMessage("돌리기");
     expect((await service.bootstrap()).orchestration.portfolioRuns).toHaveLength(0);
 
-    expect(await service.replanOvernightPortfolio({
-      planId: overnightSnapshot.portfolioPlans![0].id,
-      includedItemIds: ["night-check"],
-      providerByItem: { "night-check": "claude" },
-    })).toBeUndefined();
-    expect(portfolio.getLastReplan()).toEqual({
-      planId: overnightSnapshot.portfolioPlans![0].id,
-      input: { includedItemIds: ["night-check"], providerByItemId: { "night-check": "claude" } },
-    });
     const launched = await service.startOvernightPortfolio(overnightSnapshot.portfolioPlans![0].id);
     expect(launched.status).toBe("running");
     await service.stopOvernightPortfolio(launched.id);
@@ -978,7 +1012,6 @@ describe("Morrow service dogfood", () => {
     const mixedSnapshot = await service.orchestrationSnapshot();
     const mixedAssessment = mixedSnapshot.portfolioAssessments?.[0];
     expect(mixedAssessment?.planId).toBe(mixedSnapshot.portfolioPlans?.[0].id);
-    expect(mixedAssessment?.editableItemIds).toEqual(["editable-second", "editable-first"]);
     expect(mixedAssessment?.candidates.map((candidate) => candidate.disposition)).toEqual([
       "recommend", "clarify", "recommend", "no_run",
     ]);
@@ -1022,7 +1055,7 @@ describe("Morrow service dogfood", () => {
     expect(resumedBootstrap.conversations.some((item) => item.path === saved.path)).toBe(true);
     const restored = await resumed.openConversation(saved.path!);
     expect(JSON.stringify(restored.messages)).toContain("Dogfood Room");
-    expect(JSON.stringify(restored.messages)).toContain("Overnight에서 항목과 실행기를 편집");
+    expect(JSON.stringify(restored.messages)).toContain("Overnight에서 오늘의 정확한 안전 작업을 확인");
     expect(restored.thinkingLevel).toBe("high");
     expect(restored.model).toMatchObject({ provider: "morrow-dogfood" });
     expect(resumeEvents.some((event) => event.type === "notice")).toBe(false);
@@ -1044,7 +1077,7 @@ describe("Morrow service dogfood", () => {
     const response = (modelContext: Context) => {
       const last = lastMessage(modelContext);
       if (last?.role === "toolResult" && last.toolName === "prepare_overnight") {
-        return fauxAssistantMessage("Every discovered session was evaluated before the editable portfolio was prepared.");
+        return fauxAssistantMessage("Every discovered session was evaluated before the exact safe set was prepared.");
       }
       return fauxAssistantMessage(fauxToolCall("prepare_overnight", {
         requestKind: "goal",
@@ -1285,6 +1318,7 @@ describe("Morrow service dogfood", () => {
         providerHostPath: fixture.providerHostPath,
         contextHome: fixture.base,
         overnightPortfolioReadiness: fixture.readiness,
+        overnightProviderControlPlane: fixture.providerControlPlane,
         dailyContextBuilder: async () => ({
           summary: { date: "2026-08-26", timeZone: "America/Los_Angeles", generatedAt: new Date().toISOString(), totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "synthetic" },
           sessions: [],
@@ -1329,6 +1363,7 @@ describe("Morrow service dogfood", () => {
           providerHostPath: fixture.providerHostPath,
           contextHome: fixture.base,
           overnightPortfolioReadiness: fixture.readiness,
+          overnightProviderControlPlane: fixture.providerControlPlane,
           dailyContextBuilder: async () => ({
             summary: { date: "2026-08-26", timeZone: "America/Los_Angeles", generatedAt: new Date().toISOString(), totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "synthetic" },
             sessions: [],

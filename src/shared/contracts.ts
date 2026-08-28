@@ -1,4 +1,4 @@
-export type AppView = "chat" | "orchestrate" | "settings";
+export type AppView = "chat" | "overnight" | "settings";
 export type AppLanguage = "ko" | "en";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type LocalSessionProvider = "grok" | "claude" | "codex" | "cursor" | "pi" | "hermes" | "openclaw";
@@ -9,7 +9,8 @@ export const OVERNIGHT_EXECUTION_PROVIDERS = [
   "pi",
 ] as const;
 export type OvernightExecutionProvider = typeof OVERNIGHT_EXECUTION_PROVIDERS[number];
-export type OvernightExecutor = "codex" | "claude";
+/** Providers that share the direct stdin CLI invocation contract. */
+export type OvernightCliExecutor = "codex" | "claude";
 
 export function isOvernightExecutionProvider(value: unknown): value is OvernightExecutionProvider {
   return typeof value === "string"
@@ -164,9 +165,7 @@ export interface OvernightPortfolioAssessmentSummary {
   disposition: OvernightDisposition;
   candidates: OvernightPortfolioCandidateSummary[];
   planId?: string;
-  selectionId?: string;
-  editableItemIds?: string[];
-  editRequiredReason?: string;
+  scopeDecisionReason?: string;
   createdAt: string;
   contextGeneratedAt: string;
 }
@@ -212,7 +211,10 @@ export interface OvernightPortfolioRunItemSummary {
   verification?: string;
   provider: OvernightExecutionProvider;
   providerLabel: string;
-  status: "queued" | "running" | "completed" | "failed" | "skipped" | "stopped" | "timed_out" | "unknown";
+  status: "queued" | "running" | "completed" | "failed" | "skipped" | "stopped" | "timed_out";
+  /** Latest bounded provider activity. Raw provider logs never enter this summary. */
+  activity?: OvernightActivityKind;
+  activityAt?: string;
   providerReceiptId?: string;
   startedAt?: string;
   completedAt?: string;
@@ -231,17 +233,11 @@ export interface OvernightPortfolioRunSummary {
   id: string;
   planId: string;
   title: string;
-  status: "starting" | "running" | "completed" | "partial" | "failed" | "stopping" | "stopped" | "timed_out" | "unknown";
+  status: "starting" | "running" | "completed" | "partial" | "failed" | "stopping" | "stopped" | "timed_out";
   items: OvernightPortfolioRunItemSummary[];
   startedAt: string;
   updatedAt: string;
   completedAt?: string;
-}
-
-export interface OvernightPortfolioEditInput {
-  planId: string;
-  includedItemIds: string[];
-  providerByItem?: Partial<Record<string, OvernightExecutionProvider>>;
 }
 
 export interface OrchestrationSnapshot {
@@ -364,9 +360,10 @@ export interface MorrowBridge {
   disconnectProvider(providerId: string): Promise<void>;
   finishOnboarding(input: { language: AppLanguage }): Promise<void>;
   refreshDailyContext(): Promise<OrchestrationSnapshot>;
+  /** Read-only assessment used to keep the one-click Overnight launch ready. */
+  prepareOvernightPortfolio(): Promise<OrchestrationSnapshot>;
   verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
-  replanOvernightPortfolio(input: OvernightPortfolioEditInput): Promise<OvernightPortfolioPlanSummary | undefined>;
-  startOvernightPortfolio(planId: string): Promise<OvernightPortfolioRunSummary>;
+  startOvernightPortfolio(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary>;
   stopOvernightPortfolio(runId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   onEvent(listener: (event: MorrowEvent) => void): () => void;

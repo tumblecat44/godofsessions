@@ -67,10 +67,17 @@ export class OvernightWorktreeManager {
   }
 
   async allocate(snapshot: OvernightWorkspaceSnapshot, runId: string, itemId: string): Promise<OvernightWorkspaceAllocation> {
-    const planned = this.plannedAllocation(snapshot, runId, itemId);
-    if (snapshot.isolation === "shared") {
+    const root = await realpath(snapshot.root);
+    const canonical = {
+      ...snapshot,
+      root,
+      ...(snapshot.isolation === "shared" ? { workspaceKey: root } : {}),
+    };
+    const planned = this.plannedAllocation(canonical, runId, itemId);
+    if (canonical.isolation === "shared") {
       return planned;
     }
+    snapshot = canonical;
     if (!snapshot.repositoryRoot || !snapshot.repositoryRevision || snapshot.repositoryRelativeRoot === undefined) {
       throw new Error("The approved workspace does not contain a complete frozen git revision.");
     }

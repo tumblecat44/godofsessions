@@ -22,9 +22,9 @@ try {
   const page = await app.firstWindow();
   await page.getByRole("heading", { name: /GitHub/ }).waitFor();
   await page.getByRole("button", { name: /GitHub/ }).waitFor();
-  await page.getByText("GITHUB IDENTITY · NO REPOSITORY ACCESS", { exact: true }).waitFor();
+  await page.getByText("APP IDENTITY · NO REPOSITORY ACCESS", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: /Ask Morrow|Morrow에게 묻기/ }).count(), 0, "Morrow must stay behind the identity gate");
-  assert.equal(await page.getByRole("button", { name: /Orchestrate|Overnight 관리/ }).count(), 0, "Overnight must stay behind the identity gate");
+  assert.equal(await page.getByRole("button", { name: /Overnight/ }).count(), 0, "Overnight must stay behind the identity gate");
   await page.screenshot({ path: join(artifacts, "github-login-gate.png"), fullPage: true });
   process.stdout.write(`GitHub login gate dogfood passed. Synthetic artifact: ${join(artifacts, "github-login-gate.png")}\n`);
 } finally {

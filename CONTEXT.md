@@ -61,19 +61,12 @@ date. Its four advertised execution routes are Claude Code, Codex, Grok Build,
 and Pi Agent. Cursor, Hermes, and OpenClaw sessions may remain read-only
 evidence, but they are not selectable execution routes.
 
-Morrow returns every candidate as `recommend`, `clarify`, or `no_run` and keeps
-independent work as separate items. The user can include or exclude recommended
-items and choose a verified alternative provider. Editing never mutates an
-earlier approval authority: it creates a new exact plan, fingerprint, schedule,
-and expiry after dependencies, write conflicts, provider capacity, isolation,
-and the 450-minute night window are checked again. An empty or invalid
-portfolio cannot be approved.
-
-Without a specific goal, Morrow's default Night Plan centers on three valuable
-morning outcomes. Every other runnable result remains visible as a candidate
-that the user can add through conversation. A concrete goal or a required
-dependency may produce more than three results; three is a starting mix, not a
-portfolio limit.
+Morrow returns tonight's work as up to three cards on the Morrow chat. Every
+card starts checked. The user can uncheck a card, or tell Morrow why a card
+should be replaced. Starting Overnight runs only the checked cards. One Overnight
+is one card. Opening it on the Overnight tab shows that card's board. A route
+can run when its official CLI is on PATH. Containment canaries are not a Ready
+gate.
 
 Preparing another recommendation replaces the current runnable Night Plan.
 When the new judgment is `clarify` or `no_run`, no earlier draft remains
@@ -86,19 +79,19 @@ in parallel and serializes shared roots, overlapping scopes, explicit
 conflicts, dependencies, and provider-capacity contention. Each provider worker
 is prohibited from spawning its own subagents.
 
-A route is `Ready` only when its local installation, authentication, and every
-OS containment and capability canary required by that route are verified. A
-missing or failed proof is `Setup` or `Blocked` with the reason visible in
-Overnight. A successful executable lookup, help command, or authentication
-probe alone is not execution readiness. Unsupported provider limitations stay
-visible and fail closed.
+A route is `Ready` when its official CLI is installed and on PATH. Settings
+detects `claude`, `codex`, `grok`, and bundled Pi that way. There is no in-app
+Overnight OAuth and no Safety check or OS containment canary as a Ready gate.
+Missing CLIs stay `Setup` or `Blocked` with the reason visible in Settings.
+Start lives on Morrow as `Start N selected`, not on the Overnight tab.
 
-Ordinary refresh, recommendation, and editing read only static official-runtime
-identity plus a stored path-free attestation. A provider canary runs only after
-the user explicitly chooses Verify or Reverify, and a failed reverification
-invalidates the earlier proof. After Run approval, the ledger consumes the
-exact running item claim before creating its process-private sandbox binding;
-private root, worktree, runtime, and profile paths never enter durable authority.
+Opening an Overnight card shows that card's board. The board splits the purpose
+into tickets: the outcome, the morning check, and a CLI label on each ticket.
+
+Ordinary refresh, recommendation, and revision stay read-only. After the one
+Morrow start approval, the ledger records the frozen selected items, providers,
+outcomes, verification, root, schedule, and deadline. Private root, worktree,
+runtime, and profile paths never enter durable authority.
 
 The durable authority and run ledgers keep bounded, redacted approval metadata,
 fingerprints, status, and provider-native receipt identifiers. Raw transcripts,
@@ -113,5 +106,4 @@ claim completion when verification is missing or failed. This pre-release
 codebase has no singular legacy board or stored-history compatibility branch.
 _Avoid_: hidden start, reusable approval, state-specific page modes,
 singular compatibility branches,
-provider readiness inferred from installation alone, provider-worker
-subagents, cloud queue
+provider-worker subagents, cloud queue, Safety check as a Ready gate

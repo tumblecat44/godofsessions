@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import type { Readable, Writable } from "node:stream";
-import type { OvernightExecutionProvider, OvernightExecutor } from "../../src/shared/contracts";
+import type { OvernightActivityKind, OvernightCliExecutor, OvernightExecutionProvider } from "../../src/shared/contracts";
 import { AcpJsonRpcClient, type AcpPermissionRequest } from "./overnight-acp-client";
 import type { OvernightPortfolioItem } from "./overnight-portfolio-coordinator";
 import {
@@ -75,6 +75,7 @@ export interface OvernightProviderRunInput {
   launchBinding: Readonly<VerifiedOvernightProviderLaunchBinding>;
   launchCapability: Readonly<OvernightProviderLaunchCapability>;
   prompt: string;
+  onActivity?(activity: OvernightActivityKind): void;
 }
 
 export interface OvernightProviderRunResult {
@@ -83,8 +84,6 @@ export interface OvernightProviderRunResult {
   report?: string;
   error?: string;
 }
-
-export type OvernightPiRunner = (input: OvernightProviderRunInput & { signal: AbortSignal }) => Promise<OvernightProviderRunResult>;
 
 export interface OvernightAcpPermissionContext {
   provider: OvernightExecutionProvider;
@@ -98,7 +97,6 @@ export interface OvernightProviderRunnerOptions {
   dataDir: string;
   providerHostPath?: string;
   launchProcess?: OvernightProviderProcessLauncher;
-  runPi?: OvernightPiRunner;
   approveAcpPermission?: (context: OvernightAcpPermissionContext) => boolean | Promise<boolean>;
   now?: () => Date;
 }
@@ -116,11 +114,9 @@ export class OvernightProviderRunner {
   private readonly dataDir: string;
   private readonly providerHostPath: string;
   private readonly launchProcess: OvernightProviderProcessLauncher;
-  private readonly runPi?: OvernightPiRunner;
   private readonly approveAcpPermission?: OvernightProviderRunnerOptions["approveAcpPermission"];
   private readonly now: () => Date;
   private readonly activeProcesses = new Map<string, Set<OvernightLaunchedProviderProcess>>();
-  private readonly activePiControllers = new Map<string, Set<AbortController>>();
   private readonly pendingLaunches = new Map<string, Set<PendingProviderLaunch>>();
 
   constructor(options: OvernightProviderRunnerOptions) {
@@ -131,7 +127,6 @@ export class OvernightProviderRunner {
       dataDir: options.dataDir,
       providerHostPath: this.providerHostPath,
     });
-    this.runPi = options.runPi;
     this.approveAcpPermission = options.approveAcpPermission;
   }
 
@@ -212,10 +207,8 @@ export class OvernightProviderRunner {
 
   async stopRun(runId: string) {
     const processes = [...(this.activeProcesses.get(runId) ?? [])];
-    const controllers = [...(this.activePiControllers.get(runId) ?? [])];
     const pendingLaunches = [...(this.pendingLaunches.get(runId) ?? [])];
     pendingLaunches.forEach((pending) => pending.cancel());
-    controllers.forEach((controller) => controller.abort(new Error("사용자가 Overnight 실행을 중지했습니다.")));
     await Promise.all([...pendingLaunches.map((pending) => pending.completion), ...processes.map(async (handle) => {
       if (handle.terminateAndWait) return handle.terminateAndWait("SIGTERM");
       handle.terminate("SIGTERM");
@@ -231,11 +224,10 @@ export class OvernightProviderRunner {
     }, input);
   }
 
-  private async runEmbedded(input: OvernightProviderRunInput) {
-    if (input.item.provider !== "pi" || !this.runPi) return failed("Pi Agent의 승인된 embedded SDK 실행기가 연결되지 않았습니다.");
-    // The current SDK adapter runs inside Electron. Until the SDK and every
-    // tool subprocess execute inside the exact proof-bound OS sandbox child,
-    // no typed/synthetic containment object may authorize this direct call.
+  private async runEmbedded(_input: OvernightProviderRunInput) {
+    // Pi remains visible as Blocked until its SDK and every tool subprocess run
+    // inside the exact proof-bound OS sandbox child. Do not keep a dormant
+    // in-process execution path that could be mistaken for production support.
     return failed("Pi Agent SDK가 proof-bound OS sandbox child에 연결되지 않아 Overnight 실행을 차단했습니다.");
   }
 
@@ -243,7 +235,11 @@ export class OvernightProviderRunner {
     if (input.item.provider !== "codex" && input.item.provider !== "claude") {
       return failed("CLI Overnight 실행 경로의 공급자 계약이 올바르지 않습니다.");
     }
-    const collector = createOvernightResultCollector(input.item.provider as OvernightExecutor, () => undefined, input.item.verification);
+    const collector = createOvernightResultCollector(
+      input.item.provider as OvernightCliExecutor,
+      (activity) => input.onActivity?.(activity),
+      input.item.verification,
+    );
     const nativeReceipt = createNativeReceiptCollector(input.item.provider);
     launched.stdout.on("data", (chunk: Buffer | string) => {
       collector.push(chunk);
@@ -285,6 +281,7 @@ export class OvernightProviderRunner {
         verification: input.item.verification,
       }),
       onUpdate: (update) => {
+        input.onActivity?.(acpActivity(update, expectedCommands));
         if (update.sessionUpdate === "agent_message_chunk" && isRecord(update.content) && update.content.type === "text" && typeof update.content.text === "string") {
           if (reportLength >= OVERNIGHT_RESULT_LIMIT) return;
           const text = update.content.text.slice(0, OVERNIGHT_RESULT_LIMIT - reportLength);
@@ -332,6 +329,19 @@ export class OvernightProviderRunner {
       await Promise.allSettled([pump, launched.wait]);
     }
   }
+}
+
+function acpActivity(
+  update: Record<string, unknown>,
+  expectedCommands: ReadonlySet<string>,
+): OvernightActivityKind {
+  if (update.sessionUpdate === "agent_message_chunk") return "reporting";
+  if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return "working";
+  const command = structuredCommand(update.rawInput);
+  if (command && verificationCommandReceiptKeys(command).some((key) => expectedCommands.has(key))) {
+    return "verification";
+  }
+  return update.kind === "edit" ? "file-change" : "command";
 }
 
 function writeScopesMatchProof(input: Readonly<OvernightProviderRunInput>) {
@@ -488,6 +498,7 @@ function createGuardedProviderLauncher(options: { dataDir: string; providerHostP
       parentStartIdentity: parentStartIdentity ?? "unavailable:win32",
       provider: invocation.provider,
       executable: invocation.executableName,
+      args: [...invocation.args],
       invocationSha256,
       providerHostPath: options.providerHostPath,
       requestPath,
@@ -505,6 +516,7 @@ function createGuardedProviderLauncher(options: { dataDir: string; providerHostP
         proofSha256,
         environmentSha256,
         executableSha256: identity.containmentProof.executable.sha256,
+        attestationSha256: identity.containmentProof.attestation.sha256,
         wrapperInvocationSha256: identity.containmentProof.executable.wrapperInvocationSha256,
         providerHostSha256: identity.containmentProof.launcher.providerHostSha256,
         sandboxLauncherPath: identity.launchBinding.sandboxLauncherPath,

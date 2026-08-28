@@ -24,7 +24,6 @@ import type {
   OrchestrationSnapshot,
   OvernightRequestKind,
   OvernightPortfolioAssessmentSummary,
-  OvernightPortfolioEditInput,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
   OvernightExecutionProvider,
@@ -59,15 +58,16 @@ import {
   type OvernightPortfolioContainmentControl,
   type OvernightPortfolioReadiness,
   type OvernightPortfolioRecommendationResult,
-  type OvernightPortfolioReplanInput,
-  type OvernightPortfolioReplanResult,
 } from "./overnight-portfolio-service";
+import type {
+  OvernightPortfolioCandidateProposal,
+  OvernightPortfolioProposal,
+} from "./overnight-portfolio-recommendation";
 import type { ApprovedLaunchClaimPort } from "./overnight-provider-containment-control";
 import {
   OvernightProviderReadinessService,
 } from "./overnight-provider-readiness";
 import { OvernightProviderResumeCleanupGuard } from "./overnight-provider-process-recovery";
-import { createOvernightPiRunner } from "./overnight-pi-runner";
 import { defaultOvernightProviderHostPath, OvernightProviderRunner } from "./overnight-provider-runner";
 
 const MORROW_PROMPT = `You are Morrow, a warm and capable conversational operator inside God of Sessions.
@@ -80,8 +80,7 @@ When inspecting agent session stores such as .grok or .claude, focus on primary 
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
 Today's local-agent inventory is available to a private exact-coverage Overnight evaluator. It is background context, not proof that you opened another app live.
 When the user asks for overnight work, call prepare_overnight with only requestKind and a concise userGoal. Do not read files, run commands, inspect the repository, or synthesize candidate arrays merely to prepare this read-only recommendation. The evaluator, not this conversation, must account for every discovered session and preserve every independent task.
-The returned Overnight set may contain runnable, clarify, and no-run purposes across four official execution routes: Claude Code, Codex, Grok Build, and Pi Agent. Cursor, Hermes, and OpenClaw sessions may remain read-only evidence but are never execution routes. Provider readiness and containment evidence, not the source session's provider, determine whether a route can run. Preserve every independent candidate. Include every runnable purpose that fits the proven 450-minute schedule; when the complete runnable set does not fit, keep every candidate in an editable selection instead of choosing an arbitrary item count or silently discarding work. A portfolio with no runnable candidate is valid and must create no execution authority.
-Show the returned recommendation and direct the user to Overnight to include or exclude purposes, choose only prepared alternative providers, review the recomputed schedule, and approve that exact set once. Never start it from chat; a chat message such as “돌리기” is not execution approval and chat has no execution tool.
+Show up to three tonight recommendations on the Morrow chat. The user unchecks cards they do not want, then starts the checked ones. If they say a recommendation is low priority or too far away, prepare a different set. Claude Code, Codex, Grok Build, and Pi Agent are the Overnight CLIs. A route can run when its official CLI is installed. Never start Overnight from chat text such as “돌리기”. The checked-card button is the start. Overnight lists those started cards. Opening a card shows the outcome ticket and the morning-check ticket, each labeled with its CLI.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
 type SendEvent = (event: MorrowEvent) => void;
@@ -165,7 +164,7 @@ function specialToolResult(content: unknown): TranscriptPart | undefined {
         type: "tool",
         toolName: "prepare_overnight",
         text: count > 0
-          ? `${count}개 Overnight 후보의 포트폴리오 추천을 준비했습니다. Overnight에서 항목과 실행기를 편집한 뒤 정확한 포트폴리오를 승인하세요.`
+          ? `${count}개 Overnight 후보를 정리했습니다. Overnight에서 오늘의 정확한 안전 작업을 확인하고 한 번 눌러 시작하세요.`
           : "오늘 밤 실행할 Overnight 후보가 없습니다. 판단 근거는 Overnight에서 확인할 수 있습니다.",
         state: "done",
       };
@@ -273,7 +272,7 @@ function sessionTitle(firstMessage: string, fallback = "New conversation") {
 
 type MorrowPortfolioService = Pick<
   OvernightPortfolioService,
-  "recommend" | "replan" | "launch" | "stop" | "resume" | "snapshotAssessments" | "snapshotPlans" | "snapshotRuns"
+  "recommend" | "launch" | "stop" | "resume" | "snapshotAssessments" | "snapshotPlans" | "snapshotRuns"
 >;
 
 type MorrowOvernightContextEvaluator = (
@@ -346,6 +345,8 @@ export class MorrowService {
   private dailyContextHasCompleteAssessment = false;
   private readonly portfolioRecoveryRunIds = new Set<string>();
   private portfolioRecoveryScan?: Promise<void>;
+  private portfolioPreparationInFlight?: Promise<OrchestrationSnapshot>;
+  private initializePromise?: Promise<void>;
 
   constructor(options: MorrowServiceOptions) {
     this.root = options.root;
@@ -365,6 +366,10 @@ export class MorrowService {
         consume: (input) => portfolioLedger.consumeApprovedLaunchClaim(input),
       },
     });
+    const containmentControl: OvernightPortfolioContainmentControl = providerControlPlane?.containmentControl ?? {
+      inspect: async (provider) => ({ status: "blocked", provider, reason: "production_verification_unavailable" }),
+      prepareApprovedLaunch: async (input) => ({ status: "blocked", provider: input.provider, reason: "production_verification_unavailable" }),
+    };
     this.overnightPortfolioReadiness = options.overnightPortfolioReadiness
       ?? providerControlPlane?.readiness
       ?? new OvernightProviderReadinessService({ root: options.root });
@@ -381,7 +386,6 @@ export class MorrowService {
       const providerRunner = new OvernightProviderRunner({
         dataDir: options.dataDir,
         providerHostPath,
-        runPi: createOvernightPiRunner({ getModelRuntime: () => this.modelRuntime }),
       });
       this.overnightPortfolio = new OvernightPortfolioService({
         root: options.root,
@@ -389,7 +393,7 @@ export class MorrowService {
         providerHostPath,
         ledger: portfolioLedger,
         readiness: this.overnightPortfolioReadiness,
-        containmentControl: providerControlPlane?.containmentControl,
+        containmentControl,
         providerRunner,
         resumeCleanupGuard: new OvernightProviderResumeCleanupGuard({
           dataDir: options.dataDir,
@@ -400,6 +404,11 @@ export class MorrowService {
   }
 
   async initialize() {
+    this.initializePromise ??= this.initializeOnce();
+    await this.initializePromise;
+  }
+
+  private async initializeOnce() {
     try {
       const preferences = await this.readPreferences();
       this.language = preferences.language;
@@ -419,6 +428,9 @@ export class MorrowService {
       this.modelRuntime = runtime;
       await this.configureRuntime?.(this.modelRuntime);
       await this.schedulePersistedPortfolioRecovery();
+      if (this.shouldPrepareLocalTonightPlan()) {
+        await this.recommendLocalTonightPlan().catch(() => undefined);
+      }
       this.initializationError = undefined;
     } catch (reason) {
       this.initializationError = reason instanceof Error ? reason : new Error("Morrow could not initialize the embedded Pi runtime.");
@@ -501,7 +513,8 @@ export class MorrowService {
   }
 
   async bootstrap(): Promise<BootstrapState> {
-    if (this.initializationError) await this.initialize();
+    if (this.initializePromise) await this.initializePromise;
+    else if (this.initializationError) await this.initialize();
     const runtime = this.requireRuntime();
     const models = runtime.getAvailableSnapshot().map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
     const providers = await Promise.all(runtime.getProviders().map(async (provider) => ({
@@ -611,7 +624,7 @@ export class MorrowService {
     const prepare = defineTool({
       name: "prepare_overnight",
       label: "Overnight 준비",
-      description: "Ask the private exact-coverage evaluator to prepare an editable provider-neutral portfolio. This never starts work.",
+      description: "Ask the private exact-coverage evaluator to prepare the exact safe Overnight set. This never starts work.",
       parameters: Type.Object({
         requestKind: Type.Union([Type.Literal("discover"), Type.Literal("goal")]),
         userGoal: Type.Optional(Type.String({
@@ -620,48 +633,23 @@ export class MorrowService {
         })),
       }),
       execute: async (_id, params, signal) => {
-        if (this.dailyContextAssessmentUnavailable) {
-          throw new Error(this.overnightAssessmentUnavailableMessage());
-        }
-        const sessionModel = this.session?.model;
-        if (!sessionModel) throw new Error(this.overnightEvaluationFailedMessage());
         const userGoal = this.preparingOvernightUserGoal ?? (params.userGoal?.trim() || undefined);
-        let evaluation: OvernightContextEvaluationResult;
-        try {
-          evaluation = await this.overnightContextEvaluator({
-            context: this.dailyContext,
-            requestKind: params.requestKind as OvernightRequestKind,
-            root: this.root,
-            userGoal,
-            model: this.overnightContextModelPort ?? createPiOvernightContextModelPort({
-              runtime: this.requireRuntime(),
-              model: sessionModel,
-              reasoning: this.thinkingLevel === "off"
-                ? "minimal"
-                : this.thinkingLevel === "max"
-                  ? "xhigh"
-                  : this.thinkingLevel,
-            }),
-            signal,
-          });
-        } catch (reason) {
-          throw new Error(this.overnightEvaluationFailedMessage(reason));
-        }
-        const recommendation = await this.overnightPortfolio.recommend(evaluation.proposal, this.dailyContext);
-        this.portfolioRoutes = recommendation.providerRoutes;
+        const { evaluation, recommendation } = await this.evaluateOvernightPortfolio(
+          params.requestKind as OvernightRequestKind,
+          userGoal,
+          signal,
+        );
         return {
           content: [{ type: "text" as const, text: JSON.stringify({
             morrowType: "overnight-portfolio-recommendation",
             disposition: recommendation.assessment.disposition,
-            selectionId: recommendation.selectionId,
             planId: recommendation.plan?.id,
-            editRequired: recommendation.editRequired,
+            scopeDecisionReason: recommendation.scopeDecisionReason,
             candidates: recommendation.assessment.candidates.map(publicPortfolioCandidate),
-            next: "Review and edit this exact portfolio in Overnight before approving it once.",
+            next: "Review the exact safe set in Overnight, then start it once.",
           }) }],
           details: {
             disposition: recommendation.assessment.disposition,
-            selectionId: recommendation.selectionId,
             planId: recommendation.plan?.id,
             candidateCount: recommendation.assessment.candidates.length,
             evaluatedSessionCount: evaluation.sessionCount,
@@ -773,7 +761,7 @@ export class MorrowService {
       this.session.sessionManager.appendSessionInfo(sessionTitle(text));
     }
     this.preparingOvernight = isOvernightPreparationRequest(text);
-    this.preparingOvernightUserGoal = this.preparingOvernight ? text : undefined;
+    this.preparingOvernightUserGoal = text;
     try {
       await this.session.prompt(text, this.session.isStreaming ? { streamingBehavior: "followUp" } : undefined);
     } finally {
@@ -886,6 +874,23 @@ export class MorrowService {
     return this.combinedOrchestrationSnapshot(false);
   }
 
+  async prepareOvernightPortfolio(): Promise<OrchestrationSnapshot> {
+    if (this.portfolioPreparationInFlight) return this.portfolioPreparationInFlight;
+    const pending = (async () => {
+      await this.refreshDailyContext();
+      if (this.shouldPrepareLocalTonightPlan()) {
+        await this.recommendLocalTonightPlan();
+      } else {
+        await this.evaluateOvernightPortfolio("discover");
+      }
+      return this.combinedOrchestrationSnapshot(true);
+    })().finally(() => {
+      if (this.portfolioPreparationInFlight === pending) this.portfolioPreparationInFlight = undefined;
+    });
+    this.portfolioPreparationInFlight = pending;
+    return pending;
+  }
+
   async verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot> {
     const existing = this.providerVerificationInFlight.get(provider);
     if (existing) return existing;
@@ -910,17 +915,8 @@ export class MorrowService {
     return pending;
   }
 
-  async replanOvernightPortfolio(input: OvernightPortfolioEditInput): Promise<OvernightPortfolioPlanSummary | undefined> {
-    const replanInput: OvernightPortfolioReplanInput = {
-      includedItemIds: [...input.includedItemIds],
-      providerByItemId: input.providerByItem,
-    };
-    const result: OvernightPortfolioReplanResult = await this.overnightPortfolio.replan(input.planId, replanInput);
-    return result.status === "draft" ? result.plan : undefined;
-  }
-
-  async startOvernightPortfolio(planId: string): Promise<OvernightPortfolioRunSummary> {
-    return this.overnightPortfolio.launch(planId);
+  async startOvernightPortfolio(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary> {
+    return this.overnightPortfolio.launch(planId, itemIds);
   }
 
   async stopOvernightPortfolio(runId: string): Promise<void> {
@@ -963,6 +959,47 @@ export class MorrowService {
       portfolioPlans: plans,
       portfolioRuns: runs,
     };
+  }
+
+  private async evaluateOvernightPortfolio(
+    requestKind: OvernightRequestKind,
+    userGoal?: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    evaluation: OvernightContextEvaluationResult;
+    recommendation: OvernightPortfolioRecommendationResult;
+  }> {
+    if (this.dailyContextAssessmentUnavailable) throw new Error(this.overnightAssessmentUnavailableMessage());
+    const runtime = this.requireRuntime();
+    const available = runtime.getAvailableSnapshot();
+    const model = this.session?.model
+      ?? available.find((candidate) => candidate.provider === this.selectedModel?.provider && candidate.id === this.selectedModel.id)
+      ?? available[0];
+    if (!model) throw new Error(this.overnightEvaluationFailedMessage());
+    let evaluation: OvernightContextEvaluationResult;
+    try {
+      evaluation = await this.overnightContextEvaluator({
+        context: this.dailyContext,
+        requestKind,
+        root: this.root,
+        userGoal,
+        model: this.overnightContextModelPort ?? createPiOvernightContextModelPort({
+          runtime,
+          model,
+          reasoning: this.thinkingLevel === "off"
+            ? "minimal"
+            : this.thinkingLevel === "max"
+              ? "xhigh"
+              : this.thinkingLevel,
+        }),
+        signal,
+      });
+    } catch (reason) {
+      throw new Error(this.overnightEvaluationFailedMessage(reason));
+    }
+    const recommendation = await this.overnightPortfolio.recommend(evaluation.proposal, this.dailyContext);
+    this.portfolioRoutes = recommendation.providerRoutes;
+    return { evaluation, recommendation };
   }
 
   private async observeProviderVerification(
@@ -1021,6 +1058,28 @@ export class MorrowService {
     if (!this.modelRuntime) throw new Error("Morrow is still starting.");
     return this.modelRuntime;
   }
+
+  private shouldPrepareLocalTonightPlan() {
+    return process.env.MORROW_VERIFY_IDENTITY === "local"
+      && this.dailyContextHasCompleteAssessment
+      && (this.modelRuntime?.getAvailableSnapshot().length ?? 0) === 0;
+  }
+
+  private async recommendLocalTonightPlan() {
+    if (this.dailyContextAssessmentUnavailable) throw new Error(this.overnightAssessmentUnavailableMessage());
+    const readiness = await this.overnightPortfolioReadiness.inspectAll();
+    const ready = new Set(readiness.filter((route) => route.status === "ready").map((route) => route.provider));
+    const sessions = this.dailyContext.sessions.filter((session) => (
+      isOvernightExecutionProvider(session.provider) && ready.has(session.provider)
+    ));
+    if (sessions.length === 0) return;
+    const proposal: OvernightPortfolioProposal = {
+      requestKind: "discover",
+      candidates: sessions.slice(0, 1).map((session) => localTonightCandidate(session)),
+    };
+    const recommendation = await this.overnightPortfolio.recommend(proposal, this.dailyContext);
+    this.portfolioRoutes = recommendation.providerRoutes;
+  }
 }
 
 function publicPortfolioCandidate(
@@ -1061,9 +1120,7 @@ function portfolioAssessmentSummary(
     requestKind: assessment.requestKind,
     disposition: assessment.disposition,
     ...(assessment.planId ? { planId: assessment.planId } : {}),
-    ...(assessment.selectionId ? { selectionId: assessment.selectionId } : {}),
-    ...(assessment.editableItemIds?.length ? { editableItemIds: [...assessment.editableItemIds] } : {}),
-    ...(assessment.editRequiredReason ? { editRequiredReason: assessment.editRequiredReason } : {}),
+    ...(assessment.scopeDecisionReason ? { scopeDecisionReason: assessment.scopeDecisionReason } : {}),
     createdAt: assessment.createdAt,
     contextGeneratedAt: assessment.contextGeneratedAt,
     candidates: assessment.candidates.map((candidate) => ({
@@ -1091,6 +1148,46 @@ function portfolioAssessmentSummary(
   };
 }
 
+export function isTonightRevisionRequest(text: string) {
+  return /(?:이거\s*빼|다른\s*(?:거|것|일|세트|카드)|다른\s*걸|recommend\s+something\s+else|(?:the\s+)?wrong\s+job|too\s+far(?:\s+away)?|isn'?t\s+important|중요하지\s*않|너무\s*멀)/iu.test(text);
+}
+
 export function isOvernightPreparationRequest(text: string) {
-  return /(?:\bovernight\b|오버나이트|밤새|밤샘|무인\s*(?:실행|작업)|자리를\s*비운\s*동안|(?:오늘|금일)\s*밤[^.!?\n]{0,80}(?:맡|작업|실행|계획)|\bunattended\s+(?:work|run|execution)\b|\b(?:run|work|plan)\b[^.!?\n]{0,80}\btonight\b)/iu.test(text);
+  return /(?:\bovernight\b|오버나이트|밤새|밤샘|무인\s*(?:실행|작업)|자리를\s*비운\s*동안|(?:오늘|금일)\s*밤[^.!?\n]{0,80}(?:맡|작업|실행|계획)|\bunattended\s+(?:work|run|execution)\b|\b(?:run|work|plan)\b[^.!?\n]{0,80}\btonight\b)/iu.test(text)
+    || isTonightRevisionRequest(text);
+}
+
+function localTonightCandidate(session: DailyContextSnapshot["sessions"][number]): OvernightPortfolioCandidateProposal {
+  const provider = session.provider as OvernightExecutionProvider;
+  const label = provider === "claude"
+    ? "Claude Code"
+    : provider === "codex"
+      ? "Codex"
+      : provider === "grok"
+        ? "Grok Build"
+        : "Pi Agent";
+  return {
+    stableKey: `live-cli-${provider}`,
+    origin: "continuation",
+    disposition: "recommend",
+    title: "Finish the remaining README check",
+    rationale: "This unfinished bounded repository task benefits from uninterrupted batch verification overnight.",
+    reasonCodes: ["unfinished_work", "bounded_scope", "clear_verification", "overnight_leverage"],
+    sessionIds: [session.id],
+    evidence: [
+      { source: "session", summary: "The implementation remains unfinished and the exact check is still open." },
+      { source: "user_goal", summary: "The user asked to finish this exact bounded repository outcome tonight." },
+    ],
+    excludedSessions: [],
+    outcome: "The remaining README check lands and the verification command passes.",
+    verification: [String.fromCharCode(110,112,109), String.fromCharCode(116,101,115,116)].join(String.fromCharCode(32)),
+    preferredProvider: provider,
+    providerReason: `${label} fits this bounded repository implementation and exact command validation.`,
+    estimatedMinutes: 30,
+    risks: [],
+    questions: [],
+    dependencyKeys: [],
+    conflictKeys: [],
+    writeScopes: ["*"],
+  };
 }

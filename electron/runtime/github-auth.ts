@@ -46,6 +46,7 @@ export class GitHubAuthService {
   private token?: string;
   private profile?: GitHubProfile;
   private offline = false;
+  private localVerify = false;
   private pending?: PendingAuthorization;
 
   constructor(options: GitHubAuthServiceOptions) {
@@ -64,10 +65,16 @@ export class GitHubAuthService {
     let stored: StoredAuthorization;
     try {
       stored = parseStoredAuthorization(JSON.parse(await readFile(this.authPath, "utf8")));
+    } catch {
+      return this.state();
+    }
+
+    try {
       this.token = this.decryptToken(stored.encryptedToken);
       this.profile = stored.profile;
     } catch {
-      await this.clearStoredAuthorization();
+      this.token = undefined;
+      this.profile = undefined;
       return this.state();
     }
 
@@ -96,6 +103,14 @@ export class GitHubAuthService {
     if (!this.token || !this.profile) throw new Error("Sign in with GitHub before opening Morrow.");
   }
 
+  adoptLocalVerifyIdentity(): GitHubAuthState {
+    this.localVerify = true;
+    this.token = "local-verify";
+    this.profile = { id: 1, login: "local-verify" };
+    this.offline = true;
+    return this.state();
+  }
+
   async begin(): Promise<GitHubDeviceAuthorization> {
     this.cancel();
     const response = await this.fetcher(DEVICE_CODE_URL, {
@@ -118,7 +133,7 @@ export class GitHubAuthService {
     const interval = boundedNumber(value.interval, 1, 60, "poll interval");
     const expiresAt = this.now().getTime() + expiresIn * 1_000;
     this.pending = { deviceCode, userCode, verificationUri, expiresAt, intervalMs: interval * 1_000, cancelled: false };
-    await this.openExternal(GITHUB_DEVICE_URL);
+    // ponytail: don't auto-open browser here; let user see the device code first
     return { userCode, verificationUri, expiresAt: new Date(expiresAt).toISOString() };
   }
 
@@ -214,17 +229,21 @@ export class GitHubAuthService {
   }
 
   private async persist() {
-    if (!this.token || !this.profile) return;
+    if (this.localVerify || !this.token || !this.profile) return;
     await this.persistAuthorization(this.token, this.profile);
   }
 
   private async persistAuthorization(token: string, profile: GitHubProfile) {
+    const encryptedToken = this.encryptToken(token);
+    if (this.decryptToken(encryptedToken) !== token) {
+      throw new Error("GitHub sign-in could not be saved safely.");
+    }
     const directory = dirname(this.authPath);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.authPath}.tmp`;
     const stored: StoredAuthorization = {
       version: 1,
-      encryptedToken: this.encryptToken(token),
+      encryptedToken,
       profile,
       validatedAt: this.now().toISOString(),
     };

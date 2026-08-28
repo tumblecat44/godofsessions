@@ -28,9 +28,9 @@ The V2 alpha includes:
   absolute calendar date
 - a provider-neutral Overnight portfolio with four execution routes—Claude
   Code, Codex, Grok Build, and Pi Agent—while Cursor, Hermes, and OpenClaw
-  sessions remain read-only evidence: Morrow
-  recommends work, the user edits the included items and ready providers, one
-  exact single-use approval starts conflict- and capacity-aware scheduling, and
+  sessions remain read-only evidence: Morrow automatically prepares every safe
+  purpose that fits the night, one visible button grants the exact single-use
+  approval and starts conflict- and capacity-aware scheduling, and
   Morning Review preserves itemized results and provider receipts
 - three top-level destinations: **Ask Morrow**, **Overnight**, and **Settings**
 
@@ -61,19 +61,17 @@ Permission defaults:
   be remembered for the active conversation, while every other command asks again
 - writes outside the root and destructive/publish/deploy/push commands: ask every time
 
-Overnight planning and portfolio editing are read-only. Morrow assesses the
+Overnight planning and revision through Morrow are read-only. Morrow assesses the
 memory-only, redacted brief for every discovered session on the selected
 absolute local date, keeps independent work as separate candidates, and shows
 why each candidate is recommended, blocked, or needs an answer. System
 instructions, raw tool output, internal reasoning, credential stores, and full
 transcripts are excluded from the durable approval ledger.
 
-Editing creates a new exact plan rather than mutating an earlier authority. The
-new plan rechecks dependencies, write conflicts, provider capacity, isolation,
-and the 450-minute night window. Independent isolated items may run in parallel;
+Every fresh plan rechecks dependencies, write conflicts, provider capacity,
+isolation, and the 450-minute night window. Independent isolated items may run in parallel;
 items that share a root, overlap write scope, conflict, or exceed provider
-capacity are serialized. Nothing starts when the edited portfolio is empty or
-invalid.
+capacity are serialized. Nothing starts when the prepared set is empty or invalid.
 
 The Run action is one fresh, expiring, single-use approval for the exact visible
 portfolio. It freezes every selected item, provider, redacted session brief,
@@ -84,17 +82,14 @@ honestly terminates only the unfinished work.
 
 The four advertised execution routes are Claude Code, Codex, Grok Build, and
 Pi Agent. Cursor, Hermes, and OpenClaw may still appear in historical session
-evidence, but cannot be selected for a new Overnight. A route is shown as Ready only when its
-local installation, authentication, and every OS containment and capability
-canary required by that route have been verified. Missing proof is shown as
-Setup or Blocked with its reason; an installed command or successful help probe
-is never treated as execution readiness.
+evidence, but cannot be selected for a new Overnight. A route is Ready when its
+official CLI is on PATH. Missing CLIs are Setup or Blocked with the reason
+visible in Settings. PATH presence is not a public security claim, and a
+Safety check or OS containment canary is not a Ready gate.
 
-Refresh and planning only read the official runtime's static identity and a
-stored path-free proof. A live safety canary runs only from the explicit Verify
-or Reverify action. After the user approves Run, Morrow consumes the exact
-running item claim before creating its private sandbox binding; a failed
-reverification or mismatched claim fails closed.
+Morrow is home. It shows up to three tonight cards, all checked. Unchecking
+leaves that Overnight out. Starting runs only the checked cards. Overnight
+lists those cards for a date; opening a card shows its board.
 
 Every Overnight card survives app restart with its provider-native receipt,
 report, verification result, failure or skip, and remaining risk. Provider
@@ -115,7 +110,6 @@ Validation:
 npm run check
 npm run dogfood:electron:github-login
 npm run dogfood:electron:portfolio
-npm run dogfood:electron:real-readonly
 npm run package:mac
 ```
 
@@ -124,17 +118,9 @@ the GitHub identity gate and does not initialize the Morrow surfaces. It does
 not start an OAuth authorization or use a real account.
 The `dogfood:electron:portfolio` command drives the provider-neutral portfolio
 through the real Electron renderer and IPC boundary with synthetic worker
-receipts. It proves parallel independent work, serial conflicting work, an
-over-window edit into a new exact plan, stop with late-receipt rejection, and
-restart recovery with an itemized Morning Review. It is not a live-provider
-containment canary.
-Maintainers can also run
-`npm run dogfood:electron:real-readonly` to inspect the direct-entry surface
-against their local session summary. That command never prepares or starts a
-run, and writes its private screenshots only to an operating-system temporary
-directory outside the repository.
-A live provider may run only through the current portfolio path after an
-identity-bound containment canary and one-time approval.
+receipts. It proves the in-page calendar, date model, Morrow tonight cards,
+and Overnight board. A live CLI runs when it is on PATH and the user starts
+the checked cards.
 
 The unpacked macOS app is written to
 `dist/mac-arm64/God of Sessions.app`. The local package smoke build intentionally

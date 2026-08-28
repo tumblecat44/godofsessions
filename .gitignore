@@ -19,3 +19,7 @@ wrangler.generated.json
 .serena/
 docs/dogfood/private/
 docs/dogfood/raw/
+
+# Verification evidence (keep structure, ignore contents)
+.verify/evidence/*
+!.verify/evidence/.gitkeep
