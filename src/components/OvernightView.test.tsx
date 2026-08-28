@@ -372,14 +372,14 @@ describe("Overnight one-button workspace", () => {
     expect(screen.queryByRole("heading", { name: "No Overnight is ready tonight" })).not.toBeInTheDocument();
   });
 
-  it("sends a missing conversation model to Settings instead of treating CLIs as unfinished setup", () => {
-    const onOpenSettings = vi.fn();
-    render(<OvernightView {...props({ canPrepare: false, onOpenSettings })} />);
+  it("sends a missing conversation model to Ask Morrow instead of treating CLIs as unfinished setup", () => {
+    const onOpenChat = vi.fn();
+    render(<OvernightView {...props({ canPrepare: false, onOpenChat })} />);
 
     expect(screen.getByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Finish Overnight setup" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
-    expect(onOpenSettings).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
+    expect(onOpenChat).toHaveBeenCalled();
   });
 
   it("does not start overnight from the candidate grid", () => {

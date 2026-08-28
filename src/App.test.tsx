@@ -320,7 +320,7 @@ describe("App Overnight integration", () => {
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 
-  it("puts conversation-model setup in Settings when Overnight CLIs are already installed", async () => {
+  it("puts conversation-model setup on Ask Morrow when Overnight CLIs are already installed", async () => {
     const initial = state({
       providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
       orchestration: orchestration({
@@ -340,8 +340,8 @@ describe("App Overnight integration", () => {
     expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
     expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
-    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
+    expect(screen.getByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 

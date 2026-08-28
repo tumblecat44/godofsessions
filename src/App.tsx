@@ -385,10 +385,10 @@ function App() {
           await prepareOvernight();
         }}
         onAddOvernight={async (goal) => {
-          automaticallyPreparedContext.current = undefined;
           await prepareOvernight(goal);
         }}
         onOpenSettings={() => changeView("settings")}
+        onOpenChat={() => changeView("chat")}
         onStopPortfolio={async (runId) => {
           setOvernightError(undefined);
           try { await stopOvernightPortfolio(runId); }
