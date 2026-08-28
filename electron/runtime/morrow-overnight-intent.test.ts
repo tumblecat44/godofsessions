@@ -8,6 +8,9 @@ describe("Overnight preparation intent", () => {
     "자리를 비운 동안 처리할 일을 추천해줘",
     "Plan bounded unattended work",
     "Plan repository work for tonight",
+    "the first overnight isn't important, deadline in 2 weeks, recommend something else.",
+    "이거 빼",
+    "첫 카드가 너무 멀어요. 다른 거 추천해줘",
   ])("recognizes a read-only preparation request: %s", (text) => {
     expect(isOvernightPreparationRequest(text)).toBe(true);
   });

@@ -10,6 +10,7 @@ import { OvernightView } from "./components/OvernightView";
 import { OvernightPulse } from "./components/OvernightPulse";
 import { getMorrowBridge } from "./lib/bridge";
 import { transitionState, updateStateWithoutTransition } from "./lib/motion";
+import { visibleTonightPlan } from "./lib/tonight";
 import type {
   AppLanguage,
   AppView,
@@ -383,7 +384,7 @@ function App() {
           updateStateWithoutTransition(() => setState((current) => current ? { ...current, thinkingLevel: level } : current));
         }}
         onOpenSettings={() => changeView("settings")}
-        tonightPlan={state.orchestration.portfolioPlans.find((plan) => plan.status === "draft" && Date.now() < Date.parse(plan.expiresAt) && !state.orchestration.portfolioRuns.some((run) => run.planId === plan.id))}
+        tonightPlan={visibleTonightPlan(state.orchestration.portfolioPlans, state.orchestration.portfolioRuns)}
         tonightPreparing={overnightPreparing}
         hasReadyOvernightWorker={hasReadyOvernightWorker}
         onStartTonight={startOvernightPortfolio}

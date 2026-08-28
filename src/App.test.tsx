@@ -7,6 +7,7 @@ import type {
   ConversationDetail,
   GitHubAuthState,
   MorrowBridge,
+  MorrowEvent,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
@@ -538,5 +539,104 @@ describe("GitHub identity gate", () => {
 
     finishGitHub({ status: "authenticated", profile: { id: 42, login: "synthetic-user" } });
     await waitFor(() => expect(bridge.bootstrap).toHaveBeenCalledOnce());
+  });
+});
+
+describe("Morrow revise tonight set", () => {
+  it("shows the newest draft after a revision turn and drops the old outcomes", async () => {
+    const oldItem = planItem("one", "Ship the login fix");
+    const newItem = planItem("new-1", "Replace the login work with a closer deadline");
+    const older = plan([oldItem], { id: "tonight-plan", createdAt: "2026-08-26T07:00:00.000Z" });
+    const newer = plan([newItem, planItem("new-2", "Ship the docs pass tonight")], {
+      id: "revised-plan",
+      createdAt: "2026-08-26T08:00:00.000Z",
+    });
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      conversations: [{ id: "conversation", path: "conversation", title: "Overnight planning", createdAt: "2026-08-26T07:00:00.000Z", updatedAt: "2026-08-26T07:00:00.000Z", messageCount: 0 }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [older],
+      }),
+    });
+    const revisedConversation: ConversationDetail = {
+      ...emptyConversation,
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "the first overnight isn't important, deadline in 2 weeks, recommend something else." }] },
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "I replaced tonight's set." }] },
+      ],
+      busy: false,
+    };
+    let emit: (event: MorrowEvent) => void = () => undefined;
+    const bootstrap = vi.fn(async () => initial);
+    const bridge = morrowBridge({
+      bootstrap,
+      openConversation: vi.fn(async () => emptyConversation),
+      onEvent: (listener) => {
+        emit = listener;
+        return () => undefined;
+      },
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    const tonight = await screen.findByLabelText("Tonight's overnights");
+    expect(tonight).toHaveTextContent("Ship the login fix");
+    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+
+    bootstrap.mockResolvedValue({
+      ...initial,
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [older, newer],
+      }),
+    });
+    await act(async () => {
+      emit({ type: "conversation", sessionId: revisedConversation.id, conversation: revisedConversation });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(bootstrap.mock.calls.length).toBeGreaterThan(1));
+    expect(tonight).toHaveTextContent("Replace the login work with a closer deadline");
+    expect(tonight).toHaveTextContent("Ship the docs pass tonight");
+    expect(tonight).not.toHaveTextContent("Ship the login fix");
+    expect(screen.getByRole("button", { name: "Start 2 selected" })).toBeInTheDocument();
+    expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
+  });
+
+  it("never starts Overnight from chat text such as 돌리기", async () => {
+    const item = planItem("one", "Ship the login fix");
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      conversations: [{ id: "conversation", path: "conversation", title: "Overnight planning", createdAt: "2026-08-26T07:00:00.000Z", updatedAt: "2026-08-26T07:00:00.000Z", messageCount: 0 }],
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }],
+        portfolioPlans: [plan([item])],
+      }),
+    });
+    const sendMessage = vi.fn(async () => undefined);
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      openConversation: vi.fn(async () => emptyConversation),
+      sendMessage,
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Talk to Morrow about anything…"), { target: { value: "돌리기" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ text: "돌리기" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Talk to Morrow about anything…"), { target: { value: "start overnight" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ text: "start overnight" }));
+    expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
   });
 });
