@@ -103,12 +103,12 @@ describe("transitionState", () => {
     });
   });
 
-  it("logs a non-abort ready rejection without propagating it", async () => {
+  it("propagates a non-abort ready rejection", async () => {
     let rejectReady: ((reason?: unknown) => void) | undefined;
     const ready = new Promise<void>((_resolve, reject) => {
       rejectReady = reject;
     });
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const readyCatch = vi.spyOn(ready, "catch");
     const transition = {
       ready,
       updateCallbackDone: new Promise<void>(() => undefined),
@@ -122,15 +122,13 @@ describe("transitionState", () => {
     });
 
     transitionState(() => undefined);
-    const readyError = new DOMException(
-      "Unexpected duplicate view-transition-name: app-view",
-      "InvalidStateError",
-    );
-    rejectReady?.(readyError);
-    await Promise.resolve();
+    expect(readyCatch).toHaveBeenCalledOnce();
 
-    expect(warnSpy).toHaveBeenCalledWith("[view-transition]", readyError);
-    warnSpy.mockRestore();
-    updateStateWithoutTransition(() => undefined);
+    // Rejection is re-thrown asynchronously - verify the catch handler is registered
+    const catchHandler = readyCatch.mock.calls[0][0] as (error: unknown) => void;
+    const nonAbortError = new DOMException("test", "InvalidStateError");
+
+    // Non-abort errors are re-thrown (unlike AbortError which is swallowed)
+    expect(() => catchHandler(nonAbortError)).toThrow(nonAbortError);
   });
 });
