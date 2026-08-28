@@ -29,6 +29,7 @@ export type OvernightStatus =
   | "candidate"
   | "deleted"
   | "cancelled"
+  | "scheduled"
   | "running"
   | "ran";
 
@@ -36,6 +37,7 @@ export const OVERNIGHT_STATUSES = [
   "candidate",
   "deleted",
   "cancelled",
+  "scheduled",
   "running",
   "ran",
 ] as const;
@@ -46,6 +48,7 @@ export type OvernightDecisionKind =
   | "revised"
   | "discarded"
   | "cancelled"
+  | "scheduled"
   | "started"
   | "finished";
 
@@ -54,9 +57,36 @@ export const OVERNIGHT_DECISION_KINDS = [
   "revised",
   "discarded",
   "cancelled",
+  "scheduled",
   "started",
   "finished",
 ] as const;
+
+/**
+ * One kanban card inside a scheduled Overnight plan. Produced by AI
+ * decomposition at approval time; lane moves as the night progresses.
+ */
+export type OvernightPlanTicketLane = "waiting" | "working" | "done" | "failed";
+
+export interface OvernightPlanTicket {
+  id: string;
+  title: string;
+  plan: string;
+  provider: OvernightExecutionProvider;
+  lane: OvernightPlanTicketLane;
+}
+
+/** Fields fixed when a candidate is approved into "scheduled". */
+export interface OvernightScheduleInput {
+  planId: string;
+  targetDirectory: string;
+  /** ISO datetime — run window start. */
+  startAt: string;
+  /** ISO datetime — run window end; WIP is committed and the run stops. */
+  endAt: string;
+  branch: string;
+  tickets: readonly OvernightPlanTicket[];
+}
 
 export interface OvernightDecisionEntry {
   at: string;
@@ -75,6 +105,13 @@ export interface OvernightCard {
   verifyAi: OvernightExecutionProvider;
   stallHours: number;
   decisionsLog: readonly OvernightDecisionEntry[];
+  /** Present once status reaches "scheduled". */
+  planId?: string;
+  targetDirectory?: string;
+  startAt?: string;
+  endAt?: string;
+  branch?: string;
+  tickets: readonly OvernightPlanTicket[];
   createdAt: string;
   updatedAt: string;
 }
@@ -287,11 +324,15 @@ export interface OvernightProviderResult {
   warnings: OvernightResultWarning[];
 }
 
+export type OvernightCliLoginState = "signed_in" | "signed_out" | "unknown";
+
 export interface OvernightProviderRouteSummary {
   provider: OvernightExecutionProvider;
   label: string;
   status: "ready" | "setup_required" | "blocked";
   reason?: string;
+  /** Official CLI login status. Never includes account identifiers. */
+  authentication?: OvernightCliLoginState;
   verification?: OvernightProviderVerificationSummary;
 }
 
@@ -410,6 +451,19 @@ export interface OrchestrationSnapshot {
   portfolioAssessments: OvernightPortfolioAssessmentSummary[];
   portfolioPlans: OvernightPortfolioPlanSummary[];
   portfolioRuns: OvernightPortfolioRunSummary[];
+  /** M46 purpose cards: scheduled/running/ran nights plus today's candidates. */
+  overnightCards: OvernightCard[];
+}
+
+/** What the 예약 button sends: the chosen candidate plus the run window. */
+export interface OvernightNightRequest {
+  goal: string;
+  finishCondition: string;
+  workAi: OvernightExecutionProvider;
+  verifyAi: OvernightExecutionProvider;
+  targetDirectory: string;
+  startAt: string;
+  endAt: string;
 }
 
 export interface ProviderSummary {
@@ -549,8 +603,12 @@ export interface MorrowBridge {
     finishCondition: string;
     providerLabel: string;
   }): Promise<OvernightBoardTicket[]>;
+  scheduleOvernightNight(request: OvernightNightRequest): Promise<OrchestrationSnapshot>;
+  cancelOvernightNight(cardId: string): Promise<OrchestrationSnapshot>;
+  overnightBranchLog(cardId: string): Promise<string>;
   openExternal(url: string): Promise<void>;
   revealRoot(): Promise<void>;
+  revealOvernightStore(): Promise<void>;
   onEvent(listener: (event: MorrowEvent) => void): () => void;
 }
 

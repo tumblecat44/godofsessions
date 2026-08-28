@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, FilePenLine, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.png";
 import { cn } from "../lib/cn";
-import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightPortfolioPlanSummary, ThinkingLevel } from "../shared/contracts";
+import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightNightRequest, OvernightPortfolioPlanSummary, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
 import { TonightPlan } from "./TonightPlan";
 import { Button } from "./ui/Button";
@@ -28,6 +28,7 @@ interface ChatViewProps {
   tonightPreparing?: boolean;
   hasReadyOvernightWorker?: boolean;
   onStartTonight?(planId: string, itemIds: string[]): Promise<void>;
+  onScheduleTonight?(request: OvernightNightRequest): Promise<void>;
 }
 const FOLLOW_BOTTOM_THRESHOLD = 80;
 
@@ -111,17 +112,19 @@ export function ChatView(props: ChatViewProps) {
 
   return (
     <main className="chat-workspace h-dvh min-w-0 overflow-hidden bg-night text-ink" hidden={props.hidden}>
-      <section className="chat-main grid h-dvh grid-rows-[86px_auto_minmax(0,1fr)_auto_auto] overflow-hidden">
-        <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-[clamp(28px,4vw,54px)] pt-2"><div className="flex items-center gap-3"><OperatorMark size={32} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><RootChip state={props.state} ko={ko} onReveal={props.onRevealRoot} /></header>
+      <section className="chat-main grid h-dvh grid-rows-[48px_auto_minmax(0,1fr)_auto_auto] overflow-hidden">
+        <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-8 pt-0"><div className="flex items-center gap-2.5"><OperatorMark size={24} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><RootChip state={props.state} ko={ko} onReveal={props.onRevealRoot} /></header>
 
         {props.onStartTonight && (
-          <div className="px-[clamp(32px,9vw,150px)] pt-5 max-[900px]:px-8">
+          <div className="px-8 pt-3 max-[900px]:px-5">
             <TonightPlan
               plan={props.tonightPlan}
               preparing={props.tonightPreparing}
               language={props.state.language}
               disabled={Boolean(props.conversation?.busy)}
               onStart={props.onStartTonight}
+              onSchedule={props.onScheduleTonight}
+              rootPath={props.state.rootPath}
               needsConversationModel={!canChat}
               needsOvernightWorker={props.hasReadyOvernightWorker === false}
               onOpenSettings={props.onOpenSettings}
@@ -129,13 +132,13 @@ export function ChatView(props: ChatViewProps) {
           </div>
         )}
 
-        <div className="chat-transcript flex min-h-0 flex-col overflow-y-auto px-[clamp(32px,9vw,150px)] pb-8 pt-6 before:mt-auto before:content-[''] max-[900px]:px-8" ref={scrollRef} onScroll={() => {
+        <div className="chat-transcript flex min-h-0 flex-col overflow-y-auto px-8 pb-6 pt-4 before:mt-auto before:content-[''] max-[900px]:px-5" ref={scrollRef} onScroll={() => {
           const viewport = scrollRef.current;
           if (viewport) followBottom.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= FOLLOW_BOTTOM_THRESHOLD;
         }}>
           {props.error && <FriendlyError message={props.error} ko={ko} />}
           {props.notice && <div className="chat-notice" role="status"><Sparkles size={15} /><span>{props.notice}</span></div>}
-          {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} warnings={props.state.orchestration.context.warnings} hasTonight={Boolean(props.onStartTonight)} /> : props.conversation.messages.map((message) => (
+          {!props.conversation?.messages.length ? !props.error && <FriendlyEmpty ko={ko} warnings={props.state.orchestration.context.warnings} /> : props.conversation.messages.map((message) => (
             <article className={cn(
               `morrow-message morrow-message--${message.role}`,
               "my-3",
@@ -145,7 +148,7 @@ export function ChatView(props: ChatViewProps) {
               {message.role === "assistant" ? (
                 <div className="message-avatar grid size-[34px] place-items-center overflow-hidden rounded-[11px] border border-amber/20 bg-surface"><img className="size-full object-cover saturate-[0.8]" src={morrowImage} alt="Morrow" /><span className="sr-only">MORROW</span></div>
               ) : <span className="message-author mr-1 font-mono text-[9px] tracking-[0.12em] text-ink-faint">{message.role === "user" ? (ko ? "나" : "YOU") : "TOOL"}</span>}
-              <div className={cn("message-body text-[15.5px] leading-7 text-[#d8d2c6]", message.role === "user" && "rounded-[16px_16px_5px_16px] border border-[#344055] bg-[#202938] px-4 py-3 text-ink shadow-control")}>
+              <div className={cn("message-body text-[14px] leading-[1.5] text-[#d8d2c6]", message.role === "user" && "rounded-[12px_12px_4px_12px] border border-[#344055] bg-[#202938] px-3 py-2 text-ink")}>
                 {message.parts.map((part, index) => part.type === "tool" ? (
                   <div className={`tool-event tool-event--${part.state ?? "done"}`} key={index}>
                     {part.toolName === "edit" || part.toolName === "write" ? <FilePenLine size={15} /> : <TerminalSquare size={15} />}
@@ -179,14 +182,14 @@ export function ChatView(props: ChatViewProps) {
           </Surface>
         )}
 
-        <footer className="chat-composer mx-auto mb-4 w-[min(820px,calc(100%-48px))] overflow-visible rounded-panel border border-line bg-night-raised/88 shadow-panel backdrop-blur-xl">
-          <textarea className="block min-h-[58px] w-full resize-none border-0 bg-transparent px-4 pb-2 pt-3.5 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-faint" value={draft} rows={2} placeholder={ko ? "Morrow에게 무엇이든 말해보세요…" : "Talk to Morrow about anything…"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} ref={textareaRef} />
+        <footer className="chat-composer mx-auto mb-3 w-[min(820px,calc(100%-48px))] overflow-visible rounded-panel border border-line bg-night-raised/88">
+          <textarea className="block min-h-[44px] w-full resize-none border-0 bg-transparent px-3 pb-1.5 pt-2.5 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-faint" value={draft} rows={2} placeholder={ko ? "Morrow에게 무엇이든 말해보세요…" : "Talk to Morrow about anything…"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} ref={textareaRef} />
           <div className="composer-bar flex min-h-10 items-center gap-2 border-t border-line-soft px-2 py-1.5">
             <div className="model-picker" ref={modelPickerRef}><button type="button" aria-expanded={modelOpen} disabled={!availableModels.length} onClick={() => setModelOpen((value) => !value)}><span className={`model-dot ${canChat ? "" : "is-offline"}`} />{selectedModel?.name ?? (ko ? "모델 연결 필요" : "Connect a model")}<ChevronDown size={13} /></button><div className={`model-menu ${modelOpen ? "is-open" : ""}`} role="listbox" aria-hidden={!modelOpen} inert={!modelOpen || undefined}>{availableModels.map((model) => { const isSelected = selectedModel?.id === model.id && selectedModel.provider === model.provider; return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "is-selected" : ""} key={`${model.provider}:${model.id}`} onClick={() => { setModelOpen(false); void props.onModel(model.provider, model.id); }}><strong>{model.name}</strong><small>{model.provider}</small>{isSelected && <Check size={13} />}</button>; })}</div></div>
             <select aria-label={ko ? "답변 깊이" : "Response depth"} title={ko ? "깊을수록 더 오래 걸리고 공급자 사용량이 늘 수 있어요." : "Deeper responses can take longer and use more provider capacity."} disabled={!canChat || !supportsThinking} value={supportsThinking ? (props.conversation?.thinkingLevel ?? props.state.thinkingLevel) : "off"} onChange={(event) => void props.onThinking(event.target.value as ThinkingLevel)}><option value="off">{ko ? "가장 빠르게" : "Fastest"}</option><option value="minimal">{ko ? "빠르게" : "Faster"}</option><option value="low">{ko ? "가볍게 검토" : "Light review"}</option><option value="medium">{ko ? "균형 있게" : "Balanced"}</option><option value="high">{ko ? "더 깊게 · 느림" : "Deeper · slower"}</option><option value="xhigh">{ko ? "아주 깊게 · 더 느림" : "Very deep · slower"}</option><option value="max">{ko ? "최대한 깊게 · 가장 느림" : "Deepest · slowest"}</option></select>
             <ComposerRoot state={props.state} ko={ko} onReveal={props.onRevealRoot} />
             <span className="composer-spacer" />
-            <Button variant={props.conversation?.busy ? "danger" : "primary"} size="icon" className={`send-button size-9 min-h-0 ${props.conversation?.busy ? "is-stop" : ""}`} aria-label={props.conversation?.busy ? (ko ? "답변 중지" : "Stop response") : (ko ? "보내기" : "Send")} disabled={!props.conversation?.busy && (!draft.trim() || !canChat)} onClick={() => props.conversation?.busy ? void props.onAbort() : void submit()}><span className={`state-icon-swap ${props.conversation?.busy ? "is-active" : ""}`} aria-hidden="true"><span className="state-icon-swap__active"><CircleStop size={17} /></span><span className="state-icon-swap__inactive"><ArrowUp size={18} /></span></span></Button>
+            <Button variant={props.conversation?.busy ? "danger" : "primary"} size="icon" className={`send-button size-8 min-h-0 ${props.conversation?.busy ? "is-stop" : ""}`} aria-label={props.conversation?.busy ? (ko ? "답변 중지" : "Stop response") : (ko ? "보내기" : "Send")} disabled={!props.conversation?.busy && (!draft.trim() || !canChat)} onClick={() => props.conversation?.busy ? void props.onAbort() : void submit()}><span className={`state-icon-swap ${props.conversation?.busy ? "is-active" : ""}`} aria-hidden="true"><span className="state-icon-swap__active"><CircleStop size={15} /></span><span className="state-icon-swap__inactive"><ArrowUp size={16} /></span></span></Button>
           </div>
         </footer>
       </section>
@@ -225,7 +228,7 @@ function RootChip({ state, ko, onReveal }: { state: BootstrapState; ko: boolean;
   return (
     <button
       type="button"
-      className="root-chip max-w-[min(58vw,720px)] cursor-pointer overflow-x-auto whitespace-nowrap rounded-lg border border-line-soft bg-white/[0.018] px-3 py-2 font-mono text-[9px] tracking-[0.04em] text-ink-faint"
+      className="root-chip max-w-[min(58vw,720px)] cursor-pointer overflow-x-auto whitespace-nowrap rounded-md border border-line-soft bg-white/[0.018] px-2 py-1 font-mono text-[9px] tracking-[0.04em] text-ink-faint"
       title={path}
       aria-label={ko ? `${label} 폴더 열기` : `Open ${label} folder`}
       onClick={() => onReveal?.()}
@@ -241,16 +244,14 @@ function approvalMemoryLabel(approval: ApprovalRequest, ko: boolean) {
   return ko ? "이 대화 동안 이 승인 기억" : "Remember this approval for this conversation";
 }
 
-function FriendlyEmpty({ ko, warnings, hasTonight }: { ko: boolean; warnings: string[]; hasTonight: boolean }) {
+function FriendlyEmpty({ ko, warnings }: { ko: boolean; warnings: string[] }) {
   return (
     <div className="morrow-empty">
       <div className="morrow-empty__portrait"><img src={morrowImage} alt={ko ? "작은 불빛 곁에서 기다리는 Morrow" : "Morrow waiting beside a small light"} /><span><i />MORROW IS HERE</span></div>
       <div>
         <span className="eyebrow">MORROW</span>
         <h1>{ko ? "무엇부터 같이 풀어볼까요?" : "What shall we untangle together?"}</h1>
-        <p>{hasTonight
-          ? (ko ? "그냥 이야기해도 좋아요. 오늘 밤 카드가 보이면 읽고 시작을 누르거나, 틀렸으면 여기서 말해 주세요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. When tonight’s cards are visible, read them and press Start, or tell me here if they are wrong. I only reach for files or commands when you ask, and I pause before changing anything.")
-          : (ko ? "그냥 이야기해도 좋아요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. I only reach for files or commands when you ask, and I pause before changing anything.")}</p>
+        <p>{ko ? "그냥 이야기해도 좋아요. 파일이나 명령은 부탁할 때만 쓰고, 바꾸기 전에는 먼저 물어볼게요." : "You can simply talk. I only reach for files or commands when you ask, and I pause before changing anything."}</p>
         {warnings.length > 0 && <small className="briefing-warning">{warnings[0]}</small>}
       </div>
     </div>

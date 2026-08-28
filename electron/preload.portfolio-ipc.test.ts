@@ -30,11 +30,13 @@ describe("portfolio preload bridge", () => {
       verifyOvernightProvider(provider: string): Promise<unknown>;
       prepareOvernightPortfolio(): Promise<unknown>;
       revealRoot(): Promise<unknown>;
+      revealOvernightStore(): Promise<unknown>;
     };
     await expect(bridge.startOvernightPortfolio("plan-2")).resolves.toEqual({ channel: "morrow:start-overnight-portfolio", value: "plan-2" });
     await expect(bridge.stopOvernightPortfolio("run-2")).resolves.toEqual({ channel: "morrow:stop-overnight-portfolio", value: "run-2" });
     await expect(bridge.verifyOvernightProvider("codex")).resolves.toEqual({ channel: "morrow:verify-overnight-provider", value: "codex" });
     await expect(bridge.prepareOvernightPortfolio()).resolves.toEqual({ channel: "morrow:prepare-overnight-portfolio", value: undefined });
     await expect(bridge.revealRoot()).resolves.toEqual({ channel: "morrow:reveal-root", value: undefined });
+    await expect(bridge.revealOvernightStore()).resolves.toEqual({ channel: "morrow:reveal-overnight-store", value: undefined });
   });
 });

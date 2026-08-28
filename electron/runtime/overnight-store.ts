@@ -23,6 +23,8 @@ import {
   type OvernightGenerationId,
   type OvernightId,
   type OvernightLocalDate,
+  type OvernightPlanTicket,
+  type OvernightScheduleInput,
   type OvernightStatus,
 } from "../../src/shared/contracts";
 
@@ -45,6 +47,7 @@ export interface CommitOvernightGenerationInput {
 export type OvernightLifecycleCommand =
   | { type: "discard" }
   | { type: "cancel" }
+  | { type: "schedule" }
   | { type: "begin_run" }
   | { type: "mark_ran" };
 
@@ -73,10 +76,13 @@ export function overnightNextStatus(
       if (from === "candidate" || from === "deleted") return "deleted";
       break;
     case "cancel":
-      if (from === "candidate" || from === "running" || from === "cancelled") return "cancelled";
+      if (from === "candidate" || from === "scheduled" || from === "running" || from === "cancelled") return "cancelled";
+      break;
+    case "schedule":
+      if (from === "candidate" || from === "scheduled") return "scheduled";
       break;
     case "begin_run":
-      if (from === "candidate" || from === "running") return "running";
+      if (from === "candidate" || from === "scheduled" || from === "running") return "running";
       break;
     case "mark_ran":
       if (from === "running" || from === "ran") return "ran";
@@ -165,6 +171,37 @@ function requireProvider(value: unknown, field: string): OvernightExecutionProvi
   return value;
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parseTicket(value: unknown): OvernightPlanTicket {
+  const record = asRecord(value, "tickets");
+  const lane = record.lane;
+  if (lane !== "waiting" && lane !== "working" && lane !== "done" && lane !== "failed") {
+    throw new Error("ticket lane이 올바르지 않습니다.");
+  }
+  return {
+    id: requireString(record.id, "ticket id"),
+    title: requireString(record.title, "ticket title"),
+    plan: requireString(record.plan, "ticket plan"),
+    provider: requireProvider(record.provider, "ticket provider"),
+    lane,
+  };
+}
+
+function parseTickets(raw: unknown): OvernightPlanTicket[] {
+  if (raw === null || raw === undefined) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(requireString(raw, "tickets"));
+  } catch {
+    throw new Error("tickets JSON을 해석하지 못했습니다.");
+  }
+  if (!Array.isArray(parsed)) throw new Error("tickets는 배열이어야 합니다.");
+  return parsed.map(parseTicket);
+}
+
 function parseOvernightRow(value: unknown): OvernightCard {
   const row = asRecord(value, "overnight");
   const status = row.status;
@@ -172,6 +209,12 @@ function parseOvernightRow(value: unknown): OvernightCard {
     throw new Error(`알 수 없는 Overnight 상태입니다: ${String(status)}`);
   }
   return {
+    planId: optionalString(row.plan_id),
+    targetDirectory: optionalString(row.target_directory),
+    startAt: optionalString(row.start_at),
+    endAt: optionalString(row.end_at),
+    branch: optionalString(row.branch),
+    tickets: parseTickets(row.tickets),
     id: parseOvernightId(requireString(row.id, "id")),
     generationId: parseOvernightGenerationId(requireString(row.generation_id, "generation_id")),
     localDate: parseOvernightLocalDate(requireString(row.local_date, "local_date")),
@@ -194,6 +237,54 @@ function parseGenerationRow(value: unknown): GenerationRecord {
     localDate: parseOvernightLocalDate(requireString(row.local_date, "local_date")),
     createdAt: requireString(row.created_at, "created_at"),
   };
+}
+
+const OVERNIGHT_TABLE_DDL = `
+      CREATE TABLE IF NOT EXISTS overnight (
+        id TEXT PRIMARY KEY,
+        generation_id TEXT NOT NULL REFERENCES overnight_generation(id),
+        local_date TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('candidate','deleted','cancelled','scheduled','running','ran')),
+        goal TEXT NOT NULL,
+        finish_condition TEXT NOT NULL,
+        work_ai TEXT NOT NULL CHECK (work_ai IN ('claude','codex','grok','pi')),
+        verify_ai TEXT NOT NULL CHECK (verify_ai IN ('claude','codex','grok','pi')),
+        stall_hours REAL NOT NULL CHECK (stall_hours >= 0),
+        decisions_log TEXT NOT NULL,
+        plan_id TEXT,
+        target_directory TEXT,
+        start_at TEXT,
+        end_at TEXT,
+        branch TEXT,
+        tickets TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+`;
+
+const LEGACY_COLUMNS = "id, generation_id, local_date, status, goal, finish_condition, work_ai, verify_ai, stall_hours, decisions_log, created_at, updated_at";
+
+/** Rebuild the overnight table once when an older schema (no 'scheduled', no tickets) is found. */
+function migrateOvernightTable(database: DatabaseSync): void {
+  const master = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'overnight'",
+  ).get() as { sql?: string } | undefined;
+  const sql = master?.sql ?? "";
+  if (sql.includes("'scheduled'") && sql.includes("tickets")) return;
+  database.exec("BEGIN");
+  try {
+    database.exec("ALTER TABLE overnight RENAME TO overnight_legacy");
+    database.exec(OVERNIGHT_TABLE_DDL);
+    database.exec(`
+      INSERT INTO overnight (${LEGACY_COLUMNS})
+      SELECT ${LEGACY_COLUMNS} FROM overnight_legacy
+    `);
+    database.exec("DROP TABLE overnight_legacy");
+    database.exec("COMMIT");
+  } catch (reason) {
+    database.exec("ROLLBACK");
+    throw reason;
+  }
 }
 
 /**
@@ -228,20 +319,7 @@ export class OvernightStore {
         created_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS overnight (
-        id TEXT PRIMARY KEY,
-        generation_id TEXT NOT NULL REFERENCES overnight_generation(id),
-        local_date TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('candidate','deleted','cancelled','running','ran')),
-        goal TEXT NOT NULL,
-        finish_condition TEXT NOT NULL,
-        work_ai TEXT NOT NULL CHECK (work_ai IN ('claude','codex','grok','pi')),
-        verify_ai TEXT NOT NULL CHECK (verify_ai IN ('claude','codex','grok','pi')),
-        stall_hours REAL NOT NULL CHECK (stall_hours >= 0),
-        decisions_log TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
+      ${OVERNIGHT_TABLE_DDL}
 
       CREATE INDEX IF NOT EXISTS overnight_local_date_idx ON overnight(local_date);
       CREATE INDEX IF NOT EXISTS overnight_generation_id_idx ON overnight(generation_id);
@@ -260,6 +338,7 @@ export class OvernightStore {
       CREATE INDEX IF NOT EXISTS overnight_board_ticket_lane_idx
         ON overnight_board_ticket(overnight_id, lane, sort_order);
     `);
+    migrateOvernightTable(database);
     this.database = database;
   }
 
@@ -360,8 +439,7 @@ export class OvernightStore {
     const generation = parseGenerationRow(generationValue);
 
     const rows = database.prepare(`
-      SELECT id, generation_id, local_date, status, goal, finish_condition,
-             work_ai, verify_ai, stall_hours, decisions_log, created_at, updated_at
+      SELECT *
       FROM overnight
       WHERE generation_id = ?
       ORDER BY created_at ASC
@@ -379,8 +457,7 @@ export class OvernightStore {
     const database = this.requireOpen();
     const date = parseOvernightLocalDate(localDate);
     const rows = database.prepare(`
-      SELECT o.id, o.generation_id, o.local_date, o.status, o.goal, o.finish_condition,
-             o.work_ai, o.verify_ai, o.stall_hours, o.decisions_log, o.created_at, o.updated_at
+      SELECT o.*
       FROM overnight o
       INNER JOIN overnight_generation g ON g.id = o.generation_id
       WHERE o.local_date = ?
@@ -393,8 +470,7 @@ export class OvernightStore {
     const database = this.requireOpen();
     const cardId = parseOvernightId(id);
     const row = database.prepare(`
-      SELECT id, generation_id, local_date, status, goal, finish_condition,
-             work_ai, verify_ai, stall_hours, decisions_log, created_at, updated_at
+      SELECT *
       FROM overnight
       WHERE id = ?
     `).get(cardId);
@@ -517,6 +593,69 @@ export class OvernightStore {
       lane: "in_review",
     });
     return this.listBoardTickets(overnightId);
+  }
+
+  /**
+   * candidate → scheduled with the approved plan attached: run window,
+   * target directory, branch, decomposed tickets.
+   */
+  schedule(id: OvernightId, input: OvernightScheduleInput): OvernightCard {
+    const database = this.requireOpen();
+    const card = this.requireCard(id);
+    const next = overnightNextStatus(card.status, { type: "schedule" });
+    const tickets = JSON.stringify(input.tickets.map(parseTicket));
+    const updatedAt = this.now().toISOString();
+    database.prepare(`
+      UPDATE overnight
+      SET status = ?, plan_id = ?, target_directory = ?, start_at = ?, end_at = ?,
+          branch = ?, tickets = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      next,
+      requireString(input.planId, "planId"),
+      requireString(input.targetDirectory, "targetDirectory"),
+      requireString(input.startAt, "startAt"),
+      requireString(input.endAt, "endAt"),
+      requireString(input.branch, "branch"),
+      tickets,
+      updatedAt,
+      card.id,
+    );
+    return this.requireCard(card.id);
+  }
+
+  /** Replace ticket lanes as the night progresses. Legal while scheduled or running. */
+  updateTickets(id: OvernightId, tickets: readonly OvernightPlanTicket[]): OvernightCard {
+    const database = this.requireOpen();
+    const card = this.requireCard(id);
+    if (card.status !== "scheduled" && card.status !== "running") {
+      throw new Error("예약되었거나 작동 중인 Overnight의 티켓만 갱신할 수 있습니다.");
+    }
+    database.prepare(
+      "UPDATE overnight SET tickets = ?, updated_at = ? WHERE id = ?",
+    ).run(JSON.stringify(tickets.map(parseTicket)), this.now().toISOString(), card.id);
+    return this.requireCard(card.id);
+  }
+
+  /** All cards in a status, any date. The clock loop polls this. */
+  listByStatus(status: OvernightStatus): OvernightCard[] {
+    const database = this.requireOpen();
+    if (!isOvernightStatus(status)) throw new Error("Overnight 상태가 올바르지 않습니다.");
+    const rows = database.prepare(
+      "SELECT * FROM overnight WHERE status = ? ORDER BY updated_at ASC",
+    ).all(status);
+    return rows.map(parseOvernightRow);
+  }
+
+  /** Append decision entries regardless of status (the watch loop's journal). */
+  appendDecisions(id: OvernightId, entries: readonly OvernightDecisionEntry[]): OvernightCard {
+    const database = this.requireOpen();
+    const card = this.requireCard(id);
+    const decisionsLog = serializeDecisionsLog([...card.decisionsLog, ...entries]);
+    database.prepare(
+      "UPDATE overnight SET decisions_log = ?, updated_at = ? WHERE id = ?",
+    ).run(decisionsLog, this.now().toISOString(), card.id);
+    return this.requireCard(card.id);
   }
 
   /**

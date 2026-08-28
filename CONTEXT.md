@@ -15,9 +15,9 @@ it.
 _Avoid_: coding mode, project agent, autonomous worker
 
 **Execution Root**
-The one filesystem root fixed when the Electron app launches. V2 has no root
-or project selector. Every session uses the same root.
-_Avoid_: selected project, workspace picker, per-chat project
+The installer's home directory, fixed when the Electron app launches. V2 has
+no root or project selector. Isolated tests may set `MORROW_ROOT`.
+_Avoid_: selected project, workspace picker, per-chat project, launch cwd
 
 **Conversation**
 A durable Pi `SessionManager` session shown in the V1-style conversation rail.
@@ -34,7 +34,26 @@ _Avoid_: restoring a running Pi app, CLI login proxy
 **Model**
 One Pi-supported model selected for a conversation. The available list comes
 from the connected providers rather than a hard-coded Morrow model list.
-_Avoid_: provider, execution surface
+_Avoid_: provider, execution surface, Overnight worker
+
+**Conversation runtime**
+The Pi Agent SDK model the user connects in Settings. Ask Morrow, file and
+command tools, and Overnight planning all use this runtime. Connecting a chat
+provider is not Overnight CLI login.
+_Avoid_: Overnight worker, CLI login, Pi Agent Overnight route
+
+**Overnight workers**
+Local execution after the one Start approval. Claude Code, Codex, and Grok
+Build run when their official CLI is on PATH. Pi Agent is an advertised
+execution route and is not Ready until Overnight execution exists. The
+embedded conversation SDK is not this worker.
+_Avoid_: conversation model, bundled Ready, Pi CLI
+
+**Two runtimes**
+Local workers run only after Overnight Start. Every other model call uses the
+conversation runtime. GitHub identity is not an AI runtime. Cursor, Hermes,
+and OpenClaw are evidence only.
+_Avoid_: one AI, unqualified AI, mixing Pi Agent SDK with Overnight Pi Agent
 
 **Skill**
 An Agent Skills document discovered under `<root>/.agents/skills` or
@@ -56,17 +75,19 @@ _Avoid_: permanent blanket access, hidden confirmation
 
 **Overnight**
 A provider-neutral portfolio prepared by Morrow from memory-only, redacted
-briefs for every discovered local AI session on one absolute local calendar
-date. Its four advertised execution routes are Claude Code, Codex, Grok Build,
-and Pi Agent. Cursor, Hermes, and OpenClaw sessions may remain read-only
+briefs for collected local AI sessions on one absolute local calendar date.
+Unread or failed sessions are omitted. Zero cards is valid. The user can add an
+Overnight from the Overnight tab by stating an outcome. Its four advertised
+execution routes are Claude Code, Codex, Grok Build, and Pi Agent. Claude
+Code, Codex, and Grok Build are the workers that can run today. Pi Agent is
+not Ready. Cursor, Hermes, and OpenClaw sessions may remain read-only
 evidence, but they are not selectable execution routes.
 
 Morrow returns tonight's work as up to three cards on the Morrow chat. Every
 card starts checked. The user can uncheck a card, or tell Morrow why a card
 should be replaced. Starting Overnight runs only the checked cards. One Overnight
-is one card. Opening it on the Overnight tab shows that card's board. A route
-can run when its official CLI is on PATH. Containment canaries are not a Ready
-gate.
+is one card. Opening it on the Overnight tab shows that card's board. A PATH
+CLI can run. Pi Agent cannot. Containment canaries are not a Ready gate.
 
 Preparing another recommendation replaces the current runnable Night Plan.
 When the new judgment is `clarify` or `no_run`, no earlier draft remains
@@ -80,10 +101,13 @@ conflicts, dependencies, and provider-capacity contention. Each provider worker
 is prohibited from spawning its own subagents.
 
 A route is `Ready` when its official CLI is installed and on PATH. Settings
-detects `claude`, `codex`, `grok`, and bundled Pi that way. There is no in-app
-Overnight OAuth and no Safety check or OS containment canary as a Ready gate.
-Missing CLIs stay `Setup` or `Blocked` with the reason visible in Settings.
-Start lives on Morrow as `Start N selected`, not on the Overnight tab.
+detects `claude`, `codex`, and `grok` that way, then runs each official
+login-status command. A signed-in CLI shows Ready for Overnight. A missing
+login keeps Copy login. Pi Agent stays Blocked until Overnight execution
+exists. There is no in-app Overnight OAuth and no Safety check or OS
+containment canary as a Ready gate. Missing CLIs stay `Setup` or `Blocked`
+with the reason visible in Settings. Start lives on Morrow as
+`Start N selected`, not on the Overnight tab.
 
 Opening an Overnight card shows that card's board. The board splits the purpose
 into tickets: the outcome, the morning check, and a CLI label on each ticket.

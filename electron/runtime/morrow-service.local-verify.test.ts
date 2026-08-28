@@ -100,6 +100,9 @@ describe("local verify tonight plan", () => {
       await service.initialize();
       expect(existsSync(join(dataDir, "overnight", "overnights.sqlite"))).toBe(true);
       const bootstrap = await service.bootstrap();
+      expect(bootstrap.rootPath).toBe(root);
+      expect(bootstrap.rootIsHome).toBe(false);
+      expect(service.executionRoot()).toBe(root);
       expect(bootstrap.models).toHaveLength(0);
       expect(proposals).toHaveLength(1);
       expect(proposals[0]?.candidates[0]?.preferredProvider).toBe("claude");

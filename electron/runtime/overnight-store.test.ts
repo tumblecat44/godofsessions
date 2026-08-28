@@ -80,6 +80,7 @@ describe("OvernightStore", () => {
       decisionsLog: [
         { at: "2026-08-28T11:00:00.000Z", kind: "proposed", note: "seed" },
       ],
+      tickets: [],
       createdAt: "2026-08-28T12:00:00.000Z",
       updatedAt: "2026-08-28T12:00:00.000Z",
     });

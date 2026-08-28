@@ -899,7 +899,9 @@ describe("Morrow service dogfood", () => {
     expect(observedSystemPrompt).toContain("Ignore credentials, auth files, caches, telemetry, and general logs");
     expect(observedSystemPrompt).toContain("private exact-coverage Overnight evaluator");
     expect(observedSystemPrompt).toContain("Do not read files, run commands, inspect the repository, or synthesize candidate arrays");
-    expect(observedSystemPrompt).toContain("Claude Code, Codex, Grok Build, and Pi Agent");
+    expect(observedSystemPrompt).toContain("Overnight workers are Claude Code, Codex, and Grok Build");
+    expect(observedSystemPrompt).toContain("Pi Agent is listed and is not an Overnight worker yet");
+    expect(observedSystemPrompt).toContain("conversation model the user connected through the Pi Agent SDK");
     expect(observedSystemPrompt).toContain("Show up to three tonight recommendations");
     expect(observedSystemPrompt).toContain("checked-card button is the start");
     expect(observedSystemPrompt).toContain("Never start Overnight from chat text");

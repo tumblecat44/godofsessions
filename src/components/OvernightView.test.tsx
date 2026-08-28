@@ -92,7 +92,7 @@ function assessment(disposition: "recommend" | "clarify" | "no_run", overrides: 
 }
 
 function snapshot(overrides: Partial<OrchestrationSnapshot> = {}): OrchestrationSnapshot {
-  return { context, providerRoutes: readyRoutes, portfolioAssessments: [], portfolioPlans: [], portfolioRuns: [], ...overrides };
+  return { context, providerRoutes: readyRoutes, portfolioAssessments: [], portfolioPlans: [], portfolioRuns: [], overnightCards: [], ...overrides };
 }
 
 function props(overrides: Partial<React.ComponentProps<typeof OvernightView>> = {}): React.ComponentProps<typeof OvernightView> {

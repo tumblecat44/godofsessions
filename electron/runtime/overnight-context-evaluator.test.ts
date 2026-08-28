@@ -180,10 +180,8 @@ describe("hierarchical Overnight context evaluator", () => {
       }),
     });
 
-    await expectEvaluationError(
-      evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port, root }),
-      "invalid_response",
-    );
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port, root });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("rejects insufficient_context for a session that has readable excerpts", async () => {
@@ -194,10 +192,8 @@ describe("hierarchical Overnight context evaluator", () => {
       }),
     });
 
-    await expectEvaluationError(
-      evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port, root }),
-      "invalid_response",
-    );
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port, root });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("accepts insufficient_context only for a session with no readable excerpts", async () => {
@@ -225,10 +221,8 @@ describe("hierarchical Overnight context evaluator", () => {
       }),
     });
 
-    await expectEvaluationError(
-      evaluateOvernightContext({ context: context([priority]), requestKind: "discover", model: port, root }),
-      "invalid_response",
-    );
+    const result = await evaluateOvernightContext({ context: context([priority]), requestKind: "discover", model: port, root });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("fails closed when a local response drops every runnable explicit-priority task", async () => {
@@ -241,10 +235,8 @@ describe("hierarchical Overnight context evaluator", () => {
       }),
     });
 
-    await expectEvaluationError(
-      evaluateOvernightContext({ context: context([priority]), requestKind: "discover", model: port, root }),
-      "invalid_response",
-    );
+    const result = await evaluateOvernightContext({ context: context([priority]), requestKind: "discover", model: port, root });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("merges same-work local candidates only through an exact-coverage global group", async () => {
@@ -302,14 +294,15 @@ describe("hierarchical Overnight context evaluator", () => {
     expect(reverse.proposal).toEqual(forward.proposal);
   });
 
-  it("fails closed before a model call when collection was incomplete", async () => {
+  it("assesses collected sessions when some collectors failed", async () => {
     const { port, calls } = successfulPort();
-    await expectEvaluationError(evaluateOvernightContext({
+    const result = await evaluateOvernightContext({
       context: context([session(0)], [{ provider: "codex", code: "read_failed", count: 1 }]),
       requestKind: "discover",
       model: port,
-    }), "collection_incomplete");
-    expect(calls).toEqual([]);
+    });
+    expect(result.proposal.candidates.length).toBeGreaterThan(0);
+    expect(calls.length).toBeGreaterThan(0);
   });
 
   it("fails closed when summary and detailed session IDs disagree", async () => {
@@ -336,12 +329,13 @@ describe("hierarchical Overnight context evaluator", () => {
     expect(calls).toEqual([]);
   });
 
-  it("fails closed when a local call rejects", async () => {
+  it("omits a local batch when the model call rejects", async () => {
     const { port } = recordingPort(async () => { throw new Error("raw provider failure"); });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port }), "model_failed");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
-  it("does not return partial candidates when a later local chunk fails", async () => {
+  it("keeps earlier local candidates when a later chunk fails", async () => {
     const splitSessions = [
       session(0, `Task 0 ${"checkout evidence ".repeat(80)} remains unfinished.`),
       session(1, `Task 1 ${"checkout evidence ".repeat(80)} remains unfinished.`),
@@ -354,7 +348,9 @@ describe("hierarchical Overnight context evaluator", () => {
         candidates: [{ localKey: "task", candidate: candidate([request.coverageIds[0]]) }],
       };
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context(splitSessions), requestKind: "discover", model: port, maxPromptChars: 7_000 }), "model_failed");
+    const result = await evaluateOvernightContext({ context: context(splitSessions), requestKind: "discover", model: port, maxPromptChars: 7_000 });
+    expect(result.proposal.candidates).toHaveLength(1);
+    expect(result.proposal.candidates[0].sessionIds).toEqual([splitSessions[0].id]);
     expect(calls.map((call) => call.phase)).toEqual(["local", "local"]);
   });
 
@@ -376,19 +372,21 @@ describe("hierarchical Overnight context evaluator", () => {
       { sessionId: request.coverageIds[0], localKeys: [], reasonCodes: ["completed"] },
       { sessionId: "codex:unknown", localKeys: [], reasonCodes: ["completed"] },
     ], candidates: [] })],
-  ])("fails closed on %s local session coverage", async (_name, local) => {
+  ])("omits a local batch with %s session coverage", async (_name, local) => {
     const { port } = successfulPort({ local });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port }), "coverage_mismatch");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
-  it("fails closed when local coverage names an unknown local candidate", async () => {
+  it("omits a local batch when coverage names an unknown local candidate", async () => {
     const { port } = successfulPort({
       local: (request) => ({
         coverage: request.coverageIds.map((sessionId) => ({ sessionId, localKeys: ["missing"], reasonCodes: [] })),
         candidates: [],
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port }), "coverage_mismatch");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("does not accept unfinished_work alone as evidence for silently producing no candidate", async () => {
@@ -398,7 +396,8 @@ describe("hierarchical Overnight context evaluator", () => {
         candidates: [],
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port }), "invalid_response");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("fails closed instead of discarding refusal reasons attached to a candidate", async () => {
@@ -412,7 +411,8 @@ describe("hierarchical Overnight context evaluator", () => {
         candidates: [{ localKey: "task", candidate: candidate([...request.coverageIds]) }],
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port }), "invalid_response");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it.each([
@@ -471,7 +471,8 @@ describe("hierarchical Overnight context evaluator", () => {
         candidates: [{ localKey: "task", candidate: candidate(["codex:not-in-this-chunk"]) }],
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port }), "coverage_mismatch");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("fails closed when the local coverage mapping and candidate session IDs differ", async () => {
@@ -481,14 +482,15 @@ describe("hierarchical Overnight context evaluator", () => {
         candidates: [{ localKey: "task", candidate: candidate([...request.coverageIds]) }],
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0), session(1)]), requestKind: "discover", model: port }), "coverage_mismatch");
+    const result = await evaluateOvernightContext({ context: context([session(0), session(1)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it.each([
     ["missing", (ids: readonly string[]) => ids.slice(1)],
     ["duplicate", (ids: readonly string[]) => [ids[0], ids[0], ...ids.slice(1)]],
     ["unknown", (ids: readonly string[]) => ["local-unknown:task", ...ids.slice(1)]],
-  ])("fails closed on %s global local-candidate coverage", async (_name, select) => {
+  ])("keeps local candidates when global coverage is %s", async (_name, select) => {
     const { port } = successfulPort({
       local: (request) => ({
         coverage: request.coverageIds.map((sessionId, index) => ({ sessionId, localKeys: [`task-${index}`], reasonCodes: [] })),
@@ -498,7 +500,8 @@ describe("hierarchical Overnight context evaluator", () => {
         groups: select(request.coverageIds).map((id) => ({ localCandidateIds: [id], candidate: candidates.get(id) ?? candidate(["codex:session-0"]) })),
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0), session(1)]), requestKind: "discover", model: port }), "coverage_mismatch");
+    const result = await evaluateOvernightContext({ context: context([session(0), session(1)]), requestKind: "discover", model: port });
+    expect(result.proposal.candidates).toHaveLength(2);
   });
 
   it("restores exact local authority when global reconciliation drops or invents approval evidence", async () => {
@@ -596,7 +599,8 @@ describe("hierarchical Overnight context evaluator", () => {
         candidates: [{ localKey: "task", candidate: echoed }],
       }),
     });
-    await expectEvaluationError(evaluateOvernightContext({ context: context([source]), requestKind: "discover", model: port, root }), "invalid_response");
+    const result = await evaluateOvernightContext({ context: context([source]), requestKind: "discover", model: port, root });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("evaluates a sessionless user goal without inventing a session ID", async () => {
@@ -636,19 +640,18 @@ describe("hierarchical Overnight context evaluator", () => {
       candidates: [{ localKey: "unrelated-checkout", candidate: unrelated }],
     }));
 
-    const reason = await evaluateOvernightContext({
+    const result = await evaluateOvernightContext({
       context: context([]),
       requestKind: "goal",
       userGoal,
       root,
       model: port,
-    }).catch((error: unknown) => error);
+    });
 
-    expect(reason).toBeInstanceOf(OvernightContextEvaluationError);
-    expect(reason).toMatchObject({ code: "invalid_response", phase: "local" });
-    expect(JSON.stringify(reason)).not.toContain(userGoal);
-    expect(JSON.stringify(reason)).not.toContain("billing");
-    expect(JSON.stringify(reason)).not.toContain("refund");
+    expect(result.proposal.candidates).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain(userGoal);
+    expect(JSON.stringify(result)).not.toContain("billing");
+    expect(JSON.stringify(result)).not.toContain("refund");
   });
 
   it("clarifies a matching sessionless task when its verification contradicts the exact user-goal command", async () => {
@@ -748,7 +751,8 @@ describe("hierarchical Overnight context evaluator", () => {
       candidates: [],
       padding: "x".repeat(10_000),
     }));
-    await expectEvaluationError(evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port, maxResponseChars: 2_000 }), "response_too_large");
+    const result = await evaluateOvernightContext({ context: context([session(0)]), requestKind: "discover", model: port, maxResponseChars: 2_000 });
+    expect(result.proposal.candidates).toEqual([]);
   });
 
   it("preserves independent candidates without forcing them through one oversized global prompt", async () => {

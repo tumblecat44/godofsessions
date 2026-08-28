@@ -4,6 +4,7 @@ import type {
   AppLanguage,
   OvernightBoardTicket,
   OrchestrationSnapshot,
+  OvernightCard as OvernightNightCard,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioRunItemSummary,
   OvernightPortfolioRunSummary,
@@ -11,7 +12,7 @@ import type {
 } from "../shared/contracts";
 import { getMorrowBridge } from "../lib/bridge";
 import { overnightCliLoginCommand } from "../lib/overnight-cli";
-import { overnightTickets } from "../lib/overnight-tickets";
+import { nightShiftTickets, overnightTickets } from "../lib/overnight-tickets";
 import { startedRunItems, tonightPlanItems, visibleTonightPlan } from "../lib/tonight";
 import { CopyCommandButton } from "./CopyCommandButton";
 import { OvernightCalendarButton, OvernightDateEmptyState, overnightDateKey } from "./OvernightCalendar";
@@ -29,6 +30,8 @@ interface OvernightViewProps {
   onAddOvernight?(goal: string): Promise<void>;
   onOpenSettings(): void;
   onStopPortfolio(runId: string): Promise<void>;
+  onCancelNight?(cardId: string): Promise<void>;
+  onBranchLog?(cardId: string): Promise<string>;
 }
 
 const activeRunStatuses = new Set<OvernightPortfolioRunSummary["status"]>(["starting", "running", "stopping"]);
@@ -73,16 +76,16 @@ export function OvernightView(props: OvernightViewProps) {
   }, [cards, selectedKey]);
 
   return (
-    <main className="overnight-view h-dvh overflow-y-auto bg-night px-[clamp(32px,5vw,80px)] pb-16 pt-[clamp(58px,7vh,82px)] text-ink max-[1120px]:px-9" hidden={props.hidden}>
-      <header className="overnight-head mx-auto grid w-full max-w-[1080px] grid-cols-[minmax(0,1fr)_auto] items-end gap-8 border-b border-line pb-7">
+    <main className="overnight-view h-dvh overflow-y-auto bg-night px-8 pb-12 pt-12 text-ink max-[1120px]:px-6" hidden={props.hidden}>
+      <header className="overnight-head mx-auto grid w-full max-w-[1080px] grid-cols-[minmax(0,1fr)_auto] items-end gap-4 border-b border-line pb-4">
         <div>
-          <h1 className="text-[clamp(32px,3.6vw,48px)] font-medium leading-[0.96] tracking-[-0.05em]">
+          <h1 className="text-2xl font-medium leading-none tracking-[-0.03em]">
             {selectedCard ? (selectedCard.planItem?.outcome ?? selectedCard.runItem?.outcome ?? "Overnight") : "Overnight"}
           </h1>
-          <p className="mt-3 max-w-[680px] text-sm leading-6 text-ink-muted">
+          <p className="mt-1.5 max-w-[640px] text-[13px] leading-5 text-ink-muted">
             {selectedCard
-              ? (ko ? "이 Overnight의 작업과 아침 확인이 어느 상태인지 봅니다." : "Work and morning check for this overnight.")
-              : (ko ? "오늘 Overnight 목록입니다. 카드를 열면 상태를 봅니다." : "Today's overnights. Open a card to see its status.")}
+              ? (ko ? "작업과 아침 확인 상태." : "Work and morning check.")
+              : (ko ? "카드를 열면 상태를 봅니다." : "Open a card to see its status.")}
           </p>
         </div>
         {selectedCard ? (
@@ -92,8 +95,12 @@ export function OvernightView(props: OvernightViewProps) {
         )}
       </header>
 
-      <section className="overnight-list mx-auto mt-8 w-full max-w-[1080px]" aria-label={ko ? "Overnights" : "Overnights"}>
+      <section className="overnight-list mx-auto mt-5 w-full max-w-[1080px]" aria-label={ko ? "Overnights" : "Overnights"}>
         {selectedActiveRun && !selectedCard && <ActiveRunBar run={selectedActiveRun} ko={ko} onStop={props.onStopPortfolio} />}
+
+        {!selectedCard && (props.snapshot.overnightCards ?? []).map((night) => (
+          <NightCard key={night.id} night={night} ko={ko} onCancel={props.onCancelNight} onBranchLog={props.onBranchLog} />
+        ))}
 
         {props.error && <div className="overnight-error flex items-center justify-between gap-3" role="alert"><span>{props.error}</span><button type="button" className="shrink-0 font-semibold underline underline-offset-2" onClick={() => void props.onPrepare()}>{ko ? "다시 시도" : "Try again"}</button></div>}
 
@@ -105,12 +112,12 @@ export function OvernightView(props: OvernightViewProps) {
               <li key={card.key}>
                 <button
                 type="button"
-                className="flex w-full items-center justify-between gap-4 rounded-[12px] border border-line bg-transparent px-4 py-3.5 text-left transition-[background-color,border-color] duration-150 ease-morrow hover:border-white/15 hover:bg-surface"
+                className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-line bg-transparent px-3 py-2 text-left transition-[background-color,border-color] duration-150 ease-morrow hover:border-white/15 hover:bg-surface"
                 onClick={() => setSelectedKey(card.key)}
               >
                 <span className="min-w-0">
                   <small className="font-mono text-[9px] tracking-[0.12em] text-ink-faint">{`OVERNIGHT ${card.index + 1}`}</small>
-                  <strong className="mt-1 block truncate text-[15px]">{card.planItem?.outcome ?? card.runItem?.outcome ?? (ko ? "Overnight" : "Overnight")}</strong>
+                  <strong className="mt-0.5 block truncate text-[13px] font-medium">{card.planItem?.outcome ?? card.runItem?.outcome ?? (ko ? "Overnight" : "Overnight")}</strong>
                   <span className="mt-1 block text-[11px] text-ink-muted">{card.planItem?.providerLabel ?? card.runItem?.providerLabel}{card.runItem ? ` · ${itemListStatus(card.runItem.status, ko)}` : (ko ? " · 대기" : " · waiting")}</span>
                 </span>
                 <ChevronRight size={16} className="shrink-0 text-ink-faint" />
@@ -118,7 +125,7 @@ export function OvernightView(props: OvernightViewProps) {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : (props.snapshot.overnightCards ?? []).length > 0 ? null : (
           <EmptyToday
             date={selectedDate}
             today={today}
@@ -132,6 +139,99 @@ export function OvernightView(props: OvernightViewProps) {
         )}
       </section>
     </main>
+  );
+}
+
+function nightWindow(night: OvernightNightCard, ko: boolean) {
+  const time = (value?: string) => value
+    ? new Date(value).toLocaleTimeString(ko ? "ko-KR" : "en-US", { hour: "2-digit", minute: "2-digit" })
+    : "--:--";
+  return `${time(night.startAt)} – ${time(night.endAt)}`;
+}
+
+function NightCard({ night, ko, onCancel, onBranchLog }: {
+  night: OvernightNightCard;
+  ko: boolean;
+  onCancel?(cardId: string): Promise<void>;
+  onBranchLog?(cardId: string): Promise<string>;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  const [log, setLog] = useState<string>();
+  const done = night.tickets.filter((ticket) => ticket.lane === "done").length;
+  const failed = night.tickets.filter((ticket) => ticket.lane === "failed").length;
+  const stoppedEarly = night.status === "ran" && night.tickets.some((ticket) => ticket.lane === "waiting" || ticket.lane === "working");
+  const statusLabel = night.status === "scheduled"
+    ? (ko ? "예약됨" : "Scheduled")
+    : night.status === "running"
+      ? (ko ? "작동중" : "Running")
+      : (ko ? "완료" : "Done");
+
+  useEffect(() => {
+    if (night.status !== "ran" || !onBranchLog) return;
+    let alive = true;
+    void onBranchLog(night.id).then((value) => { if (alive) setLog(value); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [night.id, night.status]);
+
+  return (
+    <article className="mb-3 overflow-hidden rounded-[11px] border border-line bg-surface/40" aria-label={ko ? `밤 계획: ${night.goal}` : `Night plan: ${night.goal}`}>
+      <header className="flex items-start justify-between gap-3 px-4 py-3">
+        <div className="min-w-0">
+          <span className={`font-mono text-[9px] font-semibold tracking-[0.13em] ${night.status === "running" ? "text-teal" : "text-amber"}`}>{statusLabel.toUpperCase()} · {nightWindow(night, ko)}</span>
+          <h3 className="mt-0.5 truncate text-[14px] font-medium">{night.goal.split("\n")[0]}</h3>
+          <p className="mt-0.5 truncate font-mono text-[10px] text-ink-faint">{night.branch} · {night.targetDirectory}</p>
+        </div>
+        {onCancel && (night.status === "scheduled" || night.status === "running") && (
+          <Button variant="secondary" disabled={cancelling} onClick={() => { setCancelling(true); void onCancel(night.id).finally(() => setCancelling(false)); }}>
+            {cancelling ? (ko ? "취소하는 중…" : "Cancelling…") : (ko ? "취소" : "Cancel")}
+          </Button>
+        )}
+      </header>
+
+      {night.status === "ran" ? (
+        <div className="grid gap-3 border-t border-line-soft p-4 text-[12px] leading-5">
+          <p className="text-ink">
+            {ko
+              ? `카드 ${night.tickets.length}개 중 완료 ${done}, 실패 ${failed}${stoppedEarly ? ", 종료 시간에 WIP로 멈춤" : ""}.`
+              : `${done} done, ${failed} failed of ${night.tickets.length} cards${stoppedEarly ? ", stopped with WIP at the window end" : ""}.`}
+          </p>
+          <ul className="grid gap-1.5">
+            {night.tickets.map((ticket) => (
+              <li key={ticket.id} className="flex items-center gap-2 text-[11px]">
+                <span className={`inline-block size-2 shrink-0 rounded-full ${ticket.lane === "done" ? "bg-teal" : ticket.lane === "failed" ? "bg-danger" : "bg-ink-faint"}`} />
+                <span className="min-w-0 truncate text-ink">{ticket.title}</span>
+                <span className="shrink-0 text-ink-faint">{ticket.lane === "done" ? (ko ? "완료" : "done") : ticket.lane === "failed" ? (ko ? "실패" : "failed") : (ko ? "미착수" : "not started")}</span>
+              </li>
+            ))}
+          </ul>
+          {log && (
+            <section>
+              <strong className="text-[9px] text-ink-faint">{ko ? "밤새 쌓인 커밋" : "COMMITS OVERNIGHT"}</strong>
+              <pre className="mt-1 max-h-40 overflow-auto rounded-[8px] bg-black/25 p-2.5 font-mono text-[10px] leading-4 text-ink-muted">{log}</pre>
+            </section>
+          )}
+          {night.branch && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-ink-muted">{ko ? "아침은 이 브랜치에서:" : "Start the morning on:"}</span>
+              <CopyCommandButton command={`git switch ${night.branch}`} language={ko ? "ko" : "en"} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <OvernightKanban tickets={boardTicketsFromOvernightTickets(nightShiftTickets(night, ko), night.id)} outcome={night.goal.split("\n")[0]} providerLabel={night.workAi} ko={ko} />
+      )}
+
+      {night.decisionsLog.length > 0 && (
+        <details className="border-t border-line-soft">
+          <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between px-3 text-[11px] font-medium text-ink-muted hover:text-ink"><span>{ko ? "morrow 기록" : "Morrow journal"}</span><ChevronRight size={14} /></summary>
+          <ul className="grid gap-1 border-t border-line-soft p-3 text-[10px] leading-4 text-ink-muted">
+            {night.decisionsLog.slice(-8).map((entry, index) => (
+              <li key={index}><span className="font-mono text-ink-faint">{new Date(entry.at).toLocaleTimeString(ko ? "ko-KR" : "en-US", { hour: "2-digit", minute: "2-digit" })}</span> {entry.note}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </article>
   );
 }
 
@@ -246,7 +346,7 @@ function OvernightCard({ index, planItem, runItem, ko }: {
       onAddItem={onAddItem}
     />
     <details className="border-t border-line-soft">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 text-[11px] font-semibold text-ink-muted hover:text-ink"><span>{ko ? "계획과 결과 보기" : "View plan and result"}</span><ChevronRight size={14} /></summary>
+      <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between px-3 text-[11px] font-medium text-ink-muted hover:text-ink"><span>{ko ? "계획과 결과 보기" : "View plan and result"}</span><ChevronRight size={14} /></summary>
       <div className="grid gap-4 border-t border-line-soft p-4 text-[11px] leading-5">
         {(planItem?.verification ?? runItem?.verification) && <section><strong className="text-[9px] text-ink-faint">{ko ? "아침에 확인할 것" : "MORNING CHECK"}</strong><p className="mt-1 text-ink">{planItem?.verification ?? runItem?.verification}</p></section>}
         {planItem?.risks.length ? <section><strong className="text-[9px] text-ink-faint">{ko ? "알고 시작할 점" : "KNOWN RISKS"}</strong><ul className="mt-1 list-disc pl-4 text-ink-muted">{planItem.risks.map((risk) => <li key={risk}>{risk}</li>)}</ul></section> : null}
@@ -290,7 +390,7 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
       <div>
         <span>{ko ? "자동으로 준비 중" : "PREPARING AUTOMATICALLY"}</span>
         <h2>{ko ? "오늘 밤 보드를 준비하는 중" : "Preparing tonight's board"}</h2>
-        <p>{ko ? "파일은 바꾸지 않아요. 시작은 Ask Morrow 탭의 체크된 카드에서 합니다." : "No files are changing. Start from the checked cards on Ask Morrow."}</p>
+        <p>{ko ? "시작은 Ask Morrow의 체크된 카드에서 합니다." : "Start from the checked cards on Ask Morrow."}</p>
       </div>
     </div>;
   }
@@ -300,7 +400,7 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
       <div>
         <span>{ko ? "대화 모델 필요" : "CONVERSATION MODEL"}</span>
         <h2>{ko ? "먼저 대화 모델을 연결하세요" : "Connect a conversation model first"}</h2>
-        <p>{ko ? "오늘 밤 카드 최대 3장은 Ask Morrow 위에 뜹니다. 설정에서 모델을 연결한 뒤, 읽고 체크를 뺀 다음 시작을 누르세요." : "Tonight's 3 cards appear on Ask Morrow. Connect a model in Settings, then read the cards, uncheck any, press Start."}</p>
+        <p>{ko ? "설정에서 모델을 연결하면 Ask Morrow에 오늘 밤 카드가 뜹니다." : "Connect a model in Settings. Tonight's cards then appear on Ask Morrow."}</p>
         <Button variant="primary" className="mt-3" onClick={onOpenSettings}>{ko ? "설정에서 모델 연결" : "Connect a model in Settings"}</Button>
       </div>
     </div>;
@@ -319,7 +419,7 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
               <li key={route.provider} className="flex items-center justify-between gap-3 rounded-[10px] border border-line bg-surface/50 px-3 py-2">
                 <span className="min-w-0">
                   <strong className="block text-[13px]">{route.label}</strong>
-                  <small className="block font-mono text-[10px] text-ink-faint">{command ?? (ko ? "Morrow에 포함됨" : "bundled with Morrow")}</small>
+                  <small className="block font-mono text-[10px] text-ink-faint">{command ?? (ko ? "대화 SDK · Overnight 작업자 아님" : "Conversation SDK · not a worker")}</small>
                 </span>
                 {command && <CopyCommandButton command={command} language={ko ? "ko" : "en"} />}
               </li>
@@ -335,7 +435,7 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
     <div>
       <span>{ko ? "오늘은 0개" : "ZERO TONIGHT"}</span>
       <h2>{ko ? "오늘 밤 준비된 Overnight가 없어요" : "No Overnight is ready tonight"}</h2>
-      <p>{ko ? "0개도 정상이에요. 맡길 일이 있으면 아래에서 추가하세요." : "Zero is valid. Add an overnight below if you want something done tonight."}</p>
+      <p>{ko ? "맡길 일이 있으면 아래에서 추가하세요." : "Add an overnight below if you want work tonight."}</p>
       {onAddOvernight ? <AddOvernightForm ko={ko} onAdd={onAddOvernight} /> : null}
     </div>
   </div>;

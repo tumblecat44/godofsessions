@@ -150,15 +150,33 @@ async function proveOvernightBoard(page, app) {
 
 async function proveSettingsClis(page) {
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("heading", { name: "Overnight CLIs" }).waitFor();
+  await page.getByRole("heading", { name: "Overnight", exact: true }).waitFor();
   const body = await page.locator("body").innerText();
   for (const name of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) assert.match(body, new RegExp(name));
+  assert.doesNotMatch(body, /Installed means the command is on PATH/);
+  assert.match(body, /Ready for Overnight/);
+  assert.match(body, /Sign in from Terminal/);
+  assert.match(body, /Not ready for Overnight/);
+  assert.doesNotMatch(body, /Bundled with Morrow/i);
   assert.doesNotMatch(body, /Safety check/);
   assert.doesNotMatch(body, /OS containment/i);
   assert.doesNotMatch(body, /canary/i);
-  const overnightSection = page.locator(".settings-section", { has: page.getByRole("heading", { name: "Overnight CLIs" }) });
+  const overnightSection = page.locator(".settings-section", { has: page.getByRole("heading", { name: "Overnight", exact: true }) });
   assert.equal(await overnightSection.getByRole("button", { name: /Connect/ }).count(), 0);
+  assert.equal(await overnightSection.getByRole("button", { name: "Copy claude auth login" }).count(), 0);
+  assert.equal(await overnightSection.getByRole("button", { name: "Copy codex login" }).count(), 1);
   await writeEvidence(page, "settings-clis");
+  await page.getByRole("button", { name: "한국어" }).click();
+  await page.getByRole("heading", { name: "설정" }).waitFor();
+  const korean = await page.locator("body").innerText();
+  assert.match(korean, /Overnight에 사용 가능/);
+  assert.match(korean, /로그인 필요/);
+  assert.match(korean, /Overnight에 아직 없음/);
+  assert.doesNotMatch(korean, /하나면 Morrow가 말합니다/);
+  assert.doesNotMatch(korean, /설치됨은 PATH에서/);
+  assert.doesNotMatch(korean, /화면만 바꿉니다/);
+  assert.doesNotMatch(korean, /이 폴더 안에서만/);
+  await writeEvidence(page, "settings-clis-ko");
   process.stdout.write(`settings-clis passed. evidence: ${join(evidenceRoot, "settings-clis.png")}\n`);
 }
 
@@ -166,7 +184,7 @@ async function proveFourRoutes(page) {
   const tonight = await page.getByLabel("Tonight's overnights").innerText();
   assert.doesNotMatch(tonight, /Cursor|Hermes|OpenClaw/);
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("heading", { name: "Overnight CLIs" }).waitFor();
+  await page.getByRole("heading", { name: "Overnight", exact: true }).waitFor();
   const settings = await page.locator("body").innerText();
   for (const name of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) assert.match(settings, new RegExp(name));
   assert.doesNotMatch(settings, /Start.*Cursor|Hermes as a worker|OpenClaw/);
@@ -258,6 +276,7 @@ async function installSyntheticIpc(electronApp, fixture) {
       portfolioAssessments: [],
       portfolioPlans: state().plan ? [state().plan] : [],
       portfolioRuns: state().run ? [state().run] : [],
+      overnightCards: [],
     });
     const bootstrap = () => ({
       rootName: "synthetic-workspace",
@@ -393,10 +412,10 @@ function fixtureFor(command) {
     run: null,
     started: null,
     routes: [
-      { provider: "claude", label: "Claude Code", status: "ready" },
-      { provider: "codex", label: "Codex", status: "ready" },
-      { provider: "grok", label: "Grok Build", status: "ready" },
-      { provider: "pi", label: "Pi Agent", status: "ready" },
+      { provider: "claude", label: "Claude Code", status: "ready", authentication: "signed_in" },
+      { provider: "codex", label: "Codex", status: "ready", authentication: "signed_out" },
+      { provider: "grok", label: "Grok Build", status: "ready", authentication: "signed_in" },
+      { provider: "pi", label: "Pi Agent", status: "blocked", reason: "Morrow's conversation SDK is not an Overnight worker." },
     ],
     context: {
       date: now.slice(0, 10),

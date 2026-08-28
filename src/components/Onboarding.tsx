@@ -50,7 +50,7 @@ export function Onboarding({
       onLanguageChange?.(nextLanguage);
     });
   return (
-    <main className="onboarding-shell grid h-dvh grid-rows-[66px_minmax(0,1fr)_72px] overflow-hidden bg-night text-ink">
+    <main className="onboarding-shell grid h-dvh grid-rows-[52px_minmax(0,1fr)_56px] overflow-hidden bg-night text-ink">
       <header className="onboarding-topbar grid grid-cols-[1fr_auto_1fr] items-center border-b border-line-soft bg-night/80 px-7 backdrop-blur-xl">
         <div className="onboarding-brand flex items-center gap-2.5">
           <OperatorMark size={29} />
@@ -70,7 +70,7 @@ export function Onboarding({
               size="sm"
               aria-label={label}
               className={cn(
-                "h-12 min-h-0 flex-col gap-1 rounded-lg px-2 font-mono text-[9px] font-normal text-ink-faint shadow-none",
+                "h-10 min-h-0 flex-col gap-1 rounded-md px-2 font-mono text-[9px] font-normal text-ink-faint shadow-none",
                 index === step && "is-current text-amber",
                 index < step && "is-complete text-teal",
               )}
@@ -94,7 +94,7 @@ export function Onboarding({
       </header>
 
       <section
-        className={`onboarding-canvas onboarding-step onboarding-step--${step} mx-auto grid w-[min(1180px,calc(100%-80px))] grid-cols-[minmax(0,0.85fr)_minmax(380px,1.15fr)] items-center gap-[clamp(48px,8vw,120px)] overflow-hidden max-[900px]:w-[calc(100%-48px)] max-[900px]:grid-cols-1 max-[900px]:gap-8`}
+        className={`onboarding-canvas onboarding-step onboarding-step--${step} mx-auto grid w-[min(1180px,calc(100%-80px))] grid-cols-[minmax(0,0.85fr)_minmax(380px,1.15fr)] items-center gap-[clamp(32px,5vw,64px)] overflow-hidden max-[900px]:w-[calc(100%-48px)] max-[900px]:grid-cols-1 max-[900px]:gap-8`}
       >
         {step === 0 && (
           <>
@@ -102,10 +102,10 @@ export function Onboarding({
               <span className="eyebrow font-mono text-[10px] font-semibold tracking-[0.16em] text-amber">
                 YOUR CONVERSATIONAL OPERATOR
               </span>
-              <h1 className="mt-5 text-[clamp(48px,5vw,68px)] font-medium leading-[0.98] tracking-[-0.055em]">
+              <h1 className="mt-3 text-[32px] font-medium leading-[1.15] tracking-[-0.03em]">
                 {ko ? "Morrow와 그냥 이야기하세요." : "Just talk to Morrow."}
               </h1>
-              <p className="mt-5 max-w-[520px] text-[15px] leading-6 text-ink-muted">
+              <p className="mt-3 max-w-[520px] text-[13px] leading-5 text-ink-muted">
                 {ko
                   ? "지금 마음에 걸리는 일을 말해 보세요. 밤에는 Morrow가 안전한 일을 자동으로 준비하고, 한 번 눌러 맡긴 뒤 아침에 목적별 결과를 확인해요."
                   : "Tell Morrow what is on your mind. At night, Morrow prepares the safe work automatically; press once, then review every outcome in the morning."}
@@ -161,12 +161,12 @@ export function Onboarding({
               <span className="eyebrow font-mono text-[10px] font-semibold tracking-[0.16em] text-amber">
                 MORROW'S CONVERSATION MODEL
               </span>
-              <h1 className="mt-5 text-[clamp(48px,5vw,68px)] font-medium leading-[0.98] tracking-[-0.055em]">
+              <h1 className="mt-3 text-[32px] font-medium leading-[1.15] tracking-[-0.03em]">
                 {ko
                   ? "Morrow와 대화할 모델을 연결하세요."
                   : "Connect the model Morrow talks with."}
               </h1>
-              <p className="mt-5 max-w-[520px] text-[15px] leading-6 text-ink-muted">
+              <p className="mt-3 max-w-[520px] text-[13px] leading-5 text-ink-muted">
                 {ko
                   ? "이 연결은 Morrow와 대화할 때 사용합니다. 야간 작업자는 Overnight에서 별도로 확인하므로, 대화 연결과 오늘 밤 실행 준비 상태를 각각 정확히 볼 수 있어요."
                   : "This connection powers your conversations with Morrow. Overnight workers are checked separately in Overnight, so conversation access and tonight's worker readiness stay clear."}
@@ -211,15 +211,15 @@ export function Onboarding({
               <span className="eyebrow font-mono text-[10px] font-semibold tracking-[0.16em] text-amber">
                 ONE BUTTON · THEN SLEEP
               </span>
-              <h1 className="mt-5 text-[clamp(48px,5vw,68px)] font-medium leading-[0.98] tracking-[-0.055em]">
+              <h1 className="mt-3 text-[32px] font-medium leading-[1.15] tracking-[-0.03em]">
                 {ko
                   ? "열고, 한 번 누르고, 주무세요."
                   : "Open it. Press once. Go to sleep."}
               </h1>
-              <p className="mt-5 max-w-[520px] text-[15px] leading-6 text-ink-muted">
+              <p className="mt-3 max-w-[520px] text-[13px] leading-5 text-ink-muted">
                 {ko
-                  ? "Morrow가 Claude Code, Codex, Grok Build, Pi Agent 중 안전하게 준비된 작업자로 오늘의 정확한 목적을 구성해요. 보이는 그대로 한 번 눌러 시작하세요."
-                  : "Morrow builds tonight's exact outcomes from whichever of Claude Code, Codex, Grok Build, and Pi Agent are safely ready. Press once to start the visible set."}
+                  ? "Morrow가 Claude Code, Codex, Grok Build, Pi Agent를 이름으로 둡니다. PATH에 있는 CLI만 달립니다. Pi Agent는 아직 Overnight 작업자가 아닙니다. 보이는 그대로 한 번 눌러 시작하세요."
+                  : "Morrow names Claude Code, Codex, Grok Build, and Pi Agent. Only a CLI on PATH can run. Pi Agent is not a worker yet. Press once to start the visible set."}
               </p>
               <div className="onboarding-safety-list mt-7 border-t border-line-soft">
                 {[
@@ -285,7 +285,7 @@ export function Onboarding({
                   <small className="font-mono text-[10px] tracking-[0.14em] text-amber">
                     MORROW
                   </small>
-                  <p className="mt-3 text-base leading-7 text-ink-muted">
+                  <p className="mt-2 text-[13px] leading-5 text-ink-muted">
                     {ko
                       ? "오늘 밤 맡길 일을 Morrow 위에 올려 두었어요. 체크된 카드만 한 번 누르면 시작해요."
                       : "Tonight's cards are on Morrow. Press start on the checked set, then go to sleep."}

@@ -1,5 +1,9 @@
 # Morrow uses Hermes for durable agent state
 
+- Status: superseded
+- Superseded by: [ADR 0050: Embed Pi Agent SDK in Electron for Morrow V2](0050-electron-pi-morrow-v2.md)
+  for the active desktop application. Hermes is evidence only.
+
 Morrow uses an installed, probed Hermes Agent as its production conversation
 state layer. God of Sessions launches Hermes out of process through the TUI
 Gateway JSON-RPC protocol and persists Hermes' durable session ID with a

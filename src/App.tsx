@@ -291,6 +291,13 @@ function App() {
   const changeView = (nextView: AppView) => {
     if (nextView === view) return;
     transitionState(() => setView(nextView));
+    if (nextView === "settings") {
+      void bridge.bootstrap().then((next) => {
+        updateStateWithoutTransition(() => setState((current) => current
+          ? { ...current, orchestration: next.orchestration }
+          : next));
+      }).catch(() => undefined);
+    }
   };
 
   const authSurfaces = (
@@ -335,7 +342,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell relative grid min-h-dvh grid-cols-[auto_minmax(0,1fr)] overflow-hidden bg-night">
+    <div className="app-shell relative min-h-dvh overflow-hidden bg-night">
       <div className="titlebar-drag" />
       <Sidebar
         view={view}
@@ -389,6 +396,10 @@ function App() {
         tonightPreparing={overnightPreparing}
         hasReadyOvernightWorker={hasReadyOvernightWorker}
         onStartTonight={startOvernightPortfolio}
+        onScheduleTonight={async (request) => {
+          const orchestration = await bridge.scheduleOvernightNight(request);
+          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
+        }}
       />
       <OvernightView
         hidden={view !== "overnight"}
@@ -411,6 +422,11 @@ function App() {
           try { await stopOvernightPortfolio(runId); }
           catch { transitionState(() => setOvernightError(overnightStopFailureMessage(state.language))); }
         }}
+        onCancelNight={async (cardId) => {
+          const orchestration = await bridge.cancelOvernightNight(cardId);
+          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
+        }}
+        onBranchLog={(cardId) => bridge.overnightBranchLog(cardId)}
       />
       {view === "settings" ? (
         <SettingsView
@@ -438,6 +454,7 @@ function App() {
               conversationRef.current = undefined;
             });
           }}
+          onRevealOvernightStore={() => void bridge.revealOvernightStore()}
         />
       ) : null}
 

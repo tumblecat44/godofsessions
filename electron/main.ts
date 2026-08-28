@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, powerSaveBlocker, safeStorage, shell } from "electron";
+import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,6 +13,7 @@ import {
   type OvernightExecutionProvider,
   type ThinkingLevel,
 } from "../src/shared/contracts";
+import { resolveExecutionRoot } from "./runtime/execution-root";
 import { GitHubAuthService } from "./runtime/github-auth";
 import { MorrowService } from "./runtime/morrow-service";
 import { createCommonSenseOvernightControlPlane } from "./runtime/overnight-provider-common-sense";
@@ -238,6 +240,25 @@ function registerIpc() {
     syncOvernightPowerProtection(snapshot);
     return run;
   });
+  handle("morrow:schedule-overnight-night", (_event, value) => {
+    const input = record(value, "overnight night request");
+    const workAi = text(input.workAi, "work AI", 20);
+    const verifyAi = text(input.verifyAi, "verify AI", 20);
+    if (!overnightProviders.has(workAi as OvernightExecutionProvider) || !overnightProviders.has(verifyAi as OvernightExecutionProvider)) {
+      throw new Error("Invalid overnight provider.");
+    }
+    return service().scheduleOvernightNight({
+      goal: text(input.goal, "goal", 4_000),
+      finishCondition: text(input.finishCondition, "finish condition", 4_000),
+      workAi: workAi as OvernightExecutionProvider,
+      verifyAi: verifyAi as OvernightExecutionProvider,
+      targetDirectory: text(input.targetDirectory, "target directory", 4_096),
+      startAt: text(input.startAt, "start time", 64),
+      endAt: text(input.endAt, "end time", 64),
+    });
+  });
+  handle("morrow:cancel-overnight-night", (_event, value) => service().cancelOvernightNight(boundedId(value, "overnight card id")));
+  handle("morrow:overnight-branch-log", (_event, value) => service().overnightBranchLog(boundedId(value, "overnight card id")));
   handle("morrow:stop-overnight-portfolio", async (_event, value) => {
     await service().stopOvernightPortfolio(boundedId(value, "overnight portfolio run id"));
     await orchestrationSnapshotWithPowerProtection();
@@ -283,6 +304,12 @@ function registerIpc() {
   });
   handle("morrow:reveal-root", async () => {
     const error = await shell.openPath(service().executionRoot());
+    if (error) throw new Error(error);
+  });
+  handle("morrow:reveal-overnight-store", async () => {
+    const directory = service().overnightStoreDirectory();
+    await mkdir(directory, { recursive: true });
+    const error = await shell.openPath(directory);
     if (error) throw new Error(error);
   });
 }
@@ -338,8 +365,10 @@ if (!primaryInstance) {
   });
 
   app.whenReady().then(async () => {
-    const launchRoot = process.cwd();
-    const root = process.env.MORROW_ROOT || (launchRoot === "/" ? homedir() : launchRoot);
+    const root = resolveExecutionRoot({
+      envRoot: process.env.MORROW_ROOT,
+      home: homedir(),
+    });
     const dogfoodContextHome = !app.isPackaged ? process.env.MORROW_DOGFOOD_HOME : undefined;
     const providerHostPath = resolveOvernightProviderHostPath({
       isPackaged: app.isPackaged,

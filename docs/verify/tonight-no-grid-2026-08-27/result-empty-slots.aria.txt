@@ -1,0 +1,41 @@
+GOD OF SESSIONS
+MORROW · NIGHT CONTROL
+Ask Morrow
+Overnight
+Settings
+CONVERSATIONS
+New conversation
+Overnight planning
+today
+MORROW
+EXECUTION ROOT · /tmp/gos-verify-workspace
+TONIGHT
+Tonight's 3 cards
+
+Connect a model in Settings. Morrow then fills these slots.
+
+OVERNIGHT 1
+Empty
+OVERNIGHT 2
+Empty
+OVERNIGHT 3
+Empty
+Connect a model in Settings
+MORROW IS HERE
+MORROW
+What shall we untangle together?
+
+You can simply talk. When tonight’s cards are visible, read them and press Start, or tell me here if they are wrong. I only reach for files or commands when you ask, and I pause before changing anything.
+
+Morrow is shaping the next thought
+Give Morrow a voice first
+Connect one in the Tonight section above. Anything you typed here will stay put.
+Connect model
+Connect a model
+Fastest
+Faster
+Light review
+Balanced
+Deeper · slower
+Very deep · slower
+Deepest · slowest

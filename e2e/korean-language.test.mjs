@@ -68,6 +68,7 @@ try {
         portfolioAssessments: [],
         portfolioPlans: [],
         portfolioRuns: [],
+        overnightCards: [],
       },
     });
     
@@ -92,7 +93,7 @@ try {
   
   // Navigate to Settings
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("heading", { name: "Connections & preferences" }).waitFor({ timeout: 5_000 });
+  await page.getByRole("heading", { name: "Settings" }).waitFor({ timeout: 5_000 });
   process.stdout.write("✓ Settings opened\n");
   
   // Click 한국어 button
@@ -105,7 +106,7 @@ try {
   // The sidebar should show Korean text
   const sidebarVisible = await page.getByRole("button", { name: "Morrow에게 묻기" }).isVisible().catch(() => false);
   const settingsVisible = await page.getByRole("button", { name: "설정" }).isVisible().catch(() => false);
-  const headingVisible = await page.getByRole("heading", { name: "연결과 기본 설정" }).isVisible().catch(() => false);
+  const headingVisible = await page.getByRole("heading", { name: "설정" }).isVisible().catch(() => false);
   
   // Take a screenshot for evidence
   const screenshotPath = join(sandbox, "korean-toggle.png");
@@ -115,7 +116,7 @@ try {
   // These assertions fail if the window is blank
   assert.ok(sidebarVisible, "Sidebar 'Morrow에게 묻기' button should be visible after switching to Korean");
   assert.ok(settingsVisible, "Sidebar '설정' button should be visible after switching to Korean");
-  assert.ok(headingVisible, "Settings heading '연결과 기본 설정' should be visible in Korean");
+  assert.ok(headingVisible, "Settings heading '설정' should be visible in Korean");
   
   process.stdout.write("✓ Korean toggle successful - shell remains visible\n");
   
@@ -123,7 +124,7 @@ try {
   await page.getByRole("button", { name: "English" }).click();
   await page.waitForTimeout(500);
   
-  const englishHeadingVisible = await page.getByRole("heading", { name: "Connections & preferences" }).isVisible().catch(() => false);
+  const englishHeadingVisible = await page.getByRole("heading", { name: "Settings" }).isVisible().catch(() => false);
   assert.ok(englishHeadingVisible, "Settings heading should be visible in English after switching back");
   
   process.stdout.write("✓ English toggle successful\n");

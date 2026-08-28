@@ -1,5 +1,6 @@
 import type {
   OvernightActivityKind,
+  OvernightCard,
   OvernightExecutionProvider,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioRunItemSummary,
@@ -9,7 +10,7 @@ export type OvernightTicketKind = "work" | "morning-check";
 export type OvernightTicketLane = "waiting" | "working" | "result";
 
 export interface OvernightTicket {
-  id: OvernightTicketKind;
+  id: string;
   kind: OvernightTicketKind;
   title: string;
   copy: string;
@@ -140,4 +141,17 @@ function itemStatusLabel(status: OvernightPortfolioRunItemSummary["status"], ko:
     timed_out: ["승인한 시간 안에 끝나지 않았어요.", "The approved time window ended before completion."],
   };
   return labels[status][ko ? 0 : 1];
+}
+
+/** M46: real kanban tickets from a scheduled/running/ran purpose card. */
+export function nightShiftTickets(card: OvernightCard, ko: boolean): OvernightTicket[] {
+  return card.tickets.map((ticket) => ({
+    id: ticket.id,
+    kind: "work",
+    title: ticket.title,
+    copy: ticket.plan,
+    providerLabel: CLI_LABEL[ticket.provider],
+    lane: ticket.lane === "waiting" ? "waiting" : ticket.lane === "working" ? "working" : "result",
+    tone: ticket.lane === "done" ? "completed" : ticket.lane === "failed" ? "failed" : ticket.lane === "working" ? "running" : "draft",
+  } satisfies OvernightTicket));
 }

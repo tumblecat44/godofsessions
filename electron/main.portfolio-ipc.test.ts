@@ -83,6 +83,7 @@ vi.mock("./runtime/morrow-service", () => ({
     verifyOvernightProvider = vi.fn(async (provider: string) => ({ providerRoutes: [{ provider }] }));
     prepareOvernightPortfolio = vi.fn(async (input) => ({ input, portfolioPlans: [] }));
     executionRoot = vi.fn(() => "/tmp/morrow-portfolio-ipc-root");
+    overnightStoreDirectory = vi.fn(() => "/tmp/morrow-portfolio-ipc-root/overnight");
     constructor(options: Record<string, unknown>) {
       testState.morrow = this;
       testState.morrowOptions = options;
@@ -180,6 +181,14 @@ describe("portfolio IPC boundary", () => {
     const { shell } = await import("electron");
     await testState.handlers.get("morrow:reveal-root")!(trustedEvent(), "/etc/passwd");
     expect(shell.openPath).toHaveBeenCalledWith("/tmp/morrow-portfolio-ipc-root");
+    expect(shell.openPath).toHaveBeenCalledOnce();
+  });
+
+  it("opens the overnight sqlite folder in Finder and ignores a renderer-supplied path", async () => {
+    const { shell } = await import("electron");
+    vi.mocked(shell.openPath).mockClear();
+    await testState.handlers.get("morrow:reveal-overnight-store")!(trustedEvent(), "/etc/passwd");
+    expect(shell.openPath).toHaveBeenCalledWith("/tmp/morrow-portfolio-ipc-root/overnight");
     expect(shell.openPath).toHaveBeenCalledOnce();
   });
 });

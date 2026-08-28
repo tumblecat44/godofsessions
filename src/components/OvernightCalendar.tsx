@@ -1,5 +1,8 @@
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { DayPicker, type DayButtonProps } from "react-day-picker";
+import { ko as koLocale } from "react-day-picker/locale";
+import "react-day-picker/style.css";
 import { startedRunItems, tonightPlanItems } from "../lib/tonight";
 import type { OvernightPortfolioPlanSummary, OvernightPortfolioRunSummary } from "../shared/contracts";
 
@@ -21,8 +24,12 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
   useEffect(() => setVisibleMonth(selectedDate.slice(0, 7)), [selectedDate]);
   const closeCalendar = (date?: string) => {
     if (date) onSelect(date);
+    const summary = details.current?.querySelector("summary");
+    if (document.activeElement instanceof HTMLElement && details.current?.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
     details.current?.removeAttribute("open");
-    details.current?.querySelector("summary")?.focus();
+    summary?.focus();
   };
   const runPlanIds = new Set(runs.map((run) => run.planId));
   const inventory = new Map<string, { count: number; active: boolean; attention: boolean }>();
@@ -37,7 +44,16 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
   for (const run of runs) {
     include(overnightDateKey(run.startedAt, timeZone), startedRunItems(run.items).length, activeStatuses.has(run.status), run.status !== "completed" && !activeStatuses.has(run.status));
   }
-  const weekdays = ko ? ["일", "월", "화", "수", "목", "금", "토"] : ["S", "M", "T", "W", "T", "F", "S"];
+  const CountDayButton = ({ day, modifiers, ...buttonProps }: DayButtonProps) => {
+    const button = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+      if (modifiers.focused && details.current?.open) button.current?.focus();
+    }, [modifiers.focused]);
+    const date = calendarDayKey(day.date);
+    const record = inventory.get(date);
+    const label = `${formatCalendarDate(date, ko)}${record ? (ko ? `, Overnight ${record.count}개` : `, ${record.count} Overnight${record.count === 1 ? "" : "s"}`) : ""}`;
+    return <button ref={button} {...buttonProps} aria-label={label} aria-current={date === selectedDate ? "date" : undefined}><span>{day.date.getDate()}</span>{record && <em>{record.count}</em>}</button>;
+  };
   return (
     <details ref={details} className="overnight-calendar" onKeyDown={(event) => {
       if (event.key !== "Escape" || !details.current?.open) return;
@@ -46,13 +62,26 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
     }}>
       <summary aria-label={ko ? "Overnight 날짜 선택" : "Choose Overnight date"}><CalendarDays size={15} /><span>{formatCalendarDate(selectedDate, ko)}</span><ChevronRight size={13} /></summary>
       <div className="overnight-calendar__popover">
-        <header><button type="button" aria-label={ko ? "이전 달" : "Previous month"} onClick={() => setVisibleMonth(shiftCalendarMonth(visibleMonth, -1))}><ChevronLeft size={15} /></button><strong>{formatCalendarMonth(visibleMonth, ko)}</strong><button type="button" aria-label={ko ? "다음 달" : "Next month"} onClick={() => setVisibleMonth(shiftCalendarMonth(visibleMonth, 1))}><ChevronRight size={15} /></button></header>
-        <div className="overnight-calendar__weekdays" aria-hidden="true">{weekdays.map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
-        <div className="overnight-calendar__days">{calendarGridDays(visibleMonth).map((date) => {
-          const record = inventory.get(date);
-          const classes = [date === selectedDate && "is-selected", date === contextDate && "is-today", date.slice(0, 7) !== visibleMonth && "is-outside", record?.active && "is-active", record?.attention && "is-attention"].filter(Boolean).join(" ");
-          return <button type="button" key={date} className={classes} aria-current={date === selectedDate ? "date" : undefined} aria-label={`${formatCalendarDate(date, ko)}${record ? (ko ? `, Overnight ${record.count}개` : `, ${record.count} Overnight${record.count === 1 ? "" : "s"}`) : ""}`} onClick={() => closeCalendar(date)}><span>{Number(date.slice(8, 10))}</span>{record && <em>{record.count}</em>}</button>;
-        })}</div>
+        <DayPicker
+          mode="single"
+          required
+          selected={parseCalendarDay(selectedDate)}
+          today={parseCalendarDay(contextDate)}
+          month={parseCalendarDay(`${visibleMonth}-01`)}
+          onMonthChange={(month) => setVisibleMonth(calendarDayKey(month).slice(0, 7))}
+          onDayClick={(date) => closeCalendar(calendarDayKey(date))}
+          showOutsideDays
+          fixedWeeks
+          locale={ko ? koLocale : undefined}
+          formatters={{ formatCaption: (month) => formatCalendarMonth(calendarDayKey(month).slice(0, 7), ko) }}
+          labels={{ labelPrevious: () => (ko ? "이전 달" : "Previous month"), labelNext: () => (ko ? "다음 달" : "Next month") }}
+          modifiers={{
+            active: [...inventory].filter(([, record]) => record.active).map(([date]) => parseCalendarDay(date)),
+            attention: [...inventory].filter(([, record]) => record.attention).map(([date]) => parseCalendarDay(date)),
+          }}
+          modifiersClassNames={{ active: "is-active", attention: "is-attention" }}
+          components={{ DayButton: CountDayButton }}
+        />
         <footer><span><i className="is-active" />{ko ? "실행 중" : "Running"}</span><span><i />{ko ? "기록 있음" : "Has records"}</span><button type="button" onClick={() => closeCalendar(contextDate)}>{ko ? "오늘로 이동" : "Go to today"}</button></footer>
       </div>
     </details>
@@ -60,7 +89,7 @@ export function OvernightCalendarButton({ selectedDate, contextDate, timeZone, p
 }
 
 export function OvernightDateEmptyState({ date, ko }: { date: string; ko: boolean }) {
-  return <div className="overnight-date-empty"><CalendarDays size={20} /><div><span>{ko ? "기록 없음" : "NO RECORDS"}</span><h2>{ko ? `${formatCalendarDate(date, ko)}에는 Overnight가 없습니다` : `No Overnights on ${formatCalendarDate(date, ko)}`}</h2><p>{ko ? "캘린더에서 기록이 표시된 다른 날짜를 골라 주세요. 새 Overnight 준비는 오늘 날짜에서 할 수 있습니다." : "Choose another marked date in the calendar. New Overnights can be prepared from today's date."}</p></div></div>;
+  return <div className="overnight-date-empty"><CalendarDays size={20} /><div><span>{ko ? "기록 없음" : "NO RECORDS"}</span><h2>{ko ? `${formatCalendarDate(date, ko)}에는 Overnight가 없습니다` : `No Overnights on ${formatCalendarDate(date, ko)}`}</h2><p>{ko ? "기록이 있는 다른 날짜를 고르거나, 오늘에서 새로 준비하세요." : "Pick a marked date, or prepare a new overnight from today."}</p></div></div>;
 }
 
 export function overnightDateKey(value: string, timeZone: string) {
@@ -75,21 +104,13 @@ export function formatCalendarDate(date: string, ko: boolean) {
   return new Intl.DateTimeFormat(ko ? "ko-KR" : "en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`));
 }
 
-function calendarGridDays(month: string) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const first = new Date(Date.UTC(year, monthNumber - 1, 1));
-  const start = new Date(first);
-  start.setUTCDate(1 - first.getUTCDay());
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(start);
-    date.setUTCDate(start.getUTCDate() + index);
-    return date.toISOString().slice(0, 10);
-  });
+function parseCalendarDay(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day || 1);
 }
 
-function shiftCalendarMonth(month: string, amount: number) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  return new Date(Date.UTC(year, monthNumber - 1 + amount, 1)).toISOString().slice(0, 7);
+function calendarDayKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function formatCalendarMonth(month: string, ko: boolean) {

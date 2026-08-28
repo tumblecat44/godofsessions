@@ -18,11 +18,11 @@ colors:
 typography:
   body: "Instrument Sans Variable"
   system: "JetBrains Mono Variable"  # metadata, statuses, commands, eyebrows
-  scale: "mono system labels 9–12px; secondary text 10–11px; body 12–13px; section titles 14–16px; display headlines clamp(20–48px), weight 480–510, letter-spacing -0.03em to -0.05em. Never go below 9px."
+  scale: "mono labels 10–11px; helper 12px; body 13px / 1.45; chat 14px / 1.5; section titles 13–14px weight 510; page titles 24px weight 510 tracking -0.03em. Product density, not marketing display. Never go below 9px."
 radii:
-  control: 7px
-  panel: 10-12px
-borders: "1px hairlines from rgba(238,232,220,.06/.10/.25); never heavier"
+  control: 6px
+  panel: 10px
+borders: "1px hairlines from rgba(238,232,220,.06/.10/.25); never heavier. Elevation is a border, not a shadow stack."
 motion:
   ease: "cubic-bezier(0.23, 1, 0.32, 1)"
   durations: "150ms hover, 280–320ms entrance (rise-in: 8px up + fade)"
@@ -39,8 +39,9 @@ is happening tonight* and *what is my one next action*.
 
 1. **State machine, not lists.** The product's object is one ongoing night:
    empty → awaiting approval → running → morning review. The primary surface
-   shows the current state large, with exactly one primary action. History and
-   collections are demoted below or behind a click.
+   shows the current state first, at 24px, with exactly one primary action.
+   Hierarchy comes from weight and color, not 48px marketing type. History and
+   collections sit below or behind a click.
 2. **Contract before action.** Anything the agent will do is shown first as an
    exact, expiring, single-use plan card: outcome, verification, sessions,
    executor command. Amber marks everything that waits for the user's say.
@@ -56,6 +57,13 @@ is happening tonight* and *what is my one next action*.
 6. **Honest states.** Loading, empty, expired, and failed states say what
    happened and offer the one-click way back. Never render a guess (for
    example "expired" when data simply has not arrived).
+
+## Density
+
+A midnight command surface. 4px grid, 8px element gaps, 32px controls, 36px
+list rows, 32px page padding, 16px section padding. Page titles stay at 24px.
+Helper copy is one sentence per section, then stop. Do not restore display
+headlines, 44px nav rows, or 80px page gutters.
 
 ## Component grammar
 

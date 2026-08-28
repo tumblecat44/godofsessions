@@ -31,6 +31,7 @@ const state: BootstrapState = {
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
   },
 };
 
@@ -47,21 +48,27 @@ describe("Settings language toggle", () => {
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "파일 작업 폴더" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "GitHub 계정" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "대화 언어" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "설정" })).toBeInTheDocument();
+    expect(screen.getByText("작업 폴더")).toBeInTheDocument();
+    expect(screen.getByText("GitHub")).toBeInTheDocument();
+    expect(screen.getByText("화면 언어")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "한국어" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "English" })).toBeInTheDocument();
+    expect(screen.queryByText("하나면 Morrow가 말합니다.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/설치됨은 PATH에서/)).not.toBeInTheDocument();
+    expect(screen.queryByText("화면만 바꿉니다. 모델은 그대로입니다.")).not.toBeInTheDocument();
+    expect(screen.queryByText("이 폴더 안에서만 쓰고, 여기서는 바꾸지 않습니다.")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "데이터" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "로컬 데이터 폴더 열기" })).toBeInTheDocument();
   });
 
   it("switches from English to Korean and back without blanking the view", async () => {
-    let currentLanguage = "en" as "en" | "ko";
-    const onLanguage = vi.fn(async (lang: "en" | "ko") => { currentLanguage = lang; });
-    
+    const onLanguage = vi.fn(async () => undefined);
+
     const { rerender } = render(
       <SettingsView
         state={{ ...state, language: "en" }}
@@ -72,11 +79,12 @@ describe("Settings language toggle", () => {
         onLanguage={onLanguage}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
-    
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "한국어" }));
     await waitFor(() => expect(onLanguage).toHaveBeenCalledWith("ko"));
 
@@ -90,11 +98,12 @@ describe("Settings language toggle", () => {
         onLanguage={onLanguage}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
-    
+    expect(screen.getByRole("heading", { name: "설정" })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "English" }));
     await waitFor(() => expect(onLanguage).toHaveBeenCalledWith("en"));
 
@@ -108,15 +117,16 @@ describe("Settings language toggle", () => {
         onLanguage={onLanguage}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   });
 });
 
 describe("Settings user-facing safety contract", () => {
-  it("explains the exact file boundary and honest data transfer without implementation slogans", () => {
+  it("shows the working folder and conversation model without helper copy or implementation slogans", () => {
     render(
       <SettingsView
         state={state}
@@ -127,15 +137,19 @@ describe("Settings user-facing safety contract", () => {
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "File working folder" })).toBeInTheDocument();
+    expect(screen.getByText("Working folder")).toBeInTheDocument();
     expect(screen.getByText("/synthetic/workspace")).toBeInTheDocument();
-    expect(screen.getByText(/outside it require separate confirmation every time/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "What leaves this Mac" })).toBeInTheDocument();
-    expect(screen.getByText(/sent to the selected AI service/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Morrow conversation model" })).toBeInTheDocument();
+    expect(screen.getByText("Conversation model")).toBeInTheDocument();
+    expect(screen.queryByText(/Writes stay in this folder/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/One model\. Morrow talks with this/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Interface only\. Not the model/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Data" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open the local data folder" })).toBeInTheDocument();
+    expect(screen.getByText("What leaves this Mac")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Replay welcome" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Confirmation before changes" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/local first|local by default|Pi SDK|Pi runtime/i);
@@ -151,8 +165,9 @@ describe("Settings user-facing safety contract", () => {
           orchestration: {
             ...state.orchestration,
             providerRoutes: [
-              { provider: "claude", label: "Claude Code", status: "blocked", reason: "containment unavailable", verification: { state: "unsupported", canVerify: true } },
+              { provider: "claude", label: "Claude Code", status: "ready", authentication: "signed_in", verification: { state: "unsupported", canVerify: true } },
               { provider: "codex", label: "Codex", status: "setup_required", verification: { state: "not_verified", canVerify: true } },
+              { provider: "grok", label: "Grok Build", status: "ready", authentication: "signed_out" },
               { provider: "cursor" as "claude", label: "Cursor", status: "ready" },
               { provider: "hermes" as "claude", label: "Hermes", status: "ready" },
               { provider: "openclaw" as "claude", label: "OpenClaw", status: "ready" },
@@ -166,29 +181,30 @@ describe("Settings user-facing safety contract", () => {
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
-    const overnight = screen.getByRole("heading", { name: "Overnight CLIs" }).closest(".settings-section");
+    const overnight = screen.getByRole("heading", { name: "Overnight" }).closest(".settings-section");
     expect(overnight).toHaveTextContent("Claude Code");
     expect(overnight).toHaveTextContent("Codex");
     expect(overnight).toHaveTextContent("Grok Build");
     expect(overnight).toHaveTextContent("Pi Agent");
     expect(overnight).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
-    expect(overnight).toHaveTextContent("Installed means the command is on PATH");
-    expect(overnight).toHaveTextContent("Installed · ready for Overnight");
-    expect(overnight).toHaveTextContent("Not installed · not on PATH");
-    expect(overnight).toHaveTextContent("claude auth login");
-    expect(overnight).toHaveTextContent("codex login");
-    expect(overnight).toHaveTextContent("grok");
-    expect(overnight).toHaveTextContent("bundled with Morrow");
-    expect(screen.getByRole("button", { name: "Copy claude auth login" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy codex login" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy grok" })).toBeInTheDocument();
+    expect(overnight).not.toHaveTextContent(/Installed means the command is on PATH/);
+    expect(overnight).toHaveTextContent("Ready for Overnight");
+    expect(overnight).toHaveTextContent("Not installed");
+    expect(overnight).toHaveTextContent("Sign in from Terminal");
+    expect(overnight).toHaveTextContent("Not ready for Overnight");
+    expect(overnight).toHaveTextContent("Conversation SDK only. Not a worker yet.");
+    expect(overnight).not.toHaveTextContent(/Bundled with Morrow/i);
+    expect(screen.queryByRole("button", { name: "Copy claude auth login" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy codex login" })).toHaveTextContent("Copy login");
+    expect(screen.getByRole("button", { name: "Copy grok login" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Copy .*Pi|bundled/i })).not.toBeInTheDocument();
     expect(overnight).not.toHaveTextContent(/Safety check|OS containment|canary/i);
-    expect(overnight?.querySelectorAll("button")).toHaveLength(3);
-    expect(screen.queryByRole("button", { name: /Connect/ })).not.toBeInTheDocument();
+    expect(overnight?.querySelectorAll("button")).toHaveLength(2);
+    expect(overnight?.querySelector("button[aria-label^='Connect']")).toBeNull();
     expect(screen.getByRole("button", { name: /Sign in with your Anthropic/ })).toBeInTheDocument();
     expect(verify).not.toHaveBeenCalled();
   });
@@ -210,6 +226,7 @@ describe("Settings user-facing safety contract", () => {
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
       />,
     );
 
@@ -218,5 +235,61 @@ describe("Settings user-facing safety contract", () => {
     expect(screen.getByRole("button", { name: "Show 2 more providers" })).toBeInTheDocument();
     const marks = [...document.querySelectorAll(".provider-card__mark .state-icon-swap__inactive")].map((node) => node.textContent);
     expect(new Set(marks).size).toBeGreaterThan(1);
+  });
+
+  it("puts Disconnect on the Morrow row when a provider is connected and hides OpenRouter until Change", () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      id: ["anthropic", "openai", "google", "xai", "openrouter", "github-copilot", "mistral", "groq"][index],
+      name: ["Anthropic", "OpenAI", "Google", "xAI", "OpenRouter", "GitHub Copilot", "Mistral", "Groq"][index],
+      connected: index === 0,
+      authTypes: ["api_key" as const],
+    }));
+    const onDisconnect = vi.fn(async () => undefined);
+    render(
+      <SettingsView
+        state={{ ...state, providers: many }}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={onDisconnect}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={vi.fn(async () => undefined)}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Anthropic · Connected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    expect(screen.queryByText("OpenRouter")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show .* more providers/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByRole("button", { name: "Show 2 more providers" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 more providers" }));
+    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(onDisconnect).toHaveBeenCalledWith("anthropic");
+  });
+
+  it("opens the overnight sqlite folder from the Data row", () => {
+    const onRevealOvernightStore = vi.fn();
+    render(
+      <SettingsView
+        state={state}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={vi.fn(async () => undefined)}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+        onRevealOvernightStore={onRevealOvernightStore}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the local data folder" }));
+    expect(onRevealOvernightStore).toHaveBeenCalledOnce();
   });
 });

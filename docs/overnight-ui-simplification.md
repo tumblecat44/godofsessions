@@ -29,7 +29,8 @@ Status changes content inside an Overnight card. Status never replaces the page,
 creates a Morning Review mode, or switches to a separate run page.
 
 On the happy path, Morrow prepares up to three cards in the background on
-chat. There is no Prepare button, portfolio editor, or safety-check gate.
+chat. Zero cards is valid. The Overnight empty page has Add overnight, which
+takes a stated outcome. There is no portfolio editor or safety-check gate.
 A CLI on PATH is enough to show Ready. Setup copy lives in Settings.
 
 ## Draft Overnight
@@ -83,7 +84,8 @@ may all contribute bounded read-only evidence. Cursor, Hermes, and OpenClaw are
 not execution choices and have no execution readiness cards.
 
 A route is Ready when its official CLI is on PATH. Otherwise it remains Setup
-or Blocked with a reason. Containment canaries are not a Ready gate.
+or Blocked with a reason. Pi Agent stays Blocked until Overnight execution
+exists. Containment canaries are not a Ready gate.
 
 ## First-release boundary
 

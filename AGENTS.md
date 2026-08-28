@@ -6,13 +6,18 @@ authoritative rule for deciding what may be committed to the public project.
 ## Project identity
 
 God of Sessions V2 is an MIT-licensed, local-first Electron home for
-conversations with Morrow. Electron embeds the Pi Agent SDK directly. Morrow is
-conversation-first and uses file or command tools only when the user explicitly
-asks for work that needs them. The app has one fixed launch root and no project
-picker. Overnight is a provider-neutral portfolio across four official local
-execution routes: Claude Code, Codex, Grok Build, and Pi Agent. Cursor, Hermes,
-and OpenClaw may contribute read-only historical session evidence, but cannot
-be selected for new Overnight execution.
+conversations with Morrow. Electron embeds the Pi Agent SDK directly. That
+embedded SDK is the conversation runtime: the model the user connects in
+Settings. Ask Morrow, tools, and Overnight planning use that model. Overnight
+workers are local CLIs that run only after Start. Claude Code, Codex, and Grok
+Build can run when their official CLI is on PATH. Pi Agent is an advertised
+Overnight route and is not Ready. GitHub identity is not an AI runtime.
+Morrow is conversation-first and uses file or command tools only when the user
+explicitly asks for work that needs them. The app has one fixed execution root — the home folder of the person who
+installed it — and no project picker. Overnight is a provider-neutral portfolio across four
+official local execution routes: Claude Code, Codex, Grok Build, and Pi Agent.
+Cursor, Hermes, and OpenClaw may contribute read-only historical session
+evidence, but cannot be selected for new Overnight execution.
 Morrow shows up to three tonight cards on chat, all checked. The start button
 runs the checked cards. The Overnight tab lists those cards and opens each onto
 its board. Official CLIs on PATH are enough to run. Do not rebuild OS
@@ -42,7 +47,9 @@ forbidden from spawning its own subagents. It is not a cloud service.
 
 - Keep Pi SessionManager records authoritative for Morrow conversations.
 - Preserve a fail-closed approval boundary before file mutations and commands.
-- Overnight planning and revision through Morrow are read-only. Its one-time approval
+- Overnight planning and revision through Morrow are read-only. Collected local
+  sessions are enough; unread sessions are omitted. Zero cards is valid. The user
+  may add an Overnight from the Overnight tab. Its one-time approval
   freezes every selected item, provider, daily-session brief, outcome,
   verification, fixed root, schedule, and deadline before detached local
   workers start.
@@ -50,9 +57,16 @@ forbidden from spawning its own subagents. It is not a cloud service.
   active conversation. In-root file-write
   approval may also be remembered.
 - Use official provider runtimes for authentication and execution.
-- A route is Ready when its official CLI is on PATH. Keep it Setup or Blocked
-  with the reason visible when the CLI is missing. Do not restore a Safety
-  check or OS containment canary as a Ready gate.
+- Overnight workers start only from the Start approval. Chat, tools, Settings
+  probes, and Overnight planning use the connected conversation runtime. Do not
+  spawn `claude`, `codex`, or `grok` from Morrow chat. Settings may run each
+  official login-status command and must keep only signed-in / signed-out /
+  unknown. Do not treat the embedded Pi Agent SDK as an Overnight worker.
+- A route is Ready when its official CLI is on PATH. Settings shows Ready for
+  Overnight only after that CLI is also signed in. Pi Agent stays Blocked
+  until Overnight execution exists. Keep a missing CLI Setup or Blocked with
+  the reason visible. Do not restore a Safety check or OS containment canary as
+  a Ready gate.
 - This pre-release codebase has one Overnight model: a date contains zero or
   more purpose cards, each with one Kanban. Do not add singular legacy or
   stored-history compatibility branches.

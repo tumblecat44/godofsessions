@@ -254,7 +254,13 @@ export class OvernightPortfolioService {
       root: this.root,
       providers: overnightReadyProviderRecord(readiness),
     });
-    const providerRoutes = readiness.map(({ provider, label, status, reason }) => ({ provider, label, status, reason }));
+    const providerRoutes = readiness.map(({ provider, label, status, reason, authentication }) => ({
+      provider,
+      label,
+      status,
+      reason,
+      authentication: authentication ?? "unknown",
+    }));
     const assessmentId = this.createAssessmentId();
     const createdAt = this.now().toISOString();
     const allRunnable = assessment.candidates.filter((candidate) => candidate.disposition === "recommend");
