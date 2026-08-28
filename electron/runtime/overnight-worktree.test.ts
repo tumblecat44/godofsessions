@@ -70,6 +70,18 @@ describe("Overnight worktree manager", () => {
     expect(plain).toMatchObject({ isolation: "shared", reason: "not_a_git_worktree" });
   });
 
+  it("canonicalizes a shared root so launch hashes match inspect", async () => {
+    const fixture = await gitFixture();
+    const plainRoot = join(fixture.base, "plain");
+    await mkdir(plainRoot);
+    const manager = new OvernightWorktreeManager({ root: plainRoot, dataDir: fixture.dataDir });
+    const inspected = await manager.inspect();
+    const unresolved = { ...inspected, root: plainRoot, workspaceKey: plainRoot };
+    const allocation = await manager.allocate(unresolved, "run-canon", "item-canon");
+    expect(allocation.executionRoot).toBe(inspected.root);
+    expect(allocation.worktreeKey).toBe(inspected.root);
+  });
+
   it("rejects path-like run and item identifiers before creating anything", async () => {
     const fixture = await gitFixture();
     const manager = new OvernightWorktreeManager({ root: fixture.repository, dataDir: fixture.dataDir });

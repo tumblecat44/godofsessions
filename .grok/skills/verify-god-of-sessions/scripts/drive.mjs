@@ -10,6 +10,10 @@ import { _electron as electron } from "@playwright/test";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const command = process.argv[2] ?? "tonight-home";
+if (command === "live-cli") {
+  await import("./live-cli.mjs");
+  process.exit(process.exitCode ?? 0);
+}
 process.stdout.write("verify-contract: renderer against synthetic GitHub and Morrow IPC. Not live MorrowService or CLI spawn.\n");
 const evidenceRoot = process.env.GOS_VERIFY_EVIDENCE ?? join(tmpdir(), "god-of-sessions-verify", String(Date.now()));
 const lastRunPath = join(process.env.GOS_VERIFY_EVIDENCE ?? join(tmpdir(), "god-of-sessions-verify"), "last-run.json");
@@ -73,8 +77,6 @@ try {
     await proveMorrowRevise(page);
   } else if (command === "kanban-tickets") {
     await proveKanbanTickets(page, app);
-  } else if (command === "live-cli") {
-    await proveLiveCli();
   } else {
     process.stderr.write(`Unknown feature id: ${command}\n`);
     process.exit(1);
@@ -196,16 +198,6 @@ async function proveKanbanTickets(page, app) {
   assert.match(text, /Claude Code|Codex|Grok Build|Pi Agent/);
   await readStarted(app);
   process.stdout.write(`kanban-tickets passed. evidence: ${join(evidenceRoot, "kanban-tickets.png")}\n`);
-}
-
-async function proveLiveCli() {
-  const found = ["claude", "codex", "grok"].filter((bin) => existsSync(`/usr/local/bin/${bin}`) || existsSync(`/opt/homebrew/bin/${bin}`) || existsSync(`${process.env.HOME}/.local/bin/${bin}`));
-  if (found.length === 0) {
-    process.stdout.write("SKIP live-cli: no official CLI on PATH\n");
-    process.exitCode = 2;
-    return;
-  }
-  throw new Error("live-cli refuses the synthetic start handler. Wire a real main-process run against a sandbox MORROW_ROOT before claiming this feature.");
 }
 
 async function installSyntheticIpc(electronApp, fixture) {

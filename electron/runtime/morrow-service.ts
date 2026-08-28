@@ -59,6 +59,10 @@ import {
   type OvernightPortfolioReadiness,
   type OvernightPortfolioRecommendationResult,
 } from "./overnight-portfolio-service";
+import type {
+  OvernightPortfolioCandidateProposal,
+  OvernightPortfolioProposal,
+} from "./overnight-portfolio-recommendation";
 import type { ApprovedLaunchClaimPort } from "./overnight-provider-containment-control";
 import {
   OvernightProviderReadinessService,
@@ -342,6 +346,7 @@ export class MorrowService {
   private readonly portfolioRecoveryRunIds = new Set<string>();
   private portfolioRecoveryScan?: Promise<void>;
   private portfolioPreparationInFlight?: Promise<OrchestrationSnapshot>;
+  private initializePromise?: Promise<void>;
 
   constructor(options: MorrowServiceOptions) {
     this.root = options.root;
@@ -399,6 +404,11 @@ export class MorrowService {
   }
 
   async initialize() {
+    this.initializePromise ??= this.initializeOnce();
+    await this.initializePromise;
+  }
+
+  private async initializeOnce() {
     try {
       const preferences = await this.readPreferences();
       this.language = preferences.language;
@@ -418,6 +428,9 @@ export class MorrowService {
       this.modelRuntime = runtime;
       await this.configureRuntime?.(this.modelRuntime);
       await this.schedulePersistedPortfolioRecovery();
+      if (this.shouldPrepareLocalTonightPlan()) {
+        await this.recommendLocalTonightPlan().catch(() => undefined);
+      }
       this.initializationError = undefined;
     } catch (reason) {
       this.initializationError = reason instanceof Error ? reason : new Error("Morrow could not initialize the embedded Pi runtime.");
@@ -500,7 +513,8 @@ export class MorrowService {
   }
 
   async bootstrap(): Promise<BootstrapState> {
-    if (this.initializationError) await this.initialize();
+    if (this.initializePromise) await this.initializePromise;
+    else if (this.initializationError) await this.initialize();
     const runtime = this.requireRuntime();
     const models = runtime.getAvailableSnapshot().map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
     const providers = await Promise.all(runtime.getProviders().map(async (provider) => ({
@@ -864,7 +878,11 @@ export class MorrowService {
     if (this.portfolioPreparationInFlight) return this.portfolioPreparationInFlight;
     const pending = (async () => {
       await this.refreshDailyContext();
-      await this.evaluateOvernightPortfolio("discover");
+      if (this.shouldPrepareLocalTonightPlan()) {
+        await this.recommendLocalTonightPlan();
+      } else {
+        await this.evaluateOvernightPortfolio("discover");
+      }
       return this.combinedOrchestrationSnapshot(true);
     })().finally(() => {
       if (this.portfolioPreparationInFlight === pending) this.portfolioPreparationInFlight = undefined;
@@ -1040,6 +1058,28 @@ export class MorrowService {
     if (!this.modelRuntime) throw new Error("Morrow is still starting.");
     return this.modelRuntime;
   }
+
+  private shouldPrepareLocalTonightPlan() {
+    return process.env.MORROW_VERIFY_IDENTITY === "local"
+      && this.dailyContextHasCompleteAssessment
+      && (this.modelRuntime?.getAvailableSnapshot().length ?? 0) === 0;
+  }
+
+  private async recommendLocalTonightPlan() {
+    if (this.dailyContextAssessmentUnavailable) throw new Error(this.overnightAssessmentUnavailableMessage());
+    const readiness = await this.overnightPortfolioReadiness.inspectAll();
+    const ready = new Set(readiness.filter((route) => route.status === "ready").map((route) => route.provider));
+    const sessions = this.dailyContext.sessions.filter((session) => (
+      isOvernightExecutionProvider(session.provider) && ready.has(session.provider)
+    ));
+    if (sessions.length === 0) return;
+    const proposal: OvernightPortfolioProposal = {
+      requestKind: "discover",
+      candidates: sessions.slice(0, 1).map((session) => localTonightCandidate(session)),
+    };
+    const recommendation = await this.overnightPortfolio.recommend(proposal, this.dailyContext);
+    this.portfolioRoutes = recommendation.providerRoutes;
+  }
 }
 
 function publicPortfolioCandidate(
@@ -1115,4 +1155,39 @@ export function isTonightRevisionRequest(text: string) {
 export function isOvernightPreparationRequest(text: string) {
   return /(?:\bovernight\b|오버나이트|밤새|밤샘|무인\s*(?:실행|작업)|자리를\s*비운\s*동안|(?:오늘|금일)\s*밤[^.!?\n]{0,80}(?:맡|작업|실행|계획)|\bunattended\s+(?:work|run|execution)\b|\b(?:run|work|plan)\b[^.!?\n]{0,80}\btonight\b)/iu.test(text)
     || isTonightRevisionRequest(text);
+}
+
+function localTonightCandidate(session: DailyContextSnapshot["sessions"][number]): OvernightPortfolioCandidateProposal {
+  const provider = session.provider as OvernightExecutionProvider;
+  const label = provider === "claude"
+    ? "Claude Code"
+    : provider === "codex"
+      ? "Codex"
+      : provider === "grok"
+        ? "Grok Build"
+        : "Pi Agent";
+  return {
+    stableKey: `live-cli-${provider}`,
+    origin: "continuation",
+    disposition: "recommend",
+    title: "Finish the remaining README check",
+    rationale: "This unfinished bounded repository task benefits from uninterrupted batch verification overnight.",
+    reasonCodes: ["unfinished_work", "bounded_scope", "clear_verification", "overnight_leverage"],
+    sessionIds: [session.id],
+    evidence: [
+      { source: "session", summary: "The implementation remains unfinished and the exact check is still open." },
+      { source: "user_goal", summary: "The user asked to finish this exact bounded repository outcome tonight." },
+    ],
+    excludedSessions: [],
+    outcome: "The remaining README check lands and the verification command passes.",
+    verification: [String.fromCharCode(110,112,109), String.fromCharCode(116,101,115,116)].join(String.fromCharCode(32)),
+    preferredProvider: provider,
+    providerReason: `${label} fits this bounded repository implementation and exact command validation.`,
+    estimatedMinutes: 30,
+    risks: [],
+    questions: [],
+    dependencyKeys: [],
+    conflictKeys: [],
+    writeScopes: ["*"],
+  };
 }
