@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Check } from "lucide-react";
 import { Button } from "./ui/Button";
 
 export function CopyCommandButton({ command, language }: { command: string; language: "en" | "ko" }) {
@@ -15,7 +16,7 @@ export function CopyCommandButton({ command, language }: { command: string; lang
         }).catch(() => undefined);
       }}
     >
-      {copied ? (ko ? "복사됨" : "Copied") : (ko ? "명령 복사" : "Copy command")}
+      {copied ? <><Check size={14} />{ko ? "복사됨" : "Copied"}</> : (ko ? "명령 복사" : "Copy command")}
     </Button>
   );
 }
