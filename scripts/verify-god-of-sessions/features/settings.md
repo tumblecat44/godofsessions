@@ -6,7 +6,7 @@ Settings is three groups of labeled rows: Morrow, Overnight, and App. It shows t
 
 - `settings-nav` opens Settings from the sidebar or from chat `Connect model`.
 - `settings-morrow` shows the conversation-model summary or open picker, with Change and Disconnect when connected.
-- `settings-clis` lists Claude Code, Codex, Grok Build, and Pi Agent as Ready for Overnight, Sign in from Terminal, Not installed, or Not ready for Overnight.
+- `settings-clis` lists Claude Code, Codex, Grok Build, and Pi Agent as Ready for Overnight, Sign in from Terminal, Not installed, Couldn't check, or (for Pi) Overnight hookup in progress. Opening the screen re-checks live.
 - `settings-app` shows Language, Working folder, and GitHub.
 - `settings-language` toggles English and 한국어.
 
@@ -27,7 +27,7 @@ Preconditions:
 - **Open Settings.** Choose the nav button. Run `click --role button --name "Settings"`. Heading is `Settings`.
 - **Working folder.** Isolated launch sets `MORROW_ROOT`. Require the visible path to equal that disposable workspace from `doctor` output, not the user's checkout and not `/Users/example/godofsessions`. Without `MORROW_ROOT`, Settings shows the installer home; that is the product default, not this recipe.
 - **GitHub.** The App group shows `@` plus a login. Buttons `Manage access` and `Sign out` are present. Do not click Sign out unless the recipe's next step is the identity gate on this same isolated profile.
-- **Overnight.** The section `Overnight` lists the four official routes. Status is `Ready for Overnight`, `Sign in from Terminal`, `Not installed`, or `Not ready for Overnight`. This screen does not log the user into those CLIs.
+- **Overnight.** The section `Overnight` lists the four official routes. Status is `Ready for Overnight`, `Sign in from Terminal`, `Not installed`, `Couldn't check`, or (for Pi) `Overnight hookup in progress`; `Checking` shows only while the live re-check runs. This screen does not log the user into those CLIs.
 - **Language.** Choose `한국어`, then require Korean chrome (`Morrow에게 묻기`, heading `설정`). Choose `English` to restore the recipe language before other features.
 - **Proof.** Screenshot and aria named `settings` showing the working-folder path and the GitHub login. Redact nothing in the screenshot if the login is a disposable verify account. Do not copy the user's personal login screenshot into the git tree. Evidence stays under `/tmp/godofsessions-verify/`.
 

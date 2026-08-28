@@ -151,12 +151,15 @@ async function proveOvernightBoard(page, app) {
 async function proveSettingsClis(page) {
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("heading", { name: "Overnight", exact: true }).waitFor();
+  // Opening Settings triggers a live re-check; wait for it to settle.
+  await page.getByText("Ready for Overnight").first().waitFor();
   const body = await page.locator("body").innerText();
   for (const name of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) assert.match(body, new RegExp(name));
   assert.doesNotMatch(body, /Installed means the command is on PATH/);
   assert.match(body, /Ready for Overnight/);
   assert.match(body, /Sign in from Terminal/);
-  assert.match(body, /Not ready for Overnight/);
+  assert.match(body, /Overnight hookup in progress|Not installed/);
+  assert.doesNotMatch(body, /Not ready for Overnight|Conversation SDK only/);
   assert.doesNotMatch(body, /Bundled with Morrow/i);
   assert.doesNotMatch(body, /Safety check/);
   assert.doesNotMatch(body, /OS containment/i);
@@ -171,7 +174,8 @@ async function proveSettingsClis(page) {
   const korean = await page.locator("body").innerText();
   assert.match(korean, /Overnight에 사용 가능/);
   assert.match(korean, /로그인 필요/);
-  assert.match(korean, /Overnight에 아직 없음/);
+  assert.match(korean, /Overnight 연결 준비 중|없음/);
+  assert.doesNotMatch(korean, /Overnight에 아직 없음|대화 SDK/);
   assert.doesNotMatch(korean, /하나면 Morrow가 말합니다/);
   assert.doesNotMatch(korean, /설치됨은 PATH에서/);
   assert.doesNotMatch(korean, /화면만 바꿉니다/);
@@ -235,7 +239,7 @@ async function installSyntheticIpc(electronApp, fixture) {
       "morrow:bootstrap", "morrow:overnight-snapshot", "morrow:start-conversation", "morrow:open-conversation", "morrow:send-message",
       "morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval",
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
-      "morrow:refresh-daily-context", "morrow:prepare-overnight-portfolio", "morrow:start-overnight-portfolio", "morrow:stop-overnight-portfolio",
+      "morrow:refresh-daily-context", "morrow:refresh-overnight-providers", "morrow:prepare-overnight-portfolio", "morrow:start-overnight-portfolio", "morrow:stop-overnight-portfolio",
       "morrow:verify-overnight-provider", "morrow:open-external",
       "morrow:list-overnight-board-tickets", "morrow:ensure-overnight-board-tickets",
       "morrow:move-overnight-board-ticket", "morrow:add-overnight-board-ticket",
@@ -294,6 +298,7 @@ async function installSyntheticIpc(electronApp, fixture) {
     ipcMain.handle("morrow:bootstrap", () => clone(bootstrap()));
     ipcMain.handle("morrow:overnight-snapshot", () => clone(orchestration()));
     ipcMain.handle("morrow:refresh-daily-context", () => clone(orchestration()));
+    ipcMain.handle("morrow:refresh-overnight-providers", () => clone(orchestration()));
     ipcMain.handle("morrow:prepare-overnight-portfolio", () => clone(orchestration()));
     ipcMain.handle("morrow:open-conversation", () => clone(state().conversation));
     ipcMain.handle("morrow:start-conversation", () => clone(state().conversation));
@@ -415,7 +420,7 @@ function fixtureFor(command) {
       { provider: "claude", label: "Claude Code", status: "ready", authentication: "signed_in" },
       { provider: "codex", label: "Codex", status: "ready", authentication: "signed_out" },
       { provider: "grok", label: "Grok Build", status: "ready", authentication: "signed_in" },
-      { provider: "pi", label: "Pi Agent", status: "blocked", reason: "Morrow's conversation SDK is not an Overnight worker." },
+      { provider: "pi", label: "Pi Agent", status: "blocked", reason: "Pi Agent Overnight execution is not wired up yet." },
     ],
     context: {
       date: now.slice(0, 10),
