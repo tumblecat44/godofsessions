@@ -410,6 +410,8 @@ export interface OrchestrationSnapshot {
   portfolioAssessments: OvernightPortfolioAssessmentSummary[];
   portfolioPlans: OvernightPortfolioPlanSummary[];
   portfolioRuns: OvernightPortfolioRunSummary[];
+  /** Purpose cards from OvernightStore; UI filters by localDate. */
+  overnightCards: OvernightCard[];
 }
 
 export interface ProviderSummary {

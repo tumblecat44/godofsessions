@@ -28,6 +28,7 @@ import type {
   OvernightPortfolioAssessmentSummary,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
+  OvernightCard,
   OvernightExecutionProvider,
   OvernightProviderRouteSummary,
   OvernightProviderVerificationSummary,
@@ -40,6 +41,7 @@ import {
   isOvernightExecutionProvider,
   parseOvernightBoardTicketId,
   parseOvernightId,
+  parseOvernightLocalDate,
 } from "../../src/shared/contracts";
 import { deferred, type Deferred } from "./deferred";
 import { PermissionPolicy, type ApprovalScope } from "./permission-policy";
@@ -1111,7 +1113,16 @@ export class MorrowService {
       portfolioAssessments: assessments.map(portfolioAssessmentSummary),
       portfolioPlans: plans,
       portfolioRuns: runs,
+      overnightCards: this.snapshotOvernightCards(),
     };
+  }
+
+  private snapshotOvernightCards(): OvernightCard[] {
+    try {
+      return this.overnightStore.listCards(parseOvernightLocalDate(this.dailyContext.summary.date));
+    } catch {
+      return [];
+    }
   }
 
   private async evaluateOvernightPortfolio(

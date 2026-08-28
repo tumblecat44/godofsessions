@@ -32,6 +32,7 @@ function orchestration(overrides: Partial<OrchestrationSnapshot> = {}): Orchestr
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
     ...overrides,
   };
 }
@@ -369,7 +370,8 @@ describe("App Overnight integration", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
-    expect(await screen.findByRole("heading", { name: "No Overnight is ready tonight" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Overnights" })).getAllByText("Empty")).toHaveLength(3);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
     expect(screen.queryByText(/remote method|private backend detail/i)).not.toBeInTheDocument();

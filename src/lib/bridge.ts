@@ -44,6 +44,7 @@ const demoState: BootstrapState = {
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
   },
 };
 

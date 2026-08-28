@@ -28,6 +28,7 @@ const baseState: BootstrapState = {
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
   },
 };
 
