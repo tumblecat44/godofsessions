@@ -126,7 +126,9 @@ function App() {
       setOvernightError(undefined);
     });
     try {
-      const orchestration = await bridge.prepareOvernightPortfolio(userGoal);
+      const orchestration = userGoal
+        ? await bridge.prepareOvernightPortfolio(userGoal)
+        : await (bridge.generateOvernightCandidates ?? bridge.prepareOvernightPortfolio)();
       transitionState(() => setState((latest) => latest ? { ...latest, orchestration } : latest));
       return orchestration;
     } catch (reason) {

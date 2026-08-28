@@ -260,6 +260,11 @@ function registerIpc() {
     if (typeof value !== "string" || value.trim() === "") return service().prepareOvernightPortfolio();
     return service().prepareOvernightPortfolio(text(value, "overnight goal", 4_000));
   });
+  handle("morrow:generate-overnight-candidates", (_event, value) => {
+    const now = value === undefined ? undefined : new Date(text(value, "overnight generate time", 40));
+    if (now && !Number.isFinite(now.getTime())) throw new Error("Invalid overnight generate time.");
+    return service().generateOvernightCandidatesNow(now);
+  });
   handle("morrow:verify-overnight-provider", (_event, value) => {
     if (typeof value !== "string" || !overnightProviders.has(value as OvernightExecutionProvider)) {
       throw new Error("Invalid overnight provider.");

@@ -66,6 +66,7 @@ function previewBridge(): MorrowBridge {
     finishOnboarding: async () => undefined,
     refreshDailyContext: async () => demoState.orchestration,
     prepareOvernightPortfolio: async (_userGoal?: string) => demoState.orchestration,
+    generateOvernightCandidates: async () => demoState.orchestration,
     verifyOvernightProvider: async () => { throw new Error("Overnight provider verification is only available in the desktop app."); },
     reviseOvernightCard: async () => { throw new Error("Overnight candidate edits are only available in the desktop app."); },
     discardOvernightCard: async () => { throw new Error("Overnight candidate edits are only available in the desktop app."); },

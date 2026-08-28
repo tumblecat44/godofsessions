@@ -530,6 +530,7 @@ export interface MorrowBridge {
   refreshDailyContext(): Promise<OrchestrationSnapshot>;
   /** Read-only assessment used to keep the one-click Overnight launch ready. */
   prepareOvernightPortfolio(userGoal?: string): Promise<OrchestrationSnapshot>;
+  generateOvernightCandidates?(now?: string): Promise<OrchestrationSnapshot>;
   verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
   reviseOvernightCard?(input: { id: OvernightId; patch: OvernightCardRevision }): Promise<OrchestrationSnapshot>;
   discardOvernightCard?(input: { id: OvernightId }): Promise<OrchestrationSnapshot>;

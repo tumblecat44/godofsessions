@@ -482,7 +482,7 @@ export class MorrowService {
   }
 
   async generateOvernightCandidatesNow(now = this.now()) {
-    return generateOvernightCandidates({
+    await generateOvernightCandidates({
       now,
       timeZone: this.dailyContext.summary.timeZone,
       store: this.overnightStore,
@@ -496,6 +496,7 @@ export class MorrowService {
         return recommendation;
       },
     });
+    return this.combinedOrchestrationSnapshot(true);
   }
 
   async reviseOvernightCard(id: OvernightId, patch: OvernightCardRevision): Promise<OrchestrationSnapshot> {

@@ -17,6 +17,7 @@ const bridge: MorrowBridge & { openExternal(url: string): Promise<void> } = {
   finishOnboarding: (input) => ipcRenderer.invoke("morrow:finish-onboarding", input),
   refreshDailyContext: () => ipcRenderer.invoke("morrow:refresh-daily-context"),
   prepareOvernightPortfolio: (userGoal) => ipcRenderer.invoke("morrow:prepare-overnight-portfolio", userGoal),
+  generateOvernightCandidates: (now) => ipcRenderer.invoke("morrow:generate-overnight-candidates", now),
   verifyOvernightProvider: (provider) => ipcRenderer.invoke("morrow:verify-overnight-provider", provider),
   reviseOvernightCard: (input) => ipcRenderer.invoke("morrow:revise-overnight-card", input),
   discardOvernightCard: (input) => ipcRenderer.invoke("morrow:discard-overnight-card", input),
