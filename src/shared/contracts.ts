@@ -16,6 +16,134 @@ export function isOvernightExecutionProvider(value: unknown): value is Overnight
   return typeof value === "string"
     && (OVERNIGHT_EXECUTION_PROVIDERS as readonly string[]).includes(value);
 }
+
+export type OvernightId = string & { readonly __brand: "OvernightId" };
+export type OvernightGenerationId = string & { readonly __brand: "OvernightGenerationId" };
+export type OvernightLocalDate = string & { readonly __brand: "OvernightLocalDate" };
+
+/**
+ * Lifecycle of one purpose card. Encoded in SQLite CHECK and in the transition
+ * table so an illegal status cannot be stored through the public API.
+ */
+export type OvernightStatus =
+  | "candidate"
+  | "deleted"
+  | "cancelled"
+  | "running"
+  | "ran";
+
+export const OVERNIGHT_STATUSES = [
+  "candidate",
+  "deleted",
+  "cancelled",
+  "running",
+  "ran",
+] as const;
+
+/** Structured decision notes only. Never a transcript, tool log, or model dump. */
+export type OvernightDecisionKind =
+  | "proposed"
+  | "revised"
+  | "discarded"
+  | "cancelled"
+  | "started"
+  | "finished";
+
+export const OVERNIGHT_DECISION_KINDS = [
+  "proposed",
+  "revised",
+  "discarded",
+  "cancelled",
+  "started",
+  "finished",
+] as const;
+
+export interface OvernightDecisionEntry {
+  at: string;
+  kind: OvernightDecisionKind;
+  note: string;
+}
+
+export interface OvernightCard {
+  id: OvernightId;
+  generationId: OvernightGenerationId;
+  localDate: OvernightLocalDate;
+  status: OvernightStatus;
+  goal: string;
+  finishCondition: string;
+  workAi: OvernightExecutionProvider;
+  verifyAi: OvernightExecutionProvider;
+  stallHours: number;
+  decisionsLog: readonly OvernightDecisionEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OvernightGeneration {
+  id: OvernightGenerationId;
+  localDate: OvernightLocalDate;
+  createdAt: string;
+  cards: readonly OvernightCard[];
+}
+
+export interface OvernightCardDraft {
+  goal: string;
+  finishCondition: string;
+  workAi: OvernightExecutionProvider;
+  verifyAi: OvernightExecutionProvider;
+  stallHours: number;
+  decisionsLog: readonly OvernightDecisionEntry[];
+}
+
+/** Editable fields while status === "candidate". Status is not patchable here. */
+export interface OvernightCardRevision {
+  goal?: string;
+  finishCondition?: string;
+  workAi?: OvernightExecutionProvider;
+  verifyAi?: OvernightExecutionProvider;
+  stallHours?: number;
+  /** Appended (not replaced) after parse; caller supplies new entries only. */
+  appendDecisions?: readonly OvernightDecisionEntry[];
+}
+
+const OVERNIGHT_LOCAL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u;
+
+export function parseOvernightLocalDate(value: string): OvernightLocalDate {
+  const match = OVERNIGHT_LOCAL_DATE_PATTERN.exec(value);
+  if (!match) {
+    throw new Error(`Invalid OvernightLocalDate: ${value}`);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year
+    || probe.getUTCMonth() !== month - 1
+    || probe.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid OvernightLocalDate: ${value}`);
+  }
+  return value as OvernightLocalDate;
+}
+
+export function parseOvernightId(value: string): OvernightId {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("Invalid OvernightId");
+  }
+  return value as OvernightId;
+}
+
+export function isOvernightStatus(value: unknown): value is OvernightStatus {
+  return typeof value === "string"
+    && (OVERNIGHT_STATUSES as readonly string[]).includes(value);
+}
+
+export function isOvernightDecisionKind(value: unknown): value is OvernightDecisionKind {
+  return typeof value === "string"
+    && (OVERNIGHT_DECISION_KINDS as readonly string[]).includes(value);
+}
+
 export type OvernightCandidateOrigin = "continuation" | "follow_up" | "proactive" | "batch" | "routine";
 export type OvernightDisposition = "recommend" | "clarify" | "no_run";
 export type OvernightRequestKind = "discover" | "goal";

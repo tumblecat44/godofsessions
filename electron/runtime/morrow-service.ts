@@ -53,6 +53,7 @@ import {
   OvernightPortfolioLedger,
   type OvernightPortfolioAssessmentRecord,
 } from "./overnight-portfolio-ledger";
+import { OvernightStore } from "./overnight-store";
 import {
   OvernightPortfolioService,
   type OvernightPortfolioContainmentControl,
@@ -294,6 +295,7 @@ export interface MorrowServiceOptions {
   overnightPortfolioReadiness?: OvernightPortfolioReadiness;
   overnightProviderVerification?: OvernightProviderVerificationPort;
   overnightProviderControlPlane?: MorrowOvernightProviderControlPlaneFactory;
+  overnightStore?: OvernightStore;
 }
 
 export interface OvernightProviderVerificationPort {
@@ -318,6 +320,7 @@ export class MorrowService {
   private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
   private readonly contextHome?: string;
   private readonly overnightPortfolio: MorrowPortfolioService;
+  private readonly overnightStore: OvernightStore;
   private readonly overnightPortfolioReadiness: OvernightPortfolioReadiness;
   private readonly overnightProviderVerification?: OvernightProviderVerificationPort;
   private readonly providerVerification = new Map<OvernightExecutionProvider, OvernightProviderVerificationSummary>();
@@ -361,6 +364,8 @@ export class MorrowService {
     this.overnightContextEvaluator = options.overnightContextEvaluator ?? evaluateOvernightContext;
     this.overnightContextModelPort = options.overnightContextModelPort;
     const portfolioLedger = new OvernightPortfolioLedger({ dataDir: options.dataDir });
+    this.overnightStore = options.overnightStore
+      ?? new OvernightStore({ dataDir: options.dataDir });
     const providerControlPlane = options.overnightProviderControlPlane?.create({
       approvalClaims: {
         consume: (input) => portfolioLedger.consumeApprovedLaunchClaim(input),
@@ -410,6 +415,9 @@ export class MorrowService {
 
   private async initializeOnce() {
     try {
+      // Create overnights.sqlite before ModelRuntime so launch leaves the file
+      // even when later preference or runtime setup fails.
+      this.overnightStore.open();
       const preferences = await this.readPreferences();
       this.language = preferences.language;
       this.onboardingComplete = preferences.onboardingComplete;
