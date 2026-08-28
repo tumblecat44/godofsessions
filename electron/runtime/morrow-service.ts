@@ -420,6 +420,10 @@ export class MorrowService {
     }
   }
 
+  executionRoot() {
+    return this.root;
+  }
+
   async initialize() {
     this.initializePromise ??= this.initializeOnce();
     await this.initializePromise;
