@@ -335,7 +335,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell relative grid min-h-dvh grid-cols-[224px_minmax(0,1fr)] overflow-hidden bg-night max-[1120px]:grid-cols-[208px_minmax(0,1fr)] max-[900px]:grid-cols-[78px_minmax(0,1fr)]">
+    <div className="app-shell relative grid min-h-dvh grid-cols-[auto_minmax(0,1fr)] overflow-hidden bg-night">
       <div className="titlebar-drag" />
       <Sidebar
         view={view}

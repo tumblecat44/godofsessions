@@ -74,6 +74,7 @@
 .morrow-chat-head small { color: var(--ink-muted); font: 550 10px "JetBrains Mono Variable", monospace; letter-spacing: .1em; }
 
 .root-chip { padding: 6px 8px; color: var(--ink-muted); border: 1px solid var(--etched-edge-soft); border-radius: 6px; font: 550 10px "JetBrains Mono Variable", monospace; letter-spacing: .07em; }
+.root-chip:hover { color: var(--ink); border-color: var(--etched-edge); }
 
 .chat-main { grid-template-rows: auto minmax(0, 1fr) auto auto; }
 
@@ -1405,7 +1406,7 @@ button:active:not(:disabled) {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   background: var(--void);
   position: relative;
 }
@@ -1835,32 +1836,42 @@ button:active:not(:disabled) {
   }
 }
 
-@media (max-width: 900px) {
-  .app-shell {
-    grid-template-columns: 76px minmax(0, 1fr);
-  }
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
 
+.sidebar.is-collapsed .sidebar-foot {
+  justify-content: center;
+}
+
+.sidebar.is-collapsed {
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.sidebar.is-collapsed .workspace-nav button {
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding: 0;
+}
+
+.sidebar-collapse {
+  color: var(--ink-muted);
+}
+
+.sidebar-collapse:hover {
+  color: var(--ink-primary);
+}
+
+@media (max-width: 900px) {
   .no-candidate-reasons li {
     grid-template-columns: 1fr;
     gap: 4px;
   }
 
-  .sidebar {
-    padding-right: 8px;
-    padding-left: 8px;
-  }
-
-  .sidebar-history {
-    display: none;
-  }
-
-  .brand {
-    justify-content: center;
-    padding-right: 0;
-    padding-left: 0;
-  }
-
-  .brand > span:last-child,
   .nav-label,
   .provider-nav button > span:nth-child(2),
   .provider-nav button > strong,
@@ -1869,23 +1880,8 @@ button:active:not(:disabled) {
     display: none;
   }
 
-  .workspace-nav button {
-    grid-template-columns: 1fr;
-    place-items: center;
-  }
-
-  .workspace-nav button > span,
-  .workspace-nav .nav-new {
-    display: none;
-  }
-
   .provider-nav button {
     grid-template-columns: 1fr;
-    place-items: center;
-  }
-
-  .sidebar-foot {
-    display: grid;
     place-items: center;
   }
 

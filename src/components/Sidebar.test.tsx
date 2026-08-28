@@ -84,4 +84,47 @@ describe("V2 navigation", () => {
     expect(screen.getByRole("button", { name: "새 대화" })).toBeInTheDocument();
     expect(screen.getByText("대화", { selector: "span" })).toBeInTheDocument();
   });
+
+  it("collapses the rail from the footer chevron and expands it again", () => {
+    render(<Sidebar view="chat" language="en" conversations={conversations} {...noop} />);
+
+    expect(screen.getByText("GOD OF SESSIONS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Night plan/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    expect(screen.queryByText("GOD OF SESSIONS")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Night plan/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask Morrow" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Workspace" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+
+    expect(screen.getByText("GOD OF SESSIONS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Night plan/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("starts collapsed when the window is already a narrow rail", () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("max-width: 900px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as typeof window.matchMedia;
+    try {
+      render(<Sidebar view="chat" language="ko" conversations={conversations} {...noop} />);
+
+      expect(screen.queryByText("GOD OF SESSIONS")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "사이드바 펼치기" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
 });
