@@ -404,7 +404,6 @@ function App() {
         }}
         onOpenSettings={() => changeView("settings")}
         onOpenChat={() => changeView("chat")}
-        onStartPortfolio={startOvernightPortfolio}
         onStopPortfolio={async (runId) => {
           setOvernightError(undefined);
           try { await stopOvernightPortfolio(runId); }

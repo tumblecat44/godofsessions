@@ -2725,7 +2725,7 @@ button:active:not(:disabled) {
 
 .overnight-calendar[open] > summary > svg:last-child { transform: rotate(90deg); }
 
-.overnight-calendar__popover { position: absolute; top: calc(100% + 8px); right: 0; width: 322px; padding: 12px; color: var(--ink-primary); border: 1px solid var(--etched-edge); border-radius: 13px; background: rgba(16, 20, 27, .985); box-shadow: 0 28px 75px rgba(0, 0, 0, .5); backdrop-filter: blur(20px); }
+.overnight-calendar__popover { position: absolute; top: calc(100% + 8px); right: 0; width: 322px; padding: 12px; color: var(--ink-primary); border: 1px solid var(--etched-edge); border-radius: 13px; background: rgba(16, 20, 27, .985); box-shadow: 0 28px 75px rgba(0, 0, 0, .5); }
 
 .overnight-calendar__popover > header { height: 34px; display: grid; grid-template-columns: 32px 1fr 32px; align-items: center; }
 
