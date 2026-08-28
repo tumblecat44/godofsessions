@@ -228,7 +228,7 @@ describe("Morrow first-use conversation", () => {
   });
 
   it("puts conversation-model setup in the tonight region when Morrow has no voice", () => {
-    const onConnect = vi.fn(async () => undefined);
+    const onOpenSettings = vi.fn();
     render(
       <ChatView
         state={{
@@ -240,17 +240,18 @@ describe("Morrow first-use conversation", () => {
         onApproval={vi.fn()}
         onModel={vi.fn()}
         onThinking={vi.fn()}
-        onOpenSettings={vi.fn()}
+        onOpenSettings={onOpenSettings}
         onStartTonight={vi.fn(async () => undefined)}
-        onConnect={onConnect}
+        onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         hasReadyOvernightWorker
       />,
     );
 
-    expect(screen.getByRole("region", { name: "Tonight's overnights" })).toHaveTextContent("Connect a conversation model to see tonight’s 3 cards");
-    fireEvent.click(screen.getByRole("button", { name: /Sign in with your Anthropic/ }));
-    expect(onConnect).toHaveBeenCalledWith("anthropic", "oauth");
+    expect(screen.getByRole("region", { name: "Tonight's overnights" })).toHaveTextContent("Tonight's 3 cards");
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Start / })).not.toBeInTheDocument();
   });
 
