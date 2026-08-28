@@ -470,7 +470,7 @@ describe("Overnight one-button workspace", () => {
     fireEvent.click(screen.getByLabelText("Choose Overnight date"));
     fireEvent.click(screen.getByRole("button", { name: /August 19, 2026/ }));
     fireEvent.click(screen.getByRole("button", { name: /First outcome/ }));
-    expect(screen.getByRole("region", { name: /Status for First outcome/ })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /Board for First outcome/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Overnight" })).not.toBeInTheDocument();
   });
 });
