@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppLanguage, BootstrapState, OvernightPortfolioPlanItemSummary, OvernightPortfolioPlanSummary } from "../shared/contracts";
+import type { AppLanguage, OvernightPortfolioPlanItemSummary, OvernightPortfolioPlanSummary } from "../shared/contracts";
 import { tonightPlanItems } from "../lib/tonight";
 import { Button } from "./ui/Button";
 
@@ -20,9 +20,6 @@ export function TonightPlan({
   onStart(planId: string, itemIds: string[]): Promise<void>;
   needsConversationModel?: boolean;
   needsOvernightWorker?: boolean;
-  state?: BootstrapState;
-  onConnect?(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
-  onDisconnect?(providerId: string): Promise<void>;
   onOpenSettings?(): void;
 }) {
   const ko = language === "ko";
@@ -150,7 +147,7 @@ function TonightCard({ item, index, checked, ko, onToggle }: {
         <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-amber" checked={checked} onChange={onToggle} />
       </span>
       <strong className="mt-0.5 block text-[13px] leading-5">{item.outcome}</strong>
-      <span className="mt-1 block text-[11px] text-ink-muted">{item.providerLabel}{item.providerReason ? ` · ${item.providerReason}` : ""}</span>
+      <span className="mt-1 block text-[11px] text-ink-muted">{item.providerLabel}</span>
       <span className="mt-auto pt-1 font-mono text-[9px] text-ink-faint">{ko ? `${item.estimatedMinutes}분` : `${item.estimatedMinutes}m`}</span>
     </label>
   );

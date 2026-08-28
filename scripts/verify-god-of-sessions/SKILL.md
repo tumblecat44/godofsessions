@@ -74,9 +74,9 @@ Stable handles (English launch):
 | Overnight date | `Choose Overnight date` |
 | Overnight list | region `Overnights` |
 | Overnight empty tonight | heading `No Overnight is ready tonight` |
-| Overnight missing model | heading `Connect a conversation model first`; button `Connect a model on Ask Morrow` |
+| Overnight missing model | heading `Connect a conversation model first`; button `Connect a model in Settings` |
 | Overnight missing CLI | heading `Put an Overnight CLI on this Mac` |
-| Tonight missing model | heading `Connect a conversation model to see tonight’s 3 cards` |
+| Tonight missing model | heading `Tonight's 3 cards` |
 | Onboarding steps | `Meet Morrow`, `Conversation model`, `Overnight` |
 | Onboarding skip model | `Look around without a model` |
 | Onboarding enter | `Enter the room` (when a conversation model is connected) |

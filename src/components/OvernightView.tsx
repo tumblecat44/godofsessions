@@ -24,8 +24,8 @@ interface OvernightViewProps {
   preparing: boolean;
   error?: string;
   onPrepare(): Promise<void>;
+  onAddOvernight?(goal: string): Promise<void>;
   onOpenSettings(): void;
-  onOpenChat?(): void;
   onStopPortfolio(runId: string): Promise<void>;
 }
 
@@ -125,7 +125,7 @@ export function OvernightView(props: OvernightViewProps) {
             routes={props.snapshot.providerRoutes}
             ko={ko}
             onOpenSettings={props.onOpenSettings}
-            onOpenChat={props.onOpenChat}
+            onAddOvernight={props.onAddOvernight}
           />
         )}
       </section>
@@ -184,7 +184,7 @@ function ActiveRunBar({ run, ko, onStop }: { run: OvernightPortfolioRunSummary; 
   </div>;
 }
 
-function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSettings, onOpenChat }: {
+function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSettings, onAddOvernight }: {
   date: string;
   today: boolean;
   preparing: boolean;
@@ -192,7 +192,7 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
   routes: OvernightProviderRouteSummary[];
   ko: boolean;
   onOpenSettings(): void;
-  onOpenChat?(): void;
+  onAddOvernight?(goal: string): Promise<void>;
 }) {
   if (!today) return <OvernightDateEmptyState date={date} ko={ko} />;
   const noReadyWorker = routes.length > 0 && !routes.some((route) => route.status === "ready");
@@ -212,10 +212,8 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
       <div>
         <span>{ko ? "대화 모델 필요" : "CONVERSATION MODEL"}</span>
         <h2>{ko ? "먼저 대화 모델을 연결하세요" : "Connect a conversation model first"}</h2>
-        <p>{ko ? "오늘 밤 카드 최대 3장은 Ask Morrow 위에 뜹니다. 하나를 연결하면 Morrow가 고르고, 읽고 체크를 뺀 뒤 시작을 누르면 됩니다." : "Tonight’s 3 cards appear on Ask Morrow. Connect one model there, read the cards, uncheck any, press Start."}</p>
-        {onOpenChat
-          ? <Button variant="primary" className="mt-3" onClick={onOpenChat}>{ko ? "Ask Morrow에서 모델 연결" : "Connect a model on Ask Morrow"}</Button>
-          : <Button variant="primary" className="mt-3" onClick={onOpenSettings}>{ko ? "모델 연결" : "Connect a model"}</Button>}
+        <p>{ko ? "오늘 밤 카드 최대 3장은 Ask Morrow 위에 뜹니다. 설정에서 모델을 연결한 뒤, 읽고 체크를 뺀 다음 시작을 누르세요." : "Tonight's 3 cards appear on Ask Morrow. Connect a model in Settings, then read the cards, uncheck any, press Start."}</p>
+        <Button variant="primary" className="mt-3" onClick={onOpenSettings}>{ko ? "설정에서 모델 연결" : "Connect a model in Settings"}</Button>
       </div>
     </div>;
   }
@@ -249,9 +247,50 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
     <div>
       <span>{ko ? "오늘은 0개" : "ZERO TONIGHT"}</span>
       <h2>{ko ? "오늘 밤 준비된 Overnight가 없어요" : "No Overnight is ready tonight"}</h2>
-      <p>{ko ? "0개도 정상이에요. Morrow는 분명한 목적이 없으면 일을 만들거나 시작하지 않아요. 맡길 일이 있으면 Ask Morrow에서 말하세요." : "Zero is valid. Morrow does not invent or start work without a clear outcome. Tell Morrow on Ask Morrow if you want something left overnight."}</p>
+      <p>{ko ? "0개도 정상이에요. 맡길 일이 있으면 아래에서 추가하세요." : "Zero is valid. Add an overnight below if you want something done tonight."}</p>
+      {onAddOvernight ? <AddOvernightForm ko={ko} onAdd={onAddOvernight} /> : null}
     </div>
   </div>;
+}
+
+function AddOvernightForm({ ko, onAdd }: { ko: boolean; onAdd(goal: string): Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [goal, setGoal] = useState("");
+  const [working, setWorking] = useState(false);
+  if (!open) {
+    return <Button variant="primary" className="mt-3" onClick={() => setOpen(true)}>{ko ? "Overnight 추가" : "Add overnight"}</Button>;
+  }
+  return (
+    <form
+      className="mt-3 grid max-w-[520px] gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const text = goal.trim();
+        if (!text || working) return;
+        setWorking(true);
+        void onAdd(text).finally(() => {
+          setWorking(false);
+          setOpen(false);
+          setGoal("");
+        });
+      }}
+    >
+      <label className="grid gap-1.5">
+        <span className="text-[11px] font-semibold text-ink">{ko ? "오늘 밤 맡길 일" : "What should be done tonight?"}</span>
+        <textarea
+          className="min-h-20 w-full rounded-[10px] border border-line bg-transparent px-3 py-2 text-[13px] text-ink"
+          value={goal}
+          onChange={(event) => setGoal(event.target.value)}
+          placeholder={ko ? "예: README 검증을 끝내고 테스트가 통과하게" : "e.g. Finish the remaining README check and make tests pass"}
+          autoFocus
+        />
+      </label>
+      <div className="flex gap-2">
+        <Button variant="primary" type="submit" disabled={working || goal.trim() === ""}>{working ? (ko ? "추가하는 중…" : "Adding…") : (ko ? "추가" : "Add")}</Button>
+        <Button variant="secondary" type="button" onClick={() => { setOpen(false); setGoal(""); }}>{ko ? "취소" : "Cancel"}</Button>
+      </div>
+    </form>
+  );
 }
 
 function StopRunButton({ run, ko, onStop }: { run: OvernightPortfolioRunSummary; ko: boolean; onStop(runId: string): Promise<void> }) {

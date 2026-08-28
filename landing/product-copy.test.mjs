@@ -33,6 +33,10 @@ test("names the four official execution routes without declaring universal readi
   assert.match(html, /4 routes visible/i);
   assert.match(html, /0 Overnights is a valid answer/i);
   assert.doesNotMatch(html, /(?:Claude Code|Grok Build|Pi Agent) · verified/i);
+  assert.doesNotMatch(html, /leftover Max usage/);
+  assert.doesNotMatch(html, /free tonight/);
+  assert.doesNotMatch(html, /fits the remaining window/);
+  assert.doesNotMatch(html, /requiring your judgment/);
 });
 
 test("uses only the requested open-source trust line and explains the reference value below it", () => {

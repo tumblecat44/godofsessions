@@ -117,7 +117,7 @@ function App() {
     }
   };
 
-  const prepareOvernight = useCallback(async () => {
+  const prepareOvernight = useCallback(async (userGoal?: string) => {
     const current = stateRef.current;
     if (!current || overnightPreparationInFlight.current) return;
     overnightPreparationInFlight.current = true;
@@ -127,7 +127,7 @@ function App() {
       setOvernightError(undefined);
     });
     try {
-      const orchestration = await bridge.prepareOvernightPortfolio();
+      const orchestration = await bridge.prepareOvernightPortfolio(userGoal);
       transitionState(() => setState((latest) => latest ? { ...latest, orchestration } : latest));
       return orchestration;
     } catch (reason) {
@@ -384,12 +384,11 @@ function App() {
           updateStateWithoutTransition(() => setState((current) => current ? { ...current, thinkingLevel: level } : current));
         }}
         onOpenSettings={() => changeView("settings")}
+        onRevealRoot={() => void bridge.revealRoot()}
         tonightPlan={visibleTonightPlan(state.orchestration.portfolioPlans, state.orchestration.portfolioRuns)}
         tonightPreparing={overnightPreparing}
         hasReadyOvernightWorker={hasReadyOvernightWorker}
         onStartTonight={startOvernightPortfolio}
-        onConnect={connectProvider}
-        onDisconnect={async (providerId) => { await bridge.disconnectProvider(providerId); await refresh(); }}
       />
       <OvernightView
         hidden={view !== "overnight"}
@@ -402,8 +401,11 @@ function App() {
           automaticallyPreparedContext.current = undefined;
           await prepareOvernight();
         }}
+        onAddOvernight={async (goal) => {
+          automaticallyPreparedContext.current = undefined;
+          await prepareOvernight(goal);
+        }}
         onOpenSettings={() => changeView("settings")}
-        onOpenChat={() => changeView("chat")}
         onStopPortfolio={async (runId) => {
           setOvernightError(undefined);
           try { await stopOvernightPortfolio(runId); }

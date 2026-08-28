@@ -73,6 +73,10 @@ describe("TonightPlan", () => {
     expect(boxes).toHaveLength(2);
     expect(boxes[0]).toBeChecked();
     expect(boxes[1]).toBeChecked();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.queryByText(/leftover Max usage/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/free tonight/)).not.toBeInTheDocument();
 
     fireEvent.click(boxes[0]);
     fireEvent.click(screen.getByRole("button", { name: "Start 1 selected" }));
@@ -87,24 +91,6 @@ describe("TonightPlan", () => {
         language="en"
         onStart={vi.fn(async () => undefined)}
         needsConversationModel
-        state={{
-          rootName: "synthetic-root",
-          onboardingComplete: true,
-          providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
-          models: [],
-          conversations: [],
-          thinkingLevel: "medium",
-          language: "en",
-          orchestration: {
-            context: { date: "2026-08-27", timeZone: "UTC", generatedAt: "2026-08-27T00:00:00.000Z", totalSessions: 0, providerCounts: {}, sessions: [], warnings: [], methodology: "test" },
-            providerRoutes: [],
-            portfolioAssessments: [],
-            portfolioPlans: [],
-            portfolioRuns: [],
-          },
-        }}
-        onConnect={vi.fn(async () => undefined)}
-        onDisconnect={vi.fn(async () => undefined)}
         onOpenSettings={onOpenSettings}
       />,
     );

@@ -74,7 +74,8 @@ describe("Morrow onboarding product contract", () => {
       expect(portfolioCopy).toHaveTextContent(agent);
     }
     expect(portfolioCopy).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
-    expect(screen.getByText(/Only workers that passed install, sign-in, and safety checks enter the plan/)).toBeInTheDocument();
+    expect(screen.getByText(/Only workers whose official CLI is on PATH enter the plan/)).toBeInTheDocument();
+    expect(screen.queryByText(/install, sign-in, and safety checks/)).not.toBeInTheDocument();
     expect(screen.getByText(/Morning evidence by outcome/)).toBeInTheDocument();
   });
 
@@ -83,7 +84,8 @@ describe("Morrow onboarding product contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "야간 작업" }));
 
     expect(screen.getByText(/Claude Code, Codex, Grok Build, Pi Agent/)).toBeInTheDocument();
-    expect(screen.getByText(/설치·로그인·안전 확인이 끝난 작업자만 계획에 들어가고/)).toBeInTheDocument();
+    expect(screen.getByText(/공식 CLI가 PATH에 있는 작업자만 계획에 들어가고/)).toBeInTheDocument();
+    expect(screen.queryByText(/설치·로그인·안전 확인이 끝난 작업자만 계획에 들어가고/)).not.toBeInTheDocument();
     expect(screen.getByText("목적별 아침 근거")).toBeInTheDocument();
   });
 });

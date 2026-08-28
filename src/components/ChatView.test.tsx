@@ -37,7 +37,33 @@ describe("Morrow first-use conversation", () => {
     expect(screen.queryByText(/select project/i)).not.toBeInTheDocument();
     // Conversation history now lives in the app sidebar, not in the chat view.
     expect(screen.queryByText("New conversation")).not.toBeInTheDocument();
-    expect(screen.getByText("/Users/example/work/morrow-root")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open morrow-root folder" })).toHaveAttribute("title", "/Users/example/work/morrow-root");
+    expect(screen.getByRole("button", { name: "Open morrow-root folder" })).toHaveTextContent("morrow-root");
+    expect(screen.getByRole("button", { name: "Open morrow-root/" })).toHaveTextContent("morrow-root/");
+    expect(screen.queryByText("EXECUTION ROOT")).not.toBeInTheDocument();
+  });
+
+  it("opens the fixed folder from the header chip", () => {
+    const onRevealRoot = vi.fn();
+    render(<ChatView state={state} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} onRevealRoot={onRevealRoot} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open morrow-root folder" }));
+    expect(onRevealRoot).toHaveBeenCalledOnce();
+  });
+
+  it("puts a courtesy home path next to response depth", () => {
+    const onRevealRoot = vi.fn();
+    render(<ChatView state={{ ...state, language: "ko", rootIsHome: true, rootName: "example", rootPath: "/Users/example" }} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} onRevealRoot={onRevealRoot} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "홈디렉토리/ 열기" }));
+    expect(onRevealRoot).toHaveBeenCalledOnce();
+  });
+
+  it("labels the home folder as Home", () => {
+    render(<ChatView state={{ ...state, language: "ko", rootIsHome: true, rootName: "example", rootPath: "/Users/example" }} onSend={vi.fn()} onAbort={vi.fn()} onApproval={vi.fn()} onModel={vi.fn()} onThinking={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "홈 폴더 열기" })).toHaveTextContent("홈");
+    expect(screen.getByRole("button", { name: "홈디렉토리/ 열기" })).toHaveTextContent("홈디렉토리/");
   });
 
   it("keeps permission memory off until the user explicitly chooses it", () => {
@@ -242,13 +268,14 @@ describe("Morrow first-use conversation", () => {
         onThinking={vi.fn()}
         onOpenSettings={onOpenSettings}
         onStartTonight={vi.fn(async () => undefined)}
-        onConnect={vi.fn(async () => undefined)}
-        onDisconnect={vi.fn(async () => undefined)}
         hasReadyOvernightWorker
       />,
     );
 
     expect(screen.getByRole("region", { name: "Tonight's overnights" })).toHaveTextContent("Tonight's 3 cards");
+    expect(screen.getByText(/Connect a model in Settings\. Anything you typed here will stay put\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Tonight section above/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/오늘 밤 칸에서/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();

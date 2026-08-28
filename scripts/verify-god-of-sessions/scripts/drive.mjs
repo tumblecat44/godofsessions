@@ -104,8 +104,11 @@ async function proveTonightHome(page, app) {
   assert.equal(await boxes.nth(1).isChecked(), true);
   assert.equal(await boxes.nth(2).isChecked(), true);
   const body = await page.locator("body").innerText();
-  for (const snippet of ["Ship the login fix", "Backfill coverage", "Tighten the release checklist", "Claude still has leftover Max usage", "Codex is free tonight", "Grok Build fits the remaining window"]) {
+  for (const snippet of ["Ship the login fix", "Backfill coverage", "Tighten the release checklist", "Claude Code", "Codex", "Grok Build"]) {
     assert.match(body, new RegExp(snippet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const absent of ["Claude still has leftover Max usage", "Codex is free tonight", "Grok Build fits the remaining window"]) {
+    assert.doesNotMatch(body, new RegExp(absent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.doesNotMatch(body, /Hidden extra work/);
   await boxes.nth(0).click();

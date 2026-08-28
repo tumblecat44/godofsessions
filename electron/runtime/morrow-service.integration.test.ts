@@ -963,7 +963,7 @@ describe("Morrow service dogfood", () => {
     await expect(readFile(join(root, "preparation-must-stay-read-only.txt"), "utf8")).rejects.toThrow();
 
     await service.sendMessage("Overnight를 준비해줘. 실행은 하지 마.");
-    expect(JSON.stringify(service.currentConversation().messages)).toContain("Overnight에서 오늘의 정확한 안전 작업을 확인");
+    expect(JSON.stringify(service.currentConversation().messages)).toContain("Overnight에서 확인한 뒤 시작하세요");
     const overnightSnapshot = (await service.bootstrap()).orchestration;
     expect(overnightSnapshot.portfolioPlans).toHaveLength(1);
     expect(overnightSnapshot.portfolioAssessments?.[0]).toMatchObject({
@@ -1055,7 +1055,7 @@ describe("Morrow service dogfood", () => {
     expect(resumedBootstrap.conversations.some((item) => item.path === saved.path)).toBe(true);
     const restored = await resumed.openConversation(saved.path!);
     expect(JSON.stringify(restored.messages)).toContain("Dogfood Room");
-    expect(JSON.stringify(restored.messages)).toContain("Overnight에서 오늘의 정확한 안전 작업을 확인");
+    expect(JSON.stringify(restored.messages)).toContain("Overnight에서 확인한 뒤 시작하세요");
     expect(restored.thinkingLevel).toBe("high");
     expect(restored.model).toMatchObject({ provider: "morrow-dogfood" });
     expect(resumeEvents.some((event) => event.type === "notice")).toBe(false);

@@ -342,14 +342,14 @@ describe("Overnight one-button workspace", () => {
     expect(screen.queryByRole("heading", { name: "No Overnight is ready tonight" })).not.toBeInTheDocument();
   });
 
-  it("sends a missing conversation model to Ask Morrow instead of treating CLIs as unfinished setup", () => {
-    const openChat = vi.fn();
-    render(<OvernightView {...props({ canPrepare: false, onOpenChat: openChat })} />);
+  it("sends a missing conversation model to Settings instead of treating CLIs as unfinished setup", () => {
+    const onOpenSettings = vi.fn();
+    render(<OvernightView {...props({ canPrepare: false, onOpenSettings })} />);
 
     expect(screen.getByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Finish Overnight setup" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
-    expect(openChat).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
+    expect(onOpenSettings).toHaveBeenCalled();
   });
 
   it("does not start overnight from the list", () => {
@@ -397,6 +397,19 @@ describe("Overnight one-button workspace", () => {
     expect(screen.queryByText("Empty")).not.toBeInTheDocument();
     expect(screen.queryByText("OVERNIGHT 1")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Start \d+ selected/ })).not.toBeInTheDocument();
+  });
+
+  it("lets the user add an Overnight from the empty tonight page", async () => {
+    const onAddOvernight = vi.fn(async () => undefined);
+    render(<OvernightView {...props({ onAddOvernight })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add overnight" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "What should be done tonight?" }), {
+      target: { value: "Finish the remaining README check" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(onAddOvernight).toHaveBeenCalledWith("Finish the remaining README check"));
   });
 
   it("opens one kanban from the list and returns to Overnight", () => {

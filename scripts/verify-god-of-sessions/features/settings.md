@@ -16,7 +16,7 @@ Settings shows the file working folder, the GitHub identity used at first run, c
 - Choose `Settings` in the sidebar.
 - From Ask Morrow with no model, connect a provider in the Tonight section or choose `Connect model`.
 - From Overnight with no CLI, copy a login command or choose `See CLI status in Settings`.
-- From Overnight with no conversation model, choose `Connect a model on Ask Morrow`.
+- From Overnight with no conversation model, choose `Connect a model in Settings`.
 
 ## Driving it with gos-verify
 

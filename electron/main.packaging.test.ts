@@ -50,7 +50,7 @@ vi.mock("electron", () => ({
     encryptString: vi.fn(() => Buffer.from("encrypted")),
     decryptString: vi.fn(() => "token"),
   },
-  shell: { openExternal: vi.fn(async () => undefined) },
+  shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => "") },
 }));
 
 vi.mock("./runtime/github-auth", () => ({

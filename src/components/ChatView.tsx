@@ -23,12 +23,11 @@ interface ChatViewProps {
   onModel(provider: string, modelId: string): Promise<void>;
   onThinking(level: ThinkingLevel): Promise<void>;
   onOpenSettings(): void;
+  onRevealRoot?(): void;
   tonightPlan?: OvernightPortfolioPlanSummary;
   tonightPreparing?: boolean;
   hasReadyOvernightWorker?: boolean;
   onStartTonight?(planId: string, itemIds: string[]): Promise<void>;
-  onConnect?(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
-  onDisconnect?(providerId: string): Promise<void>;
 }
 const FOLLOW_BOTTOM_THRESHOLD = 80;
 
@@ -113,7 +112,7 @@ export function ChatView(props: ChatViewProps) {
   return (
     <main className="chat-workspace h-dvh min-w-0 overflow-hidden bg-night text-ink" hidden={props.hidden}>
       <section className="chat-main grid h-dvh grid-rows-[86px_auto_minmax(0,1fr)_auto_auto] overflow-hidden">
-        <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-[clamp(28px,4vw,54px)] pt-2"><div className="flex items-center gap-3"><OperatorMark size={32} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><span className="root-chip max-w-[min(58vw,720px)] overflow-x-auto whitespace-nowrap rounded-lg border border-line-soft bg-white/[0.018] px-3 py-2 font-mono text-[9px] tracking-[0.04em] text-ink-faint" title={ko ? "고정 실행 폴더" : "Fixed execution root"}><strong>{ko ? "실행 폴더" : "EXECUTION ROOT"}</strong> · <code>{props.state.rootPath ?? props.state.rootName}</code></span></header>
+        <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-[clamp(28px,4vw,54px)] pt-2"><div className="flex items-center gap-3"><OperatorMark size={32} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><RootChip state={props.state} ko={ko} onReveal={props.onRevealRoot} /></header>
 
         {props.onStartTonight && (
           <div className="px-[clamp(32px,9vw,150px)] pt-5 max-[900px]:px-8">
@@ -125,9 +124,6 @@ export function ChatView(props: ChatViewProps) {
               onStart={props.onStartTonight}
               needsConversationModel={!canChat}
               needsOvernightWorker={props.hasReadyOvernightWorker === false}
-              state={props.state}
-              onConnect={props.onConnect}
-              onDisconnect={props.onDisconnect}
               onOpenSettings={props.onOpenSettings}
             />
           </div>
@@ -177,7 +173,7 @@ export function ChatView(props: ChatViewProps) {
           <Surface className="chat-provider-needed mx-auto mb-3 grid w-[min(820px,calc(100%-48px))] grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-3 border-teal/20 bg-teal/[0.035] px-4 py-3 shadow-none" aria-live="polite">
             <ShieldCheck size={17} />
             <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{props.onStartTonight
-              ? (ko ? "위 오늘 밤 칸에서 하나를 연결하세요. 입력한 글은 그대로 남아요." : "Connect one in the Tonight section above. Anything you typed here will stay put.")
+              ? (ko ? "설정에서 모델을 연결하세요. 입력한 글은 그대로 남아요." : "Connect a model in Settings. Anything you typed here will stay put.")
               : (ko ? "설정에서 공급자에 연결하면 이 입력 내용은 그대로 보존돼요." : "Connect a provider in Settings. Anything you typed here will stay put.")}</small></span>
             <Button size="sm" onClick={props.onOpenSettings}><Settings size={14} />{ko ? "모델 연결" : "Connect model"}</Button>
           </Surface>
@@ -188,12 +184,54 @@ export function ChatView(props: ChatViewProps) {
           <div className="composer-bar flex min-h-10 items-center gap-2 border-t border-line-soft px-2 py-1.5">
             <div className="model-picker" ref={modelPickerRef}><button type="button" aria-expanded={modelOpen} disabled={!availableModels.length} onClick={() => setModelOpen((value) => !value)}><span className={`model-dot ${canChat ? "" : "is-offline"}`} />{selectedModel?.name ?? (ko ? "모델 연결 필요" : "Connect a model")}<ChevronDown size={13} /></button><div className={`model-menu ${modelOpen ? "is-open" : ""}`} role="listbox" aria-hidden={!modelOpen} inert={!modelOpen || undefined}>{availableModels.map((model) => { const isSelected = selectedModel?.id === model.id && selectedModel.provider === model.provider; return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "is-selected" : ""} key={`${model.provider}:${model.id}`} onClick={() => { setModelOpen(false); void props.onModel(model.provider, model.id); }}><strong>{model.name}</strong><small>{model.provider}</small>{isSelected && <Check size={13} />}</button>; })}</div></div>
             <select aria-label={ko ? "답변 깊이" : "Response depth"} title={ko ? "깊을수록 더 오래 걸리고 공급자 사용량이 늘 수 있어요." : "Deeper responses can take longer and use more provider capacity."} disabled={!canChat || !supportsThinking} value={supportsThinking ? (props.conversation?.thinkingLevel ?? props.state.thinkingLevel) : "off"} onChange={(event) => void props.onThinking(event.target.value as ThinkingLevel)}><option value="off">{ko ? "가장 빠르게" : "Fastest"}</option><option value="minimal">{ko ? "빠르게" : "Faster"}</option><option value="low">{ko ? "가볍게 검토" : "Light review"}</option><option value="medium">{ko ? "균형 있게" : "Balanced"}</option><option value="high">{ko ? "더 깊게 · 느림" : "Deeper · slower"}</option><option value="xhigh">{ko ? "아주 깊게 · 더 느림" : "Very deep · slower"}</option><option value="max">{ko ? "최대한 깊게 · 가장 느림" : "Deepest · slowest"}</option></select>
+            <ComposerRoot state={props.state} ko={ko} onReveal={props.onRevealRoot} />
             <span className="composer-spacer" />
             <Button variant={props.conversation?.busy ? "danger" : "primary"} size="icon" className={`send-button size-9 min-h-0 ${props.conversation?.busy ? "is-stop" : ""}`} aria-label={props.conversation?.busy ? (ko ? "답변 중지" : "Stop response") : (ko ? "보내기" : "Send")} disabled={!props.conversation?.busy && (!draft.trim() || !canChat)} onClick={() => props.conversation?.busy ? void props.onAbort() : void submit()}><span className={`state-icon-swap ${props.conversation?.busy ? "is-active" : ""}`} aria-hidden="true"><span className="state-icon-swap__active"><CircleStop size={17} /></span><span className="state-icon-swap__inactive"><ArrowUp size={18} /></span></span></Button>
           </div>
         </footer>
       </section>
     </main>
+  );
+}
+
+function rootChipLabel(state: BootstrapState, ko: boolean) {
+  if (state.rootIsHome) return ko ? "홈" : "Home";
+  return state.rootName;
+}
+
+function composerRootLabel(state: BootstrapState, ko: boolean) {
+  if (state.rootIsHome) return ko ? "홈디렉토리/" : "Home/";
+  return `${state.rootName}/`;
+}
+
+function ComposerRoot({ state, ko, onReveal }: { state: BootstrapState; ko: boolean; onReveal?: () => void }) {
+  const path = state.rootPath ?? state.rootName;
+  const label = composerRootLabel(state, ko);
+  return (
+    <button
+      type="button"
+      title={path}
+      aria-label={ko ? `${label} 열기` : `Open ${label}`}
+      onClick={() => onReveal?.()}
+    >
+      {label}
+    </button>
+  );
+}
+
+function RootChip({ state, ko, onReveal }: { state: BootstrapState; ko: boolean; onReveal?: () => void }) {
+  const path = state.rootPath ?? state.rootName;
+  const label = rootChipLabel(state, ko);
+  return (
+    <button
+      type="button"
+      className="root-chip max-w-[min(58vw,720px)] cursor-pointer overflow-x-auto whitespace-nowrap rounded-lg border border-line-soft bg-white/[0.018] px-3 py-2 font-mono text-[9px] tracking-[0.04em] text-ink-faint"
+      title={path}
+      aria-label={ko ? `${label} 폴더 열기` : `Open ${label} folder`}
+      onClick={() => onReveal?.()}
+    >
+      {label}
+    </button>
   );
 }
 

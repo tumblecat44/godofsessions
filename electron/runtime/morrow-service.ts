@@ -125,7 +125,7 @@ function transcriptParts(content: unknown, completedToolCalls: ReadonlySet<strin
   });
 }
 
-function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
+function serializeMessages(messages: readonly unknown[], language: AppLanguage): TranscriptMessage[] {
   const completedToolCalls = new Set(messages.flatMap((message) => {
     if (!message || typeof message !== "object") return [];
     const value = message as Record<string, unknown>;
@@ -141,7 +141,7 @@ function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
     const value = message as Record<string, unknown>;
     const role = value.role;
     if (role !== "user" && role !== "assistant" && role !== "toolResult") return [];
-    const special = role === "toolResult" ? specialToolResult(value.content) : undefined;
+    const special = role === "toolResult" ? specialToolResult(value.content, language) : undefined;
     const parts = special ? [special] : transcriptParts(value.content, completedToolCalls, failedToolCalls);
     if (parts.length === 0) return [];
     return [{
@@ -155,18 +155,23 @@ function serializeMessages(messages: readonly unknown[]): TranscriptMessage[] {
   });
 }
 
-function specialToolResult(content: unknown): TranscriptPart | undefined {
+function specialToolResult(content: unknown, language: AppLanguage): TranscriptPart | undefined {
   const raw = textFromContent(content);
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (value.morrowType === "overnight-portfolio-recommendation") {
       const count = Array.isArray(value.candidates) ? value.candidates.length : 0;
+      const korean = language === "ko";
       return {
         type: "tool",
         toolName: "prepare_overnight",
         text: count > 0
-          ? `${count}개 Overnight 후보를 정리했습니다. Overnight에서 오늘의 정확한 안전 작업을 확인하고 한 번 눌러 시작하세요.`
-          : "오늘 밤 실행할 Overnight 후보가 없습니다. 판단 근거는 Overnight에서 확인할 수 있습니다.",
+          ? korean
+            ? `${count}개 Overnight를 준비했습니다. Overnight에서 확인한 뒤 시작하세요.`
+            : `Prepared ${count} overnight ${count === 1 ? "card" : "cards"}. Review them on Overnight, then start.`
+          : korean
+            ? "오늘 밤 준비된 Overnight가 없습니다."
+            : "No overnight is ready tonight.",
         state: "done",
       };
     }
@@ -245,8 +250,8 @@ function unavailableDailyContext(
     totalSessions: collectedContext?.summary.totalSessions ?? unavailable.totalSessions,
     warnings: [...new Set([...(collectedContext?.summary.warnings ?? []), reason])],
     methodology: capacity
-      ? "세션을 누락하거나 일부만 평가하지 않고, 전체 의미 평가를 중단했습니다."
-      : "수집 문제가 있는 상태에서 일부 세션만으로 Overnight 작업을 추론하지 않았습니다.",
+      ? "오늘의 모든 로컬 AI 세션을 한도 안에서 평가하지 못했습니다."
+      : "오늘의 로컬 AI 세션 수집이 완전하지 않습니다.",
   };
   const detail = capacity
     ? `Sessions observed: ${unavailable.totalSessions}. Capacity: ${unavailable.maxChars} characters.`
@@ -476,23 +481,23 @@ export class MorrowService {
     const collection = this.dailyContextAssessmentUnavailable?.reason === "collection";
     return this.language === "ko"
       ? collection
-        ? "오늘의 로컬 AI 세션 수집이 완전하지 않아 Overnight 추천을 만들지 않았습니다. 일부 세션만으로 작업을 추론하지 않았습니다."
-        : "오늘의 모든 로컬 AI 세션을 안전한 한도 안에서 평가할 수 없어 Overnight 추천을 만들지 않았습니다. 세션을 누락하는 대신 전체 평가를 중단했습니다."
+        ? "오늘의 로컬 AI 세션 수집이 완전하지 않아 Overnight 추천을 만들지 않았습니다."
+        : "오늘의 모든 로컬 AI 세션을 안전한 한도 안에서 평가할 수 없어 Overnight 추천을 만들지 않았습니다."
       : collection
-        ? "Morrow did not create an Overnight recommendation because local AI session collection was incomplete. It did not infer work from a partial session set."
-        : "Morrow did not create an Overnight recommendation because every local AI session could not be assessed within the safe capacity limit. The complete assessment stopped instead of omitting sessions.";
+        ? "Overnight is not ready. Today's local AI sessions could not be collected completely."
+        : "Overnight is not ready. Today's local AI sessions could not all be assessed within the safe limit.";
   }
 
   private overnightEvaluationFailedMessage(reason?: unknown) {
     const aborted = reason instanceof OvernightContextEvaluationError && reason.code === "aborted";
     if (this.language === "ko") {
       return aborted
-        ? "Overnight 포트폴리오 평가를 중지했습니다. 부분 추천은 저장하지 않았습니다."
-        : "오늘의 모든 로컬 AI 세션을 정확히 평가하지 못해 Overnight 추천 준비에 실패했습니다. 부분 결과로 계획을 만들지 않았습니다.";
+        ? "Overnight 평가를 중지했습니다. 추천은 저장하지 않았습니다."
+        : "오늘의 로컬 AI 세션을 평가하지 못해 Overnight를 준비하지 못했습니다.";
     }
     return aborted
-      ? "The Overnight portfolio assessment was stopped. No partial recommendation was saved."
-      : "Morrow could not exactly assess every local AI session, so Overnight preparation failed. It did not create a plan from partial results.";
+      ? "Overnight assessment stopped. No recommendation was saved."
+      : "Overnight is not ready. Today's local AI sessions could not be assessed.";
   }
 
   private async readPreferences(): Promise<{
@@ -739,7 +744,7 @@ export class MorrowService {
       id: this.session.sessionId,
       path: this.session.sessionFile,
       title: this.session.sessionName || sessionTitle(firstUser ? textFromContent(firstUser.content) : ""),
-      messages: serializeMessages(this.session.messages),
+      messages: serializeMessages(this.session.messages, this.language),
       model: this.session.model ? { provider: this.session.model.provider, id: this.session.model.id, name: this.session.model.name } : undefined,
       thinkingLevel: this.session.thinkingLevel as ThinkingLevel,
       busy: this.session.isStreaming,
@@ -882,11 +887,13 @@ export class MorrowService {
     return this.combinedOrchestrationSnapshot(false);
   }
 
-  async prepareOvernightPortfolio(): Promise<OrchestrationSnapshot> {
+  async prepareOvernightPortfolio(userGoal?: string): Promise<OrchestrationSnapshot> {
     if (this.portfolioPreparationInFlight) return this.portfolioPreparationInFlight;
     const pending = (async () => {
       await this.refreshDailyContext();
-      if (this.shouldPrepareLocalTonightPlan()) {
+      if (userGoal) {
+        await this.evaluateOvernightPortfolio("goal", userGoal);
+      } else if (this.shouldPrepareLocalTonightPlan()) {
         await this.recommendLocalTonightPlan();
       } else {
         await this.evaluateOvernightPortfolio("discover");

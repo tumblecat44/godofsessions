@@ -62,7 +62,7 @@ vi.mock("electron", () => ({
     encryptString: vi.fn(() => Buffer.from("encrypted")),
     decryptString: vi.fn(() => "token"),
   },
-  shell: { openExternal: vi.fn(async () => undefined) },
+  shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => "") },
 }));
 
 vi.mock("./runtime/github-auth", () => ({
@@ -82,6 +82,7 @@ vi.mock("./runtime/morrow-service", () => ({
     stopOvernightPortfolio = vi.fn(async () => undefined);
     verifyOvernightProvider = vi.fn(async (provider: string) => ({ providerRoutes: [{ provider }] }));
     prepareOvernightPortfolio = vi.fn(async (input) => ({ input, portfolioPlans: [] }));
+    executionRoot = vi.fn(() => "/tmp/morrow-portfolio-ipc-root");
     constructor(options: Record<string, unknown>) {
       testState.morrow = this;
       testState.morrowOptions = options;
@@ -173,5 +174,12 @@ describe("portfolio IPC boundary", () => {
 
     await expect(testState.handlers.get("morrow:stop-overnight-portfolio")!(trustedEvent(), "")).rejects.toThrow(/run id/);
     await expect(testState.handlers.get("morrow:stop-overnight-portfolio")!(trustedEvent(), "x".repeat(257))).rejects.toThrow(/run id/);
+  });
+
+  it("opens the fixed root in Finder and ignores a renderer-supplied path", async () => {
+    const { shell } = await import("electron");
+    await testState.handlers.get("morrow:reveal-root")!(trustedEvent(), "/etc/passwd");
+    expect(shell.openPath).toHaveBeenCalledWith("/tmp/morrow-portfolio-ipc-root");
+    expect(shell.openPath).toHaveBeenCalledOnce();
   });
 });

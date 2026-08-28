@@ -214,7 +214,10 @@ function registerIpc() {
     return service().finishOnboarding(language);
   });
   handle("morrow:refresh-daily-context", () => service().refreshDailyContext());
-  handle("morrow:prepare-overnight-portfolio", () => service().prepareOvernightPortfolio());
+  handle("morrow:prepare-overnight-portfolio", (_event, value) => {
+    if (typeof value !== "string" || value.trim() === "") return service().prepareOvernightPortfolio();
+    return service().prepareOvernightPortfolio(text(value, "overnight goal", 4_000));
+  });
   handle("morrow:verify-overnight-provider", (_event, value) => {
     if (typeof value !== "string" || !overnightProviders.has(value as OvernightExecutionProvider)) {
       throw new Error("Invalid overnight provider.");
@@ -241,6 +244,10 @@ function registerIpc() {
     const parsed = new URL(text(value, "external URL", 8_192));
     if (parsed.protocol !== "https:" || !allowedExternalUrls.has(parsed.toString())) throw new Error("This link was not issued by the active provider connection.");
     return shell.openExternal(parsed.toString());
+  });
+  handle("morrow:reveal-root", async () => {
+    const error = await shell.openPath(service().executionRoot());
+    if (error) throw new Error(error);
   });
 }
 

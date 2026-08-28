@@ -428,6 +428,8 @@ export interface BootstrapState {
   rootName: string;
   /** Exact fixed filesystem scope used by every conversation and Overnight item. */
   rootPath?: string;
+  /** True when the fixed root is the user home folder. */
+  rootIsHome?: boolean;
   onboardingComplete: boolean;
   providers: ProviderSummary[];
   models: ModelSummary[];
@@ -489,11 +491,12 @@ export interface MorrowBridge {
   finishOnboarding(input: { language: AppLanguage }): Promise<void>;
   refreshDailyContext(): Promise<OrchestrationSnapshot>;
   /** Read-only assessment used to keep the one-click Overnight launch ready. */
-  prepareOvernightPortfolio(): Promise<OrchestrationSnapshot>;
+  prepareOvernightPortfolio(userGoal?: string): Promise<OrchestrationSnapshot>;
   verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
   startOvernightPortfolio(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary>;
   stopOvernightPortfolio(runId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  revealRoot(): Promise<void>;
   onEvent(listener: (event: MorrowEvent) => void): () => void;
 }
 

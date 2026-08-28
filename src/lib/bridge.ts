@@ -64,11 +64,12 @@ function previewBridge(): MorrowBridge {
     disconnectProvider: async () => undefined,
     finishOnboarding: async () => undefined,
     refreshDailyContext: async () => demoState.orchestration,
-    prepareOvernightPortfolio: async () => demoState.orchestration,
+    prepareOvernightPortfolio: async (_userGoal?: string) => demoState.orchestration,
     verifyOvernightProvider: async () => { throw new Error("Overnight provider verification is only available in the desktop app."); },
     startOvernightPortfolio: async (_planId, _itemIds) => { throw new Error("Overnight portfolio runs are only available in the desktop app."); },
     stopOvernightPortfolio: async () => { throw new Error("Overnight portfolio controls are only available in the desktop app."); },
     openExternal: async (url) => { window.open(url, "_blank", "noopener"); },
+    revealRoot: async () => undefined,
     onEvent: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
   };
 }

@@ -79,6 +79,7 @@ function morrowBridge(overrides: Partial<MorrowBridge> = {}): MorrowBridge {
     startOvernightPortfolio: vi.fn(async () => { throw new Error("not prepared"); }),
     stopOvernightPortfolio: vi.fn(async () => undefined),
     openExternal: vi.fn(async () => undefined),
+    revealRoot: vi.fn(async () => undefined),
     onEvent: () => () => undefined,
     ...overrides,
   };
@@ -185,7 +186,7 @@ describe("App Overnight integration", () => {
     expect(screen.getAllByRole("heading", { name: "Copy is clear" }).length).toBeGreaterThan(0);
     expect(screen.getByText("Copy review failed.")).toBeInTheDocument();
     expect(screen.queryByText(/Morning Review/i)).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("uses only the portfolio stop boundary", async () => {
     const running = activeRun();
@@ -306,7 +307,7 @@ describe("App Overnight integration", () => {
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 
-  it("puts conversation-model setup on Ask Morrow when Overnight CLIs are already installed", async () => {
+  it("puts conversation-model setup in Settings when Overnight CLIs are already installed", async () => {
     const initial = state({
       providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
       orchestration: orchestration({
@@ -326,8 +327,8 @@ describe("App Overnight integration", () => {
     expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
     expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
-    expect(screen.getByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
+    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 

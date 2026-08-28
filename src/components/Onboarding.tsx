@@ -227,8 +227,8 @@ export function Onboarding({
                     MessageCircle,
                     ko ? "준비된 작업자만 사용" : "Ready workers only",
                     ko
-                      ? "설치·로그인·안전 확인이 끝난 작업자만 계획에 들어가고, 막힌 작업자는 시작되지 않아요."
-                      : "Only workers that passed install, sign-in, and safety checks enter the plan; blocked workers never start.",
+                      ? "공식 CLI가 PATH에 있는 작업자만 계획에 들어가고, 없는 CLI는 시작되지 않아요."
+                      : "Only workers whose official CLI is on PATH enter the plan; missing CLIs never start.",
                   ],
                   [
                     LockKeyhole,
