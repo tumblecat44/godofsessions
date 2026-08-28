@@ -1,5 +1,5 @@
 import { ExternalLink, FolderLock, Github, LogOut, Send, ShieldCheck } from "lucide-react";
-import { overnightCliLoginCommand } from "../lib/overnight-cli";
+import { officialOvernightCliCards } from "../lib/overnight-cli";
 import type { AppLanguage, BootstrapState, GitHubProfile, OvernightExecutionProvider } from "../shared/contracts";
 import { CopyCommandButton } from "./CopyCommandButton";
 import { ProviderConnections } from "./ProviderConnections";
@@ -61,12 +61,11 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
 
         <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
           <div className="settings-section__intro"><h2 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck size={18} />{ko ? "Overnight CLI" : "Overnight CLIs"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "설치됨은 PATH에서 명령을 찾았다는 뜻입니다. 로그인 명령을 복사해 Terminal에서 실행하세요. 이 앱 안에서 Overnight 계정에 로그인하지 않습니다." : "Installed means the command is on PATH. Copy a login command and run it in Terminal. This app does not log into Overnight accounts."}</p></div>
-          <div className="mt-4 grid gap-2">{state.orchestration.providerRoutes.map((route) => {
-            const command = overnightCliLoginCommand(route.provider);
+          <div className="mt-4 grid gap-2">{officialOvernightCliCards(state.orchestration.providerRoutes).map((cli) => {
             return (
-              <div key={route.provider} className="flex min-h-12 items-center justify-between gap-4 rounded-[12px] border border-line bg-surface/50 px-4 py-2.5">
-                <span className="min-w-0"><strong className="block text-sm">{route.label}</strong><small className="block truncate text-[11px] text-ink-faint">{route.status === "ready" ? (ko ? "설치됨 · Overnight에 사용 가능" : "Installed · ready for Overnight") : (ko ? "설치되지 않음 · PATH에 없음" : "Not installed · not on PATH")}</small><small className="mt-1 block font-mono text-[10px] text-ink-faint">{command ?? (ko ? "Morrow에 포함됨" : "bundled with Morrow")}</small></span>
-                {command && <CopyCommandButton command={command} language={state.language} />}
+              <div key={cli.provider} className="flex min-h-12 items-center justify-between gap-4 rounded-[12px] border border-line bg-surface/50 px-4 py-2.5">
+                <span className="min-w-0"><strong className="block text-sm">{cli.label}</strong><small className="block truncate text-[11px] text-ink-faint">{cli.installed ? (ko ? "설치됨 · Overnight에 사용 가능" : "Installed · ready for Overnight") : (ko ? "설치되지 않음 · PATH에 없음" : "Not installed · not on PATH")}</small><small className="mt-1 block font-mono text-[10px] text-ink-faint">{cli.loginCommand ?? (ko ? "Morrow에 포함됨" : "bundled with Morrow")}</small></span>
+                {cli.loginCommand && <CopyCommandButton command={cli.loginCommand} language={state.language} />}
               </div>
             );
           })}</div>

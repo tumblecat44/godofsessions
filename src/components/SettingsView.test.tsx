@@ -141,19 +141,21 @@ describe("Settings user-facing safety contract", () => {
     expect(document.body).not.toHaveTextContent(/local first|local by default|Pi SDK|Pi runtime/i);
   });
 
-  it("keeps setup for exactly the four Overnight workers out of the Overnight page", async () => {
+  it("always lists the four official Overnight CLIs from PATH, not a canary", () => {
     const verify = vi.fn(async () => undefined);
     render(
       <SettingsView
         state={{
           ...state,
+          providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
           orchestration: {
             ...state.orchestration,
             providerRoutes: [
-              { provider: "claude", label: "Claude Code", status: "blocked", verification: { state: "unsupported", canVerify: false } },
+              { provider: "claude", label: "Claude Code", status: "blocked", reason: "containment unavailable", verification: { state: "unsupported", canVerify: true } },
               { provider: "codex", label: "Codex", status: "setup_required", verification: { state: "not_verified", canVerify: true } },
-              { provider: "grok", label: "Grok Build", status: "blocked", verification: { state: "unsupported", canVerify: false } },
-              { provider: "pi", label: "Pi Agent", status: "blocked", verification: { state: "unsupported", canVerify: false } },
+              { provider: "cursor" as "claude", label: "Cursor", status: "ready" },
+              { provider: "hermes" as "claude", label: "Hermes", status: "ready" },
+              { provider: "openclaw" as "claude", label: "OpenClaw", status: "ready" },
             ],
           },
         }}
@@ -167,14 +169,27 @@ describe("Settings user-facing safety contract", () => {
       />,
     );
 
-    for (const provider of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) {
-      expect(screen.getByText(provider)).toBeInTheDocument();
-    }
-    expect(document.body).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
-    expect(screen.getAllByText(/Not installed/)).toHaveLength(4);
-    expect(screen.getByText("codex login")).toBeInTheDocument();
+    const overnight = screen.getByRole("heading", { name: "Overnight CLIs" }).closest(".settings-section");
+    expect(overnight).toHaveTextContent("Claude Code");
+    expect(overnight).toHaveTextContent("Codex");
+    expect(overnight).toHaveTextContent("Grok Build");
+    expect(overnight).toHaveTextContent("Pi Agent");
+    expect(overnight).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
+    expect(overnight).toHaveTextContent("Installed means the command is on PATH");
+    expect(overnight).toHaveTextContent("Installed · ready for Overnight");
+    expect(overnight).toHaveTextContent("Not installed · not on PATH");
+    expect(overnight).toHaveTextContent("claude auth login");
+    expect(overnight).toHaveTextContent("codex login");
+    expect(overnight).toHaveTextContent("grok");
+    expect(overnight).toHaveTextContent("bundled with Morrow");
+    expect(screen.getByRole("button", { name: "Copy claude auth login" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy codex login" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Safety check" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy grok" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Copy .*Pi|bundled/i })).not.toBeInTheDocument();
+    expect(overnight).not.toHaveTextContent(/Safety check|OS containment|canary/i);
+    expect(overnight?.querySelectorAll("button")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: /Connect/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign in with your Anthropic/ })).toBeInTheDocument();
     expect(verify).not.toHaveBeenCalled();
   });
 
