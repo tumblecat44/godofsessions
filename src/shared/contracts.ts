@@ -15,6 +15,34 @@ export function isOvernightExecutionProvider(value: unknown): value is Overnight
   return typeof value === "string"
     && (OVERNIGHT_EXECUTION_PROVIDERS as readonly string[]).includes(value);
 }
+
+export const OVERNIGHT_STATUSES = ["candidate", "deleted", "cancelled", "running", "ran"] as const;
+export type OvernightStatus = typeof OVERNIGHT_STATUSES[number];
+
+export function isOvernightStatus(value: unknown): value is OvernightStatus {
+  return typeof value === "string"
+    && (OVERNIGHT_STATUSES as readonly string[]).includes(value);
+}
+
+export interface OvernightRecord {
+  id: string;
+  localDate: string;
+  status: OvernightStatus;
+  goal: string;
+  finishCondition: string;
+  workAi: OvernightExecutionProvider;
+  verifyAi: OvernightExecutionProvider;
+  stallHours: number;
+  decisionsLog: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OvernightGenerationRecord {
+  localDate: string;
+  generatedAt: string;
+}
+
 export type OvernightCandidateOrigin = "continuation" | "follow_up" | "proactive" | "batch" | "routine";
 export type OvernightDisposition = "recommend" | "clarify" | "no_run";
 export type OvernightRequestKind = "discover" | "goal";

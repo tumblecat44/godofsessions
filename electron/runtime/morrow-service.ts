@@ -54,6 +54,7 @@ import {
   OvernightPortfolioLedger,
   type OvernightPortfolioAssessmentRecord,
 } from "./overnight-portfolio-ledger";
+import { OvernightStore } from "./overnight-store";
 import {
   OvernightPortfolioService,
   type OvernightPortfolioContainmentControl,
@@ -318,6 +319,7 @@ export class MorrowService {
   private readonly sendEvent: SendEvent;
   private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
   private readonly contextHome?: string;
+  private readonly overnightStore: OvernightStore;
   private readonly overnightPortfolio: MorrowPortfolioService;
   private readonly overnightPortfolioReadiness: OvernightPortfolioReadiness;
   private readonly overnightProviderVerification?: OvernightProviderVerificationPort;
@@ -359,6 +361,7 @@ export class MorrowService {
     this.dailyContextBuilder = options.dailyContextBuilder ?? collectDailyContextForEvaluation;
     this.overnightContextEvaluator = options.overnightContextEvaluator ?? evaluateOvernightContext;
     this.overnightContextModelPort = options.overnightContextModelPort;
+    this.overnightStore = new OvernightStore({ dataDir: options.dataDir });
     const portfolioLedger = new OvernightPortfolioLedger({ dataDir: options.dataDir });
     const providerControlPlane = options.overnightProviderControlPlane?.create({
       approvalClaims: {
