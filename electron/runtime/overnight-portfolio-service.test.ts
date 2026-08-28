@@ -294,21 +294,31 @@ function workspaceHarness() {
   return { manager, allocate };
 }
 
-function sharedWorkspaceHarness(): OvernightPortfolioWorkspaceManager {
+function dirtyIsolatedWorkspaceHarness(): OvernightPortfolioWorkspaceManager {
   const snapshot: OvernightWorkspaceSnapshot = {
     root: "/repo",
     repositoryRoot: "/repo",
     repositoryRevision: "a".repeat(40),
     repositoryRelativeRoot: "",
     workspaceKey: "/repo",
-    isolation: "shared",
+    isolation: "isolated",
     reason: "dirty_git_worktree",
   };
-  const allocation = { ...snapshot, executionRoot: "/repo", worktreeKey: "/repo" };
+  const allocate = vi.fn(async (_snapshot: OvernightWorkspaceSnapshot, planId: string, itemId: string) => ({
+    ...snapshot,
+    executionRoot: `/private/worktrees/${planId}/${itemId}`,
+    worktreeKey: `/private/worktrees/${planId}/${itemId}`,
+    branch: `morrow/overnight/${planId}/${itemId}`,
+  }));
   return {
     inspect: vi.fn(async () => snapshot),
-    plannedAllocation: () => allocation,
-    allocate: vi.fn(async () => allocation),
+    plannedAllocation: (_snapshot, planId, itemId) => ({
+      ...snapshot,
+      executionRoot: `/private/worktrees/${planId}/${itemId}`,
+      worktreeKey: `/private/worktrees/${planId}/${itemId}`,
+      branch: `morrow/overnight/${planId}/${itemId}`,
+    }),
+    allocate,
     resultMetadata: overnightWorkspaceResultMetadata,
   };
 }
@@ -493,19 +503,17 @@ describe("Overnight portfolio service", () => {
     expect(setup.dispatchItem).not.toHaveBeenCalled();
   });
 
-  it("serializes independent V3 items that share one approved workspace without persisting its path", async () => {
+  it("keeps dirty git plans isolated in private worktrees without persisting their paths", async () => {
     const setup = await setupService();
     const containment = containmentControlHarness();
-    const shared = sharedWorkspaceHarness();
+    const dirty = dirtyIsolatedWorkspaceHarness();
     const service = new OvernightPortfolioService({
       ...setup.options,
-      workspace: shared,
+      workspace: dirty,
       containmentControl: containment.control,
     });
     const first = candidate("shared-first", "codex", ["codex:shared-first"]);
     const second = candidate("shared-second", "claude", ["claude:shared-second"]);
-    first.writeScopes = ["*"];
-    second.writeScopes = ["*"];
 
     const result = await service.recommend(
       { requestKind: "explicit", candidates: [first, second] },
@@ -515,9 +523,12 @@ describe("Overnight portfolio service", () => {
       ]),
     );
 
-    expect(result.plan).toMatchObject({ peakParallelism: 1, totalMinutes: 120 });
+    expect(result.plan?.items.every((item) => item.isolation === "isolated")).toBe(true);
+    expect(result.plan?.items.map((item) => item.id)).toEqual(["shared-first", "shared-second"]);
+    expect(result.plan).toMatchObject({ peakParallelism: 2, totalMinutes: 60 });
     const authorityText = await readFile(join(setup.dataDir, "overnight", "portfolios", "plans", "plan_20260826.json"), "utf8");
     expect(authorityText).not.toContain('"worktreeKey":"/repo"');
+    expect(authorityText).not.toContain('"integrationStatus":"shared_workspace"');
     expect(authorityText).toContain('"worktreeKey":"path-free:');
   });
 
@@ -605,19 +616,20 @@ describe("Overnight portfolio service", () => {
     expect(result.assessment.candidates).toHaveLength(5);
   });
 
-  it("keeps every discover outcome when one requires an additional result", async () => {
+  it("preserves independent discover outcomes when a cross-worktree dependency is blocked", async () => {
     const ids = ["primary", "second", "third", "required-setup"];
     const sessions = ids.map((id) => session(`codex:${id}`, "codex", `Prepare ${id}`));
     const candidates = ids.map((id) => candidate(id, "codex", [`codex:${id}`]));
     candidates[0].reasonCodes = [...candidates[0].reasonCodes, "explicit_priority"];
     candidates[0].dependencyKeys = ["required-setup"];
     const setup = await setupService();
-    const service = new OvernightPortfolioService({ ...setup.options, workspace: sharedWorkspaceHarness() });
+    const service = new OvernightPortfolioService({ ...setup.options, workspace: dirtyIsolatedWorkspaceHarness() });
 
     const result = await service.recommend({ requestKind: "discover", candidates }, context(sessions));
 
-    expect(result.plan?.items.map((item) => item.stableKey)).toEqual(ids);
-    expect(result.plan?.totalMinutes).toBe(240);
+    expect(result.scopeDecisionReason).toMatch(/의존 작업 결과|차단된 의존 관계/u);
+    expect(result.plan?.items.map((item) => item.stableKey)).toEqual(["second", "third"]);
+    expect(result.assessment.candidates.map((item) => item.stableKey)).toEqual(ids);
   });
 
   it("collapses proposed mutation scopes to the one root-wide approved boundary", async () => {
@@ -1066,7 +1078,7 @@ describe("Overnight portfolio service", () => {
     expect((await setup.service.snapshotPlans()).map((plan) => plan.id)).toEqual([prepared.plan!.id]);
   });
 
-  it("allows a dependency chain when both items execute in the same shared workspace", async () => {
+  it("plans dirty git overnight items as isolated worktrees and blocks cross-worktree dependencies", async () => {
     const sessions = [
       session("codex:first", "codex", "Fix first transition regression"),
       session("grok:second", "grok", "Fix second transition regression"),
@@ -1074,16 +1086,18 @@ describe("Overnight portfolio service", () => {
     const second = candidate("second", "grok", ["grok:second"]);
     second.dependencyKeys = ["first"];
     const setup = await setupService();
-    const service = new OvernightPortfolioService({ ...setup.options, workspace: sharedWorkspaceHarness() });
+    const workspace = dirtyIsolatedWorkspaceHarness();
+    const service = new OvernightPortfolioService({ ...setup.options, workspace });
 
     const prepared = await service.recommend({
       requestKind: "discover",
       candidates: [candidate("first", "codex", ["codex:first"]), second],
     }, context(sessions));
 
-    expect(prepared.scopeDecisionReason).toBeUndefined();
-    expect(prepared.plan?.items.map((item) => item.id)).toEqual(["first", "second"]);
-    expect(prepared.plan?.items.every((item) => item.isolation === "shared")).toBe(true);
+    expect(await workspace.inspect()).toMatchObject({ isolation: "isolated", reason: "dirty_git_worktree" });
+    expect(prepared.scopeDecisionReason).toMatch(/의존 작업 결과|차단된 의존 관계/u);
+    expect(prepared.plan).toBeUndefined();
+    expect(prepared.assessment.candidates.map((item) => item.stableKey)).toEqual(["first", "second"]);
   });
 
   it("recovers an interrupted run without repeating completed work", async () => {

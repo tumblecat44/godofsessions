@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { access, mkdir, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -31,6 +31,8 @@ export interface OvernightWorkspaceResultMetadata {
 
 export type OvernightGitRunner = (args: readonly string[]) => Promise<string>;
 
+const NOT_A_GIT_ERROR = "Overnight는 git 저장소 안에서만 시작할 수 있습니다.";
+
 export class OvernightWorktreeManager {
   private readonly root: string;
   private readonly dataDir: string;
@@ -58,7 +60,7 @@ export class OvernightWorktreeManager {
         repositoryRevision,
         repositoryRelativeRoot,
         workspaceKey: repositoryRoot,
-        isolation: dirty ? "shared" : "isolated",
+        isolation: "isolated",
         reason: dirty ? "dirty_git_worktree" : "clean_git_worktree",
       };
     } catch {
@@ -68,45 +70,33 @@ export class OvernightWorktreeManager {
 
   async allocate(snapshot: OvernightWorkspaceSnapshot, runId: string, itemId: string): Promise<OvernightWorkspaceAllocation> {
     const root = await realpath(snapshot.root);
-    const canonical = {
-      ...snapshot,
-      root,
-      ...(snapshot.isolation === "shared" ? { workspaceKey: root } : {}),
-    };
+    const canonical = { ...snapshot, root };
+    assertGitWorkspace(canonical);
     const planned = this.plannedAllocation(canonical, runId, itemId);
-    if (canonical.isolation === "shared") {
+    const worktreeRoot = planned.worktreeKey;
+    if (await this.worktreeExists(canonical.repositoryRoot!, worktreeRoot)) {
       return planned;
     }
-    snapshot = canonical;
-    if (!snapshot.repositoryRoot || !snapshot.repositoryRevision || snapshot.repositoryRelativeRoot === undefined) {
-      throw new Error("The approved workspace does not contain a complete frozen git revision.");
-    }
-    const worktreeRoot = planned.worktreeKey;
     await mkdir(dirname(worktreeRoot), { recursive: true, mode: 0o700 });
-    const branch = planned.branch!;
     await this.runGit([
-      "-C", snapshot.repositoryRoot,
-      "worktree", "add", "-b", branch, worktreeRoot, snapshot.repositoryRevision,
+      "-C", canonical.repositoryRoot!,
+      "worktree", "add", "-b", planned.branch!, worktreeRoot, canonical.repositoryRevision!,
     ]);
     return planned;
   }
 
   plannedAllocation(snapshot: OvernightWorkspaceSnapshot, runId: string, itemId: string): OvernightWorkspaceAllocation {
-    if (snapshot.isolation === "shared") {
-      return { ...snapshot, executionRoot: snapshot.root, worktreeKey: snapshot.root };
-    }
-    if (!snapshot.repositoryRoot || !snapshot.repositoryRevision || snapshot.repositoryRelativeRoot === undefined) {
-      throw new Error("The approved workspace does not contain a complete frozen git revision.");
-    }
+    assertGitWorkspace(snapshot);
     const safeRunId = safeSegment(runId, "run id");
     const safeItemId = safeSegment(itemId, "item id");
     const worktreeBase = resolve(this.dataDir, "overnight", "worktrees");
     const worktreeRoot = resolve(worktreeBase, safeRunId, safeItemId);
     assertInside(worktreeBase, worktreeRoot);
-    const executionRoot = resolve(worktreeRoot, snapshot.repositoryRelativeRoot);
+    const executionRoot = resolve(worktreeRoot, snapshot.repositoryRelativeRoot!);
     assertInside(worktreeRoot, executionRoot, true);
     return {
       ...snapshot,
+      isolation: "isolated",
       executionRoot,
       worktreeKey: worktreeRoot,
       branch: `morrow/overnight/${safeRunId}/${safeItemId}`,
@@ -115,6 +105,32 @@ export class OvernightWorktreeManager {
 
   resultMetadata(allocation: OvernightWorkspaceAllocation): OvernightWorkspaceResultMetadata {
     return overnightWorkspaceResultMetadata(allocation);
+  }
+
+  private async worktreeExists(repositoryRoot: string, worktreeRoot: string) {
+    try {
+      await access(worktreeRoot);
+    } catch {
+      return false;
+    }
+    let existing: string;
+    try {
+      existing = await realpath(worktreeRoot);
+    } catch {
+      return false;
+    }
+    const listed = await this.runGit(["-C", repositoryRoot, "worktree", "list", "--porcelain"]);
+    for (const block of listed.split("\n\n")) {
+      const line = block.split("\n").find((entry) => entry.startsWith("worktree "));
+      if (!line) continue;
+      const listedPath = line.slice("worktree ".length);
+      try {
+        if (await realpath(listedPath) === existing) return true;
+      } catch {
+        if (resolve(listedPath) === existing) return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -126,7 +142,7 @@ export function overnightWorkspaceResultMetadata(
     worktreeKey: allocation.worktreeKey,
     ...(allocation.branch ? { branch: allocation.branch } : {}),
     ...(allocation.repositoryRevision ? { baseRevision: allocation.repositoryRevision } : {}),
-    integrationStatus: allocation.isolation === "isolated" ? "not_integrated" : "shared_workspace",
+    integrationStatus: "not_integrated",
   };
 }
 
@@ -142,6 +158,18 @@ function sharedSnapshot(root: string, reason: OvernightWorkspaceSnapshot["reason
     isolation: "shared",
     reason,
   };
+}
+
+function assertGitWorkspace(snapshot: OvernightWorkspaceSnapshot) {
+  if (
+    snapshot.reason === "not_a_git_worktree"
+    || snapshot.isolation === "shared"
+    || !snapshot.repositoryRoot
+    || !snapshot.repositoryRevision
+    || snapshot.repositoryRelativeRoot === undefined
+  ) {
+    throw new Error(NOT_A_GIT_ERROR);
+  }
 }
 
 function safeSegment(value: string, label: string) {
