@@ -123,7 +123,7 @@ export function TonightPlan({
           ? items.map((item, index) => (
               <TonightCard key={item.id} index={index} item={item} checked={checked[item.id] !== false} ko={ko} onToggle={() => setChecked((current) => ({ ...current, [item.id]: current[item.id] === false }))} />
             ))
-          : [0, 1, 2].map((index) => <EmptyTonightCard key={index} index={index} ko={ko} />)}
+          : [0, 1, 2].map((index) => <EmptyTonightCard key={index} index={index} ko={ko} preparing={preparing} />)}
       </div>
       {onSchedule && plan && items.length > 0 && (
         <div className="mt-3 grid gap-2 rounded-[10px] border border-line bg-surface-raised p-3">
@@ -212,7 +212,16 @@ function tonightCopy({
   return ko ? "체크된 일만 시작합니다. 빼거나 Morrow에게 다른 걸 부탁해도 됩니다." : "Only checked work starts. Uncheck any, or tell Morrow you want something else.";
 }
 
-function EmptyTonightCard({ index, ko }: { index: number; ko: boolean }) {
+function EmptyTonightCard({ index, ko, preparing }: { index: number; ko: boolean; preparing?: boolean }) {
+  if (preparing) {
+    return (
+      <div className="min-h-[72px] animate-pulse rounded-[8px] border border-line bg-surface-raised px-2.5 py-2" role="status" aria-label={ko ? "추천 만드는 중" : "Preparing recommendation"}>
+        <small className="font-mono text-[9px] tracking-[0.12em] text-ink-faint">{`OVERNIGHT ${index + 1}`}</small>
+        <span className="mt-1.5 block h-3 w-3/4 rounded bg-line" />
+        <span className="mt-1.5 block h-3 w-1/2 rounded bg-line" />
+      </div>
+    );
+  }
   return (
     <div className="min-h-[72px] rounded-[8px] border border-line bg-surface-raised px-2.5 py-2">
       <small className="font-mono text-[9px] tracking-[0.12em] text-ink-faint">{`OVERNIGHT ${index + 1}`}</small>

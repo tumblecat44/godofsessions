@@ -895,7 +895,10 @@ describe("Overnight portfolio service", () => {
 
     const prepared = await setup.service.recommend({ requestKind: "discover", candidates: [clarify] }, context([selected]));
 
-    expect(prepared.plan).toBeUndefined();
+    // Clarify-only inputs still yield best-effort cards (tonight never stays
+    // empty while plausible work exists), but the stored assessment keeps its
+    // clarify judgment and stays free of raw evidence.
+    expect(prepared.plan?.items.map((item) => item.id)).toEqual(["first"]);
     const assessments = await new OvernightPortfolioService({
       ...setup.options,
       ledger: new OvernightPortfolioLedger({ dataDir: setup.dataDir }),

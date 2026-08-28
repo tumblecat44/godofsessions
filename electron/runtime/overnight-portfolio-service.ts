@@ -263,7 +263,17 @@ export class OvernightPortfolioService {
     }));
     const assessmentId = this.createAssessmentId();
     const createdAt = this.now().toISOString();
-    const allRunnable = assessment.candidates.filter((candidate) => candidate.disposition === "recommend");
+    let allRunnable = assessment.candidates.filter((candidate) => candidate.disposition === "recommend");
+    if (allRunnable.length === 0) {
+      // Tonight should not stay empty while plausible work exists: promote the
+      // best under-specified (clarify) candidates as best-effort cards. Hard
+      // no_run candidates stay out, and the execution boundary below still
+      // gates every promoted item.
+      allRunnable = assessment.candidates
+        .filter((candidate) => candidate.disposition === "clarify")
+        .slice(0, 3)
+        .map((candidate) => ({ ...candidate, disposition: "recommend" as const }));
+    }
     if (allRunnable.length === 0) {
       await this.replaceCurrentNightPlan(undefined, createdAt);
       await this.ledger.saveAssessment(assessmentRecord(

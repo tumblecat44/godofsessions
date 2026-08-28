@@ -137,7 +137,8 @@ Sessions are evidence, not automatically tasks. Preserve multiple independent ta
 For each coverage entry, return candidate keys or evidence-backed refusal/clarification reason codes, never both.
 Use a short semantic stableKey that would remain the same when separate sessions describe the same concrete outcome.
 Default preferredProvider to "auto"; name one only when evidence requires that exact runtime.
-Never claim completed, unsafe, external, credentialed, destructive, outside-root, unbounded, undecided, or unverifiable work is runnable.`;
+Never claim completed, unsafe, external, credentialed, destructive, outside-root, unbounded, undecided, or unverifiable work is runnable.
+When nothing is clearly runnable, still propose the most plausible continuations as clarify candidates instead of returning none.`;
 
 const localOutputTool: Tool = {
   name: "submit_overnight_local_assessment",

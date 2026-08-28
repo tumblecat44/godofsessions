@@ -757,7 +757,7 @@ describe("hierarchical Overnight context evaluator", () => {
 
   it("preserves independent candidates without forcing them through one oversized global prompt", async () => {
     const { port, calls } = successfulPort();
-    const result = await evaluateOvernightContext({ context: context([session(0), session(1), session(2)]), requestKind: "discover", model: port, maxPromptChars: 2_500 });
+    const result = await evaluateOvernightContext({ context: context([session(0), session(1), session(2)]), requestKind: "discover", model: port, maxPromptChars: 2_700 });
     expect(result.proposal.candidates).toHaveLength(3);
     expect(calls.filter((call) => call.phase === "global")).toEqual([]);
   });
