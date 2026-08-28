@@ -33,32 +33,20 @@ npm run landing:deploy
 
 ## Verified launch behavior
 
-- English is the default, and the EN/KO toggle updates all public copy plus the
-  asynchronous artifact status.
+- English is the default public copy.
 - The proof uses the real English app surface and is chapter-seekable at the
   four product decisions.
 - Desktop was checked at 1280×720; mobile was checked at 390×844 with no
   horizontal overflow.
 - The 22-second H.264 proof is silent-first, 1920×1080, and 4.0 MB.
 - The below-fold Morrow art is lazy-loaded as a 63 KB WebP.
-- Missing media has a poster/link fallback; a missing DMG disables the
-  download action instead of serving the site shell.
-
-## Stage the public Universal DMG
-
-The landing expects this local file:
-
-```text
-public/downloads/God-of-Sessions_0.1.0_universal-20260728.dmg
-```
-
-DMGs are intentionally ignored by Git. Public hosting should receive a
-notarized, stapled artifact from the release pipeline rather than a binary
-committed to source control. If the file is absent, the page disables the
-download action instead of sending the user to an HTML fallback.
+- Missing media has a poster/link fallback. Download CTAs use
+  `href="/download/mac"`; the Worker 302s that path to the GitHub latest
+  release when `MACOS_DOWNLOAD_URL` is set.
 
 ## Launch boundary
 
 The public download must be Developer ID signed, Apple notarized, ticket
-stapled, and verified with Gatekeeper before deployment. The current release
-artifact meets those gates and supports Apple Silicon and Intel Macs.
+stapled, and verified with Gatekeeper before a GitHub Release is published.
+Until that published latest asset exists, `/download/mac` still 302s to GitHub
+and GitHub returns 404.
