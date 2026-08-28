@@ -1,12 +1,84 @@
-import { ExternalLink, FolderLock, Github, LogOut, Send, ShieldCheck } from "lucide-react";
-import { officialOvernightCliCards } from "../lib/overnight-cli";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { cn } from "../lib/cn";
+import { officialOvernightCliCards, overnightCliRowCopy } from "../lib/overnight-cli";
 import type { AppLanguage, BootstrapState, GitHubProfile, OvernightExecutionProvider } from "../shared/contracts";
 import { CopyCommandButton } from "./CopyCommandButton";
 import { ProviderConnections } from "./ProviderConnections";
 import { Button } from "./ui/Button";
-import { Surface } from "./ui/Surface";
 
-export function SettingsView({ state, error, githubProfile, githubOffline, onConnect, onDisconnect, onVerifyOvernightProvider, onLanguage, onManageGitHub, onLogoutGitHub }: {
+function SettingsGroup({
+  title,
+  id,
+  children,
+}: {
+  title: string;
+  id?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="settings-section overflow-hidden rounded-panel border border-line bg-surface" id={id}>
+      <div className="border-b border-line px-3 py-2">
+        <h2 className="text-[13px] font-medium tracking-tight text-ink">{title}</h2>
+      </div>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function SettingsRow({
+  label,
+  detail,
+  value,
+  children,
+  onActivate,
+  activateLabel,
+}: {
+  label: string;
+  detail?: string;
+  value?: ReactNode;
+  children?: ReactNode;
+  onActivate?: () => void;
+  activateLabel?: string;
+}) {
+  const body = (
+    <>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-[13px] font-medium text-ink">{label}</span>
+          {value != null ? (
+            typeof value === "string"
+              ? <span className="min-w-0 break-all text-[13px] text-ink-muted">{value}</span>
+              : <span className="min-w-0">{value}</span>
+          ) : null}
+        </div>
+        {detail ? <p className="mt-0.5 text-[12px] leading-4 text-ink-muted">{detail}</p> : null}
+      </div>
+      {children ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-0.5">{children}</div> : null}
+    </>
+  );
+  const rowClass = "flex w-full items-start justify-between gap-3 border-b border-line px-3 py-2 text-left last:border-b-0";
+  if (onActivate) {
+    return (
+      <button type="button" className={`${rowClass} cursor-pointer hover:bg-white/[0.02]`} aria-label={activateLabel} onClick={onActivate}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={rowClass}>{body}</div>;
+}
+
+export function SettingsView({
+  state,
+  error,
+  githubProfile,
+  githubOffline,
+  onConnect,
+  onDisconnect,
+  onLanguage,
+  onManageGitHub,
+  onLogoutGitHub,
+  onRevealOvernightStore,
+}: {
   state: BootstrapState;
   error?: string;
   githubProfile?: GitHubProfile;
@@ -17,75 +89,156 @@ export function SettingsView({ state, error, githubProfile, githubOffline, onCon
   onLanguage(language: AppLanguage): Promise<void>;
   onManageGitHub(): Promise<void>;
   onLogoutGitHub(): Promise<void>;
+  onRevealOvernightStore(): void;
 }) {
   const ko = state.language === "ko";
+  const connectedProvider = state.providers.find((provider) => provider.connected);
+  const connectedCount = state.providers.filter((provider) => provider.connected).length;
+  const [modelPickerOpen, setModelPickerOpen] = useState(connectedCount === 0);
+  const previousConnectedCount = useRef(connectedCount);
+
+  useEffect(() => {
+    const previous = previousConnectedCount.current;
+    if (previous === 0 && connectedCount >= 1) setModelPickerOpen(false);
+    if (previous >= 1 && connectedCount === 0) setModelPickerOpen(true);
+    previousConnectedCount.current = connectedCount;
+  }, [connectedCount]);
+
+  const conversationValue = connectedProvider
+    ? `${connectedProvider.name} · ${ko ? "연결됨" : "Connected"}`
+    : (ko ? "하나를 연결하세요." : "Connect one.");
+
   return (
-    <main className="settings-view morrow-settings h-dvh overflow-y-auto bg-night px-[clamp(32px,5vw,80px)] pb-16 pt-[clamp(58px,7vh,82px)] text-ink max-[1120px]:px-9">
-      <div className="mx-auto w-full max-w-[1080px]">
-        <header className="settings-header mb-0 border-b border-line pb-7">
-          <div>
-            <span className="eyebrow font-mono text-[10px] font-semibold tracking-[0.16em] text-amber">MORROW · SETTINGS</span>
-            <h1 className="mt-3 text-[clamp(38px,4vw,54px)] font-medium leading-[0.98] tracking-[-0.045em] text-ink">{ko ? "연결과 기본 설정" : "Connections & preferences"}</h1>
-            <p className="mt-3 max-w-[660px] text-sm leading-6 text-ink-muted">{ko ? "Morrow 대화 모델, Overnight CLI, 앱 언어, 파일 작업 범위를 확인합니다." : "Review Morrow’s conversation model, Overnight CLIs, app language, and file working boundary."}</p>
-          </div>
-        </header>
+    <main className="settings-view morrow-settings h-dvh overflow-y-auto bg-night px-8 pb-12 pt-12 text-ink max-[1120px]:px-6">
+      <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-3">
+        <h1 className="text-2xl font-medium leading-none tracking-[-0.03em] text-ink">{ko ? "설정" : "Settings"}</h1>
 
-        <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
-          <div className="settings-section__intro">
-            <h2 className="flex items-center gap-2 text-base font-semibold"><FolderLock size={18} />{ko ? "파일 작업 폴더" : "File working folder"}</h2>
-            <p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "Morrow가 파일 관련 부탁을 처리할 때 기준이 되는 폴더입니다. 파일 변경과 명령은 실행 전에 확인합니다." : "This is the default boundary for Morrow’s file-related work. File changes and commands are confirmed before they run."}</p>
-          </div>
-          <div className="mt-4 rounded-[14px] border border-amber/20 bg-amber/[0.035] px-4 py-3.5">
-            <span className="block font-mono text-[9px] tracking-[0.12em] text-amber">{ko ? "현재 파일 작업 범위" : "CURRENT FILE BOUNDARY"}</span>
-            <code className="mt-2 block break-all text-[13px] leading-6 text-ink">{state.rootPath}</code>
-            <small className="mt-2 block text-[11px] leading-5 text-ink-faint">{ko ? "이 폴더 안의 파일 변경만 한 대화 동안 기억할 수 있습니다. 폴더 밖 변경은 매번 별도 확인이 필요하고, 밤새 작업에는 포함할 수 없습니다." : "Only changes inside this folder can be remembered for one conversation. Changes outside it require separate confirmation every time and cannot be included in overnight work."}</small>
-          </div>
-        </Surface>
+        <SettingsGroup title="Morrow" id="morrow-conversation-model">
+          <SettingsRow
+            label={ko ? "대화 모델" : "Conversation model"}
+            value={conversationValue}
+          >
+            {connectedProvider ? (
+              <>
+                <Button size="sm" onClick={() => setModelPickerOpen((open) => !open)}>
+                  {ko ? "바꾸기" : "Change"}
+                </Button>
+                <Button variant="danger" size="sm" className="danger-subtle" onClick={() => void onDisconnect(connectedProvider.id)}>
+                  {ko ? "연결 해제" : "Disconnect"}
+                </Button>
+              </>
+            ) : null}
+          </SettingsRow>
+          {error ? (
+            <div className="settings-error border-b border-line px-4 py-3 text-sm text-danger" role="alert">
+              {ko ? "Morrow가 연결을 마치지 못했어요." : "Morrow couldn’t complete that connection."}
+              <small className="block pt-1 opacity-80">{error}</small>
+            </div>
+          ) : null}
+          {modelPickerOpen ? (
+            <div className="px-4 py-3">
+              <ProviderConnections state={state} language={state.language} compact onConnect={onConnect} onDisconnect={onDisconnect} />
+            </div>
+          ) : null}
+        </SettingsGroup>
 
-        <Surface className="settings-section github-account-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
-          <div className="settings-section__intro">
-            <h2 className="flex items-center gap-2 text-base font-semibold"><Github size={18} />{ko ? "GitHub 계정" : "GitHub account"}</h2>
-            <p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "God of Sessions를 시작할 때 확인한 신원입니다. 저장소나 이메일 권한은 요청하지 않습니다." : "The identity verified when you started God of Sessions. Repository and email access are not requested."}</p>
-          </div>
-          <div className="github-account-card mt-4 flex items-center justify-between gap-5 rounded-[14px] border border-line bg-white/[0.018] px-4 py-3.5">
-            <span className="flex flex-col gap-1"><strong className="text-[15px]">@{githubProfile?.login ?? (ko ? "알 수 없는 사용자" : "Unknown user")}</strong><small className="text-[11px] text-ink-faint">{githubOffline ? (ko ? "오프라인 · 마지막으로 확인된 로그인 사용 중" : "Offline · using the last verified sign-in") : (ko ? "GitHub로 확인됨" : "Verified by GitHub")}</small></span>
-            <div className="flex gap-2"><Button size="sm" onClick={() => void onManageGitHub()}><ExternalLink size={13} />{ko ? "권한 관리" : "Manage access"}</Button><Button variant="danger" size="sm" className="danger-subtle" onClick={() => void onLogoutGitHub()}><LogOut size={13} />{ko ? "로그아웃" : "Sign out"}</Button></div>
-          </div>
-        </Surface>
-
-        <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
-          <div className="settings-section__intro" id="morrow-conversation-model"><h2 className="text-base font-semibold">{ko ? "Morrow 대화 모델" : "Morrow conversation model"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "하나를 연결하면 Morrow가 대화하고, 오늘 밤 카드 최대 3장을 고를 수 있습니다. 로그인은 각 서비스의 공식 흐름으로 이뤄집니다." : "Connect one so Morrow can talk and pick tonight’s 3 cards. Sign-in uses that service’s official login or API key flow."}</p></div>
-          {error && <div className="settings-error mt-4 rounded-control border border-danger/25 bg-danger/[0.06] px-4 py-3 text-sm text-danger" role="alert">{ko ? "Morrow가 연결을 마치지 못했어요." : "Morrow couldn’t complete that connection."} <small className="block pt-1 opacity-80">{error}</small></div>}
-          <ProviderConnections state={state} language={state.language} compact onConnect={onConnect} onDisconnect={onDisconnect} />
-        </Surface>
-
-        <Surface className="settings-section mt-0 rounded-t-none border-t-0 p-5 shadow-none">
-          <div className="settings-section__intro"><h2 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck size={18} />{ko ? "Overnight CLI" : "Overnight CLIs"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "설치됨은 PATH에서 명령을 찾았다는 뜻입니다. 로그인 명령을 복사해 Terminal에서 실행하세요. 이 앱 안에서 Overnight 계정에 로그인하지 않습니다." : "Installed means the command is on PATH. Copy a login command and run it in Terminal. This app does not log into Overnight accounts."}</p></div>
-          <div className="mt-4 grid gap-2">{officialOvernightCliCards(state.orchestration.providerRoutes).map((cli) => {
+        <SettingsGroup title="Overnight">
+          {officialOvernightCliCards(state.orchestration.providerRoutes).map((cli) => {
+            const row = overnightCliRowCopy(cli, state.language);
             return (
-              <div key={cli.provider} className="flex min-h-12 items-center justify-between gap-4 rounded-[12px] border border-line bg-surface/50 px-4 py-2.5">
-                <span className="min-w-0"><strong className="block text-sm">{cli.label}</strong><small className="block truncate text-[11px] text-ink-faint">{cli.installed ? (ko ? "설치됨 · Overnight에 사용 가능" : "Installed · ready for Overnight") : (ko ? "설치되지 않음 · PATH에 없음" : "Not installed · not on PATH")}</small><small className="mt-1 block font-mono text-[10px] text-ink-faint">{cli.loginCommand ?? (ko ? "Morrow에 포함됨" : "bundled with Morrow")}</small></span>
-                {cli.loginCommand && <CopyCommandButton command={cli.loginCommand} language={state.language} />}
-              </div>
+              <SettingsRow
+                key={cli.provider}
+                label={cli.label}
+                value={<OvernightCliStatus tone={row.tone}>{row.status}</OvernightCliStatus>}
+                detail={row.detail}
+              >
+                {row.showLogin && cli.loginCommand
+                  ? <CopyCommandButton command={cli.loginCommand} language={state.language} />
+                  : null}
+              </SettingsRow>
             );
-          })}</div>
-        </Surface>
+          })}
+        </SettingsGroup>
 
-        <Surface className="settings-section settings-grid mt-0 flex items-center justify-between gap-6 rounded-t-none border-t-0 p-5 shadow-none">
-          <div><h2 className="text-base font-semibold">{ko ? "대화 언어" : "Conversation language"}</h2><p className="mt-1.5 text-[13px] leading-5 text-ink-muted">{ko ? "Morrow 화면의 언어만 바꾸며, 사용하는 모델은 바뀌지 않습니다." : "This changes Morrow’s interface language, not the model you use."}</p></div>
-          <div className="segmented flex shrink-0 rounded-[13px] border border-line bg-night p-1">
-            <Button variant="ghost" size="sm" className={state.language === "en" ? "is-selected bg-surface-raised text-ink" : ""} onClick={() => void onLanguage("en")}>English</Button>
-            <Button variant="ghost" size="sm" className={state.language === "ko" ? "is-selected bg-surface-raised text-ink" : ""} onClick={() => void onLanguage("ko")}>한국어</Button>
-          </div>
-        </Surface>
+        <SettingsGroup title={ko ? "앱" : "App"}>
+          <SettingsRow label={ko ? "화면 언어" : "Language"}>
+            <div className="segmented flex shrink-0 rounded-[8px] border border-line bg-night p-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={state.language === "en" ? "is-selected bg-surface-raised text-ink" : ""}
+                onClick={() => void onLanguage("en")}
+              >
+                English
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={state.language === "ko" ? "is-selected bg-surface-raised text-ink" : ""}
+                onClick={() => void onLanguage("ko")}
+              >
+                한국어
+              </Button>
+            </div>
+          </SettingsRow>
+          <SettingsRow
+            label={ko ? "작업 폴더" : "Working folder"}
+            value={<code className="font-mono text-[13px] text-ink">{state.rootPath}</code>}
+          />
+          <SettingsRow
+            label="GitHub"
+            detail={
+              githubOffline
+                ? (ko ? "오프라인 · 마지막으로 확인된 로그인 사용 중" : "Offline · using the last verified sign-in")
+                : (ko ? "GitHub로 확인됨" : "Verified by GitHub")
+            }
+            value={`@${githubProfile?.login ?? (ko ? "알 수 없는 사용자" : "Unknown user")}`}
+          >
+            <Button size="sm" onClick={() => void onManageGitHub()}>{ko ? "권한 관리" : "Manage access"}</Button>
+            <Button variant="danger" size="sm" className="danger-subtle" onClick={() => void onLogoutGitHub()}>
+              {ko ? "로그아웃" : "Sign out"}
+            </Button>
+          </SettingsRow>
+        </SettingsGroup>
 
-        <Surface className="settings-section trust-note mt-0 flex gap-4 rounded-t-none border-t-0 p-5 shadow-none">
-          <span className="grid size-9 shrink-0 place-items-center rounded-[11px] bg-amber/10 text-amber"><Send size={18} /></span>
-          <div><h2 className="text-base font-semibold">{ko ? "이 Mac 밖으로 보내는 내용" : "What leaves this Mac"}</h2><p className="mt-1.5 max-w-[900px] text-[13px] leading-5 text-ink-muted">{ko ? "대화 기록과 승인 내역은 이 Mac의 앱 데이터에 저장됩니다. 답변이나 작업을 요청하면 필요한 입력과 작업 내용은 선택한 AI 서비스로 전송되며, 해당 서비스의 데이터 정책이 적용됩니다." : "Conversation history and approvals are stored in this Mac’s app data. When you request an answer or task, the required input and work content are sent to the selected AI service under that service’s data policy."}</p></div>
-        </Surface>
+        <SettingsGroup title={ko ? "데이터" : "Data"}>
+          <SettingsRow
+            label={ko ? "이 Mac 밖으로 보내는 내용" : "What leaves this Mac"}
+            detail={ko ? "기록은 이 Mac에 남습니다. 프롬프트는 고른 모델로 갑니다." : "History stays on this Mac. Prompts go to the model you picked."}
+            activateLabel={ko ? "로컬 데이터 폴더 열기" : "Open the local data folder"}
+            onActivate={onRevealOvernightStore}
+          />
+        </SettingsGroup>
       </div>
     </main>
   );
 }
 
-
+function OvernightCliStatus({
+  tone,
+  children,
+}: {
+  tone: "ready" | "action" | "muted";
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-[0.04em]",
+        tone === "ready" && "rounded-full bg-teal/[0.14] px-2 py-0.5 text-teal",
+        tone === "action" && "text-amber",
+        tone === "muted" && "text-ink-muted",
+      )}
+      role="status"
+    >
+      <i
+        className={cn(
+          "size-1.5 rounded-full",
+          tone === "ready" ? "bg-teal" : tone === "action" ? "bg-amber" : "bg-ink-faint",
+        )}
+        aria-hidden
+      />
+      {children}
+    </span>
+  );
+}

@@ -4,15 +4,15 @@ Overnight work is a local official CLI, the same class of command as `claude -p`
 
 ## Sub-features
 
-- `spawn-official` starts `claude`, `codex`, `grok`, or bundled Pi, matching the card's worker.
+- `spawn-official` starts `claude`, `codex`, or `grok`, matching the card's worker. Pi Agent is not a live worker.
 - `in-root` mutates only the approved execution root.
 - `receipt-on-card` leaves a provider receipt and morning-check evidence on the Overnight card.
-- `skip-if-missing` exits 2 when none of the four CLIs are on PATH, without claiming pass.
+- `skip-if-missing` exits 2 when none of `claude`, `codex`, or `grok` are on PATH, without claiming pass.
 
 ## How to get to it (user POV)
 
 - Install and log in with the official CLI.
-- Confirm Settings shows Installed.
+- Confirm Settings shows Ready for Overnight for the signed-in CLI.
 - Start a checked card that names that CLI.
 - In the morning, open the card and read the result.
 

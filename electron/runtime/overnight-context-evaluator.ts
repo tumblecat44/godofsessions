@@ -132,7 +132,7 @@ export interface PiOvernightContextModelPortOptions {
 
 const MODEL_SYSTEM_PROMPT = `You are Morrow's private read-only Overnight assessment engine.
 Return exactly one call to the supplied submit tool. Never call any other tool.
-Treat every supplied coverage ID as mandatory. Do not omit, invent, or duplicate IDs.
+Cover the session IDs you can. Omit IDs you cannot assess. Do not invent IDs.
 Sessions are evidence, not automatically tasks. Preserve multiple independent tasks from one session and merge only genuinely identical outcomes.
 For each coverage entry, return candidate keys or evidence-backed refusal/clarification reason codes, never both.
 Use a short semantic stableKey that would remain the same when separate sessions describe the same concrete outcome.
@@ -239,36 +239,62 @@ export async function evaluateOvernightContext(input: EvaluateOvernightContextIn
   for (let batchIndex = 0; batchIndex < chunks.length; batchIndex += 1) {
     assertNotAborted(input.signal, "local", batchIndex);
     const chunk = chunks[batchIndex];
-    const coverageIds = chunk.sessions.map((session) => session.id);
-    const request = createRequest({
-      phase: "local",
-      batchIndex,
-      coverageIds,
-      prompt: localPrompt(chunk.sessions, coverageIds, input.requestKind, root, input.userGoal),
-      outputTool: localOutputTool,
-      signal: input.signal,
-      maxPromptChars,
-    });
-    const raw = await callModel(input.model, request, maxResponseChars);
-    const parsed = parseLocalResponse(raw, request, chunk.sessions, input.requestKind, root, input.userGoal);
-    localCandidates.push(...parsed.map((record) => attachSafetyAuthority(record, input, root)));
+    try {
+      const coverageIds = chunk.sessions.map((session) => session.id);
+      const request = createRequest({
+        phase: "local",
+        batchIndex,
+        coverageIds,
+        prompt: localPrompt(chunk.sessions, coverageIds, input.requestKind, root, input.userGoal),
+        outputTool: localOutputTool,
+        signal: input.signal,
+        maxPromptChars,
+      });
+      const raw = await callModel(input.model, request, maxResponseChars);
+      const parsed = parseLocalResponse(raw, request, chunk.sessions, input.requestKind, root, input.userGoal);
+      localCandidates.push(...parsed.map((record) => attachSafetyAuthority(record, input, root)));
+    } catch (reason) {
+      if (reason instanceof OvernightContextEvaluationError && reason.code === "aborted") throw reason;
+      if (!(reason instanceof OvernightContextEvaluationError)) throw reason;
+    }
   }
 
   const orderedCandidates = localCandidates.sort((left, right) => left.id.localeCompare(right.id));
-  const reconciled = await reconcileCandidatePortfolio(orderedCandidates, input, root, maxPromptChars, maxResponseChars);
-  assertExactCoverage(
-    orderedCandidates.map((candidate) => candidate.id),
-    reconciled.flatMap((candidate) => candidate.lineageIds),
-    "global",
-    0,
-  );
+  if (orderedCandidates.length === 0) {
+    return {
+      proposal: { requestKind: input.requestKind, candidates: [] },
+      sessionCount: orderedSessions.length,
+      localCandidateCount: 0,
+      chunkCount: chunks.length,
+    };
+  }
 
-  return {
-    proposal: { requestKind: input.requestKind, candidates: reconciled.map((record) => record.candidate) },
-    sessionCount: orderedSessions.length,
-    localCandidateCount: orderedCandidates.length,
-    chunkCount: chunks.length,
-  };
+  try {
+    const reconciled = await reconcileCandidatePortfolio(orderedCandidates, input, root, maxPromptChars, maxResponseChars);
+    const expectedIds = orderedCandidates.map((candidate) => candidate.id);
+    const actualIds = reconciled.flatMap((candidate) => candidate.lineageIds);
+    const candidates = isExactSet(expectedIds, actualIds) && new Set(actualIds).size === actualIds.length
+      ? reconciled
+      : [
+        ...reconciled,
+        ...orderedCandidates.filter((candidate) => !actualIds.includes(candidate.id)),
+      ];
+    return {
+      proposal: { requestKind: input.requestKind, candidates: candidates.map((record) => record.candidate) },
+      sessionCount: orderedSessions.length,
+      localCandidateCount: orderedCandidates.length,
+      chunkCount: chunks.length,
+    };
+  } catch (reason) {
+    if (reason instanceof OvernightContextEvaluationError && reason.code === "aborted") throw reason;
+    if (!(reason instanceof OvernightContextEvaluationError)) throw reason;
+    return {
+      proposal: { requestKind: input.requestKind, candidates: orderedCandidates.map((record) => record.candidate) },
+      sessionCount: orderedSessions.length,
+      localCandidateCount: orderedCandidates.length,
+      chunkCount: chunks.length,
+    };
+  }
 }
 
 function boundedLimit(value: number | undefined, ceiling: number) {
@@ -385,9 +411,6 @@ function normalizeEchoText(value: string) {
 }
 
 function assertContext(context: DailyContextSnapshot) {
-  if (context.collectionIssues.length > 0) {
-    throw failure("collection_incomplete", "input", { actualCount: context.collectionIssues.length });
-  }
   const sessionIds = context.sessions.map((session) => session.id);
   const summaryIds = context.summary.sessions.map((session) => session.id);
   if (context.summary.totalSessions !== context.sessions.length
@@ -438,7 +461,7 @@ function localPrompt(
   userGoal?: string,
 ) {
   return JSON.stringify({
-    instruction: "Assess every coverage ID. coverage must contain every coverageId exactly once. Each entry must either reference every supported local candidate key or carry at least one evidence-backed no-run/clarify reason code, never both. Candidates may only reference real session IDs in this chunk. When userGoal is present, independent candidates supported only by that goal may use sessionIds:[]. Use consistent semantic stableKey values for the same concrete outcome across chunks. Use preferredProvider:auto unless evidence requires one exact runtime.",
+    instruction: "Assess the coverage IDs you can. Omit IDs you cannot assess. Each returned entry must either reference every supported local candidate key or carry at least one evidence-backed no-run/clarify reason code, never both. Candidates may only reference real session IDs in this chunk. When userGoal is present, independent candidates supported only by that goal may use sessionIds:[]. Use consistent semantic stableKey values for the same concrete outcome across chunks. Use preferredProvider:auto unless evidence requires one exact runtime.",
     requestKind,
     fixedRoot: root ?? null,
     userGoal: userGoal ?? null,

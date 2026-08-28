@@ -10,10 +10,10 @@ The current tree is a pre-release alpha. macOS is the primary development target
 
 ## Features
 
-- **Ask Morrow** — a conversation-first assistant. It uses files and commands only when you ask for work that needs them.
+- **Ask Morrow** — a conversation-first assistant on the model you connect through the Pi Agent SDK. It uses files and commands only when you ask for work that needs them.
 - **Tonight cards** — up to three Overnight cards on chat, all checked. Start runs only the cards you leave checked.
 - **Overnight** — one Kanban per card, recovered after restart with the provider's own receipt.
-- **Four local routes** — Claude Code, Codex, Grok Build, and Pi Agent. A route is Ready when its official CLI is on PATH.
+- **Overnight workers** — Claude Code, Codex, and Grok Build when their official CLI is on PATH. Pi Agent is listed and not Ready. These workers run only after Start.
 - **GitHub identity** — first-run Device Flow with no repository, source-code, organization, or email access.
 - **Approvals** — writes and shell commands pause for a readable card before they run.
 
@@ -30,7 +30,7 @@ npm run dev
 
 The first window asks you to continue with GitHub. That identity is separate from model-provider login. Connect a conversation model in Settings, then talk on Ask Morrow.
 
-Overnight needs an official CLI on PATH. Missing CLIs show as Setup or Blocked in Settings; PATH presence is not a security claim.
+Overnight needs an official CLI on PATH. Claude Code, Codex, and Grok Build show as Ready when that command is on PATH. Pi Agent stays Blocked. PATH presence is not a security claim.
 
 Packaged macOS output (unsigned smoke build):
 

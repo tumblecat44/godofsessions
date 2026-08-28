@@ -93,13 +93,17 @@ describe("V2 navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
-    expect(screen.queryByText("GOD OF SESSIONS")).not.toBeInTheDocument();
+    const rail = screen.getByRole("navigation", { name: "Workspace" }).closest("aside");
+    expect(rail).toHaveClass("is-collapsed");
     expect(screen.queryByRole("button", { name: /Night plan/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ask Morrow" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask Morrow" }).querySelector("svg")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overnight" }).querySelector("svg")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" }).querySelector("svg")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
 
     fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
 
+    expect(rail).not.toHaveClass("is-collapsed");
     expect(screen.getByText("GOD OF SESSIONS")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Night plan/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute("aria-expanded", "true");
@@ -120,9 +124,10 @@ describe("V2 navigation", () => {
     try {
       render(<Sidebar view="chat" language="ko" conversations={conversations} {...noop} />);
 
-      expect(screen.queryByText("GOD OF SESSIONS")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "사이드바 펼치기" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Morrow에게 묻기" }).querySelector("svg")).toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "화면" }).closest("aside")).toHaveClass("is-collapsed");
+      expect(screen.queryByRole("button", { name: /Night plan/ })).not.toBeInTheDocument();
     } finally {
       window.matchMedia = matchMedia;
     }

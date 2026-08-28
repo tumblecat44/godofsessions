@@ -16,7 +16,7 @@ export function CopyCommandButton({ command, language }: { command: string; lang
         }).catch(() => undefined);
       }}
     >
-      {copied ? <><Check size={14} />{ko ? "복사됨" : "Copied"}</> : (ko ? "명령 복사" : "Copy command")}
+      {copied ? <><Check size={14} />{ko ? "복사됨" : "Copied"}</> : (ko ? "로그인 복사" : "Copy login")}
     </Button>
   );
 }

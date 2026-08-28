@@ -5,6 +5,8 @@ import {
   officialOvernightCliCards,
   overnightCliInstalledOnPath,
   overnightCliLoginCommand,
+  overnightCliRowCopy,
+  overnightCliUsableForOvernight,
 } from "./overnight-cli";
 
 function route(
@@ -17,18 +19,18 @@ function route(
 
 describe("official Overnight CLIs", () => {
   it("names exactly the four official workers", () => {
-    expect(OFFICIAL_OVERNIGHT_CLIS.map((cli) => [cli.provider, cli.label])).toEqual([
-      ["claude", "Claude Code"],
-      ["codex", "Codex"],
-      ["grok", "Grok Build"],
-      ["pi", "Pi Agent"],
+    expect(OFFICIAL_OVERNIGHT_CLIS.map((cli) => [cli.provider, cli.label, cli.kind])).toEqual([
+      ["claude", "Claude Code", "cli"],
+      ["codex", "Codex", "cli"],
+      ["grok", "Grok Build", "cli"],
+      ["pi", "Pi Agent", "conversation-sdk"],
     ]);
   });
 
-  it("returns the official login command, and none for bundled Pi", () => {
+  it("returns the official login command, and none for Pi Agent", () => {
     expect(overnightCliLoginCommand("claude")).toBe("claude auth login");
     expect(overnightCliLoginCommand("codex")).toBe("codex login");
-    expect(overnightCliLoginCommand("grok")).toBe("grok");
+    expect(overnightCliLoginCommand("grok")).toBe("grok login");
     expect(overnightCliLoginCommand("pi")).toBeUndefined();
   });
 
@@ -37,8 +39,9 @@ describe("official Overnight CLIs", () => {
     expect(overnightCliInstalledOnPath("claude", route("claude", "blocked"))).toBe(true);
     expect(overnightCliInstalledOnPath("codex", route("codex", "setup_required"))).toBe(false);
     expect(overnightCliInstalledOnPath("grok")).toBe(false);
-    expect(overnightCliInstalledOnPath("pi")).toBe(true);
-    expect(overnightCliInstalledOnPath("pi", route("pi", "blocked"))).toBe(true);
+    expect(overnightCliInstalledOnPath("pi")).toBe(false);
+    expect(overnightCliInstalledOnPath("pi", route("pi", "blocked"))).toBe(false);
+    expect(overnightCliInstalledOnPath("pi", route("pi", "ready"))).toBe(true);
   });
 
   it("always returns the four official cards and ignores evidence-only names", () => {
@@ -51,12 +54,43 @@ describe("official Overnight CLIs", () => {
     ]);
 
     expect(cards.map((card) => card.label)).toEqual(["Claude Code", "Codex", "Grok Build", "Pi Agent"]);
-    expect(cards.map((card) => card.installed)).toEqual([true, false, false, true]);
+    expect(cards.map((card) => card.installed)).toEqual([true, false, false, false]);
+    expect(cards.map((card) => card.kind)).toEqual(["cli", "cli", "cli", "conversation-sdk"]);
     expect(cards.map((card) => card.loginCommand)).toEqual([
       "claude auth login",
       "codex login",
-      "grok",
+      "grok login",
       undefined,
     ]);
+    expect(cards.map((card) => card.usable)).toEqual([false, false, false, false]);
+  });
+
+  it("marks a signed-in PATH CLI as usable for Overnight", () => {
+    const cards = officialOvernightCliCards([
+      { provider: "claude", label: "Claude Code", status: "ready", authentication: "signed_in" },
+      { provider: "codex", label: "Codex", status: "ready", authentication: "signed_out" },
+      { provider: "grok", label: "Grok Build", status: "setup_required" },
+      { provider: "pi", label: "Pi Agent", status: "blocked", authentication: "unknown" },
+    ]);
+    expect(cards.map((card) => [card.label, card.usable, overnightCliRowCopy(card, "en").status])).toEqual([
+      ["Claude Code", true, "Ready for Overnight"],
+      ["Codex", false, "Sign in from Terminal"],
+      ["Grok Build", false, "Not installed"],
+      ["Pi Agent", false, "Not ready for Overnight"],
+    ]);
+    expect(overnightCliUsableForOvernight("cli", true, "signed_in")).toBe(true);
+    expect(overnightCliUsableForOvernight("conversation-sdk", true, "signed_in")).toBe(false);
+    expect(overnightCliRowCopy(cards[0], "ko")).toMatchObject({ status: "Overnight에 사용 가능", showLogin: false, tone: "ready" });
+    expect(overnightCliRowCopy(cards[1], "en").showLogin).toBe(true);
+    expect(overnightCliRowCopy({
+      kind: "cli",
+      installed: true,
+      authentication: "unknown",
+    }, "ko")).toMatchObject({ status: "확인 중", showLogin: false });
+    expect(overnightCliRowCopy({
+      kind: "cli",
+      installed: true,
+      authentication: "unknown",
+    }, "en")).toMatchObject({ status: "Checking", showLogin: false });
   });
 });

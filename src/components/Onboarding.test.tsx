@@ -28,6 +28,7 @@ const baseState: BootstrapState = {
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
   },
 };
 
@@ -69,7 +70,7 @@ describe("Morrow onboarding product contract", () => {
     renderOnboarding();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
 
-    const portfolioCopy = screen.getByText(/Morrow builds tonight's exact outcomes from whichever of Claude Code/);
+    const portfolioCopy = screen.getByText(/Morrow names Claude Code, Codex, Grok Build, and Pi Agent/);
     for (const agent of ["Claude Code", "Codex", "Grok Build", "Pi Agent"]) {
       expect(portfolioCopy).toHaveTextContent(agent);
     }

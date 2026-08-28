@@ -32,6 +32,7 @@ function orchestration(overrides: Partial<OrchestrationSnapshot> = {}): Orchestr
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
     ...overrides,
   };
 }
@@ -78,8 +79,12 @@ function morrowBridge(overrides: Partial<MorrowBridge> = {}): MorrowBridge {
     verifyOvernightProvider: vi.fn(async () => orchestration()),
     startOvernightPortfolio: vi.fn(async () => { throw new Error("not prepared"); }),
     stopOvernightPortfolio: vi.fn(async () => undefined),
+    scheduleOvernightNight: vi.fn(async () => orchestration()),
+    cancelOvernightNight: vi.fn(async () => orchestration()),
+    overnightBranchLog: vi.fn(async () => ""),
     openExternal: vi.fn(async () => undefined),
     revealRoot: vi.fn(async () => undefined),
+    revealOvernightStore: vi.fn(async () => undefined),
     onEvent: () => () => undefined,
     ...overrides,
   };
@@ -328,7 +333,7 @@ describe("App Overnight integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
     expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
-    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 
@@ -486,14 +491,14 @@ describe("Korean language toggle", () => {
     const { rerender } = render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "한국어" }));
     await waitFor(() => expect(finishOnboarding).toHaveBeenCalledWith({ language: "ko" }));
 
     expect(screen.getByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "설정" })).toBeInTheDocument();
   });
 
   it("survives a reload after Korean is persisted", async () => {

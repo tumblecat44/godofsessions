@@ -1,18 +1,18 @@
 # Four routes
 
-New Overnight execution has exactly four workers: Claude Code, Codex, Grok Build, and Pi Agent. A route can run when its official CLI is on PATH. Cursor, Hermes, and OpenClaw may feed read-only session evidence and cannot be started.
+New Overnight execution names four routes: Claude Code, Codex, Grok Build, and Pi Agent. Claude Code, Codex, and Grok Build can run when their official CLI is on PATH. Pi Agent is listed and not Ready. Cursor, Hermes, and OpenClaw may feed read-only session evidence and cannot be started.
 
 ## Sub-features
 
 - `official-four` is the only execution set on tonight cards, Overnight cards, and Settings CLI cards.
-- `path-ready` marks a route Ready/Installed when the binary is on PATH.
+- `path-ready` marks a CLI route Ready/Installed when the binary is on PATH. Pi Agent stays not Ready.
 - `evidence-only` never offers Cursor, Hermes, or OpenClaw as a startable worker.
 - `no-codex-only-gate` does not block Claude, Grok, or Pi solely because a containment canary is missing.
 
 ## How to get to it (user POV)
 
 - Read tonight cards. Each names one of the four.
-- Read Settings Overnight CLIs.
+- Read Settings Overnight.
 - Try to pick a fifth worker. There is no such control.
 
 ## Driving it with drive.mjs

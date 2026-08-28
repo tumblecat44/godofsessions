@@ -41,17 +41,17 @@ reconciled in bounded batches and rounds rather than one repository-wide global
 call. System prompt, tool schema, and input together must stay at or below
 80,000 characters for every call.
 
-Every discovered session ID must appear exactly once in local coverage, and
-every local candidate ID must be accounted for exactly once: either preserved
-directly by the host or included exactly once across the bounded global
-reconciliation batches and rounds. A failed batch or round, missing or
-duplicate ID, malformed response, partial collection, or oversized call or
-response stops the whole recommendation. No partial proposal reaches the
-portfolio service. The host restores exact session evidence, exclusions,
-conflicts, and write scopes from local authority after semantic grouping, so
-the global model cannot invent or erase that evidence. Prompts and raw
-responses remain in memory and are not written to conversation or
-orchestration ledgers.
+Collected sessions are enough. A failed collector, unread file, failed batch,
+or malformed model response omits that session or batch. Overnight still
+prepares from what remains. Zero cards is valid. The user may add an Overnight
+by stating an outcome on the Overnight tab. The host still restores session
+evidence, exclusions, conflicts, and write scopes from local authority after
+semantic grouping, so the global model cannot invent or erase that evidence.
+Prompts and raw responses remain in memory and are not written to conversation
+or orchestration ledgers.
+
+Amended 2026-08-28: exact-coverage fail-closed no longer blocks the
+recommendation. Missing sessions are omitted instead of aborting tonight.
 
 ### Preserve independent candidates
 

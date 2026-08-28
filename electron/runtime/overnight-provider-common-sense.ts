@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { constants } from "node:fs";
 import { access, realpath } from "node:fs/promises";
-import type { OvernightExecutionProvider } from "../../src/shared/contracts";
+import type { OvernightCliLoginState, OvernightExecutionProvider } from "../../src/shared/contracts";
+import { probeOvernightCliLogin } from "./overnight-cli-auth";
 import {
   overnightProviderAdapterIdentity,
   overnightProviderAdapterInvocation,
@@ -33,7 +34,72 @@ const STABLE_HEX = {
 
 export function createCommonSenseOvernightControlPlane(options: {
   providerHostPath: string;
+  resolveExecutable?: (provider: OvernightExecutionProvider) => Promise<string | undefined>;
+  probeLogin?: (input: { provider: OvernightExecutionProvider; executable?: string }) => Promise<OvernightCliLoginState>;
 }) {
+  const find = options.resolveExecutable ?? resolveExecutable;
+  const probeLogin = options.probeLogin ?? probeOvernightCliLogin;
+
+  async function inspectProvider(provider: OvernightExecutionProvider): Promise<ProviderPlanningInspection> {
+    if (overnightProviderRoute(provider).adapterKind === "embedded-sdk") {
+      return {
+        status: "blocked",
+        provider,
+        reason: "Pi Agent Overnight execution is not available. Morrow's conversation SDK is not an Overnight worker.",
+      };
+    }
+    const executable = await find(provider);
+    if (!executable) {
+      return { status: "setup", provider, reason: `${overnightProviderRoute(provider).label} is not installed.` };
+    }
+    const executableSha256 = await sha256File(executable);
+    return {
+      status: "ready",
+      provider,
+      executableSha256,
+      identitySha256: digest(`identity:${provider}:${executable}`),
+      attestationSha256: digest(`attestation:${provider}`),
+      expiresAt: FAR_FUTURE,
+    };
+  }
+
+  async function inspectReadiness(provider: OvernightExecutionProvider): Promise<OvernightProviderReadiness> {
+    const route = overnightProviderRoute(provider);
+    if (route.adapterKind === "embedded-sdk") {
+      return {
+        provider,
+        label: route.label,
+        status: "blocked",
+        reason: "Pi Agent Overnight execution is not available. Morrow's conversation SDK is not an Overnight worker.",
+        authentication: "unknown",
+        checks: { installation: "missing", authentication: "unverified", containment: "unverified" },
+      };
+    }
+    const executable = await find(provider);
+    if (!executable) {
+      return {
+        provider,
+        label: route.label,
+        status: "setup_required",
+        reason: `${route.label} is not installed.`,
+        authentication: "unknown",
+        checks: { installation: "missing", authentication: "unverified", containment: "unverified" },
+      };
+    }
+    const authentication = await probeLogin({ provider, executable });
+    return {
+      provider,
+      label: route.label,
+      status: "ready",
+      authentication,
+      checks: {
+        installation: "verified",
+        authentication: authentication === "signed_in" ? "verified" : authentication === "signed_out" ? "missing" : "unverified",
+        containment: "unverified",
+      },
+    };
+  }
+
   return Object.freeze({
     create() {
       const containmentControl: OvernightPortfolioContainmentControl = {
@@ -43,7 +109,7 @@ export function createCommonSenseOvernightControlPlane(options: {
           if (inspection.status !== "ready") {
             return { status: "blocked", provider: input.provider, reason: inspection.reason };
           }
-          const executable = await resolveExecutable(input.provider);
+          const executable = await find(input.provider);
           const invocation = overnightProviderAdapterInvocation(
             input.provider,
             input.fixedRoot,
@@ -87,43 +153,6 @@ export function createCommonSenseOvernightControlPlane(options: {
       };
     },
   });
-}
-
-async function inspectProvider(provider: OvernightExecutionProvider): Promise<ProviderPlanningInspection> {
-  const executable = await resolveExecutable(provider);
-  if (!executable && provider !== "pi") {
-    return { status: "setup", provider, reason: `${overnightProviderRoute(provider).label} is not installed.` };
-  }
-  const path = executable ?? process.execPath;
-  const executableSha256 = await sha256File(path);
-  return {
-    status: "ready",
-    provider,
-    executableSha256,
-    identitySha256: digest(`identity:${provider}:${path}`),
-    attestationSha256: digest(`attestation:${provider}`),
-    expiresAt: FAR_FUTURE,
-  };
-}
-
-async function inspectReadiness(provider: OvernightExecutionProvider): Promise<OvernightProviderReadiness> {
-  const inspection = await inspectProvider(provider);
-  const route = overnightProviderRoute(provider);
-  if (inspection.status !== "ready") {
-    return {
-      provider,
-      label: route.label,
-      status: "setup_required",
-      reason: inspection.reason,
-      checks: { installation: "missing", authentication: "unverified", containment: "unverified" },
-    };
-  }
-  return {
-    provider,
-    label: route.label,
-    status: "ready",
-    checks: { installation: "verified", authentication: "verified", containment: "unverified" },
-  };
 }
 
 function summary(provider: OvernightExecutionProvider, inspection: ProviderPlanningInspection) {
@@ -216,12 +245,19 @@ function launchArtifacts(
 }
 
 async function resolveExecutable(provider: OvernightExecutionProvider) {
-  if (provider === "pi") return process.execPath;
+  if (overnightProviderRoute(provider).adapterKind === "embedded-sdk") return undefined;
   return findOnPath(overnightProviderRoute(provider).executableNames);
 }
 
 async function findOnPath(names: readonly string[]) {
-  const directories = [join(homedir(), ".local", "bin"), ...(process.env.PATH ?? "").split(delimiter).filter(Boolean)];
+  const home = homedir();
+  const directories = [
+    join(home, ".local", "bin"),
+    join(home, ".grok", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    ...(process.env.PATH ?? "").split(delimiter).filter(Boolean),
+  ];
   for (const name of names) {
     for (const directory of [...new Set(directories)]) {
       const candidate = join(directory, name);

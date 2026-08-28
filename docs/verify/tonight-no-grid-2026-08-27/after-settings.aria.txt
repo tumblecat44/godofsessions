@@ -1,0 +1,46 @@
+GOD OF SESSIONS
+MORROW · NIGHT CONTROL
+Ask Morrow
+Overnight
+Settings
+CONVERSATIONS
+New conversation
+Overnight planning
+today
+MORROW · SETTINGS
+Connections & preferences
+
+Review Morrow’s conversation model, Overnight CLIs, app language, and file working boundary.
+
+File working folder
+
+This is the default boundary for Morrow’s file-related work. File changes and commands are confirmed before they run.
+
+CURRENT FILE BOUNDARY
+/tmp/gos-verify-workspace
+Only changes inside this folder can be remembered for one conversation. Changes outside it require separate confirmation every time and cannot be included in overnight work.
+GitHub account
+
+The identity verified when you started God of Sessions. Repository and email access are not requested.
+
+@synthetic-user
+Verified by GitHub
+Manage access
+Sign out
+Morrow conversation model
+
+Connect one so Morrow can talk and pick tonight’s 3 cards. Sign-in uses that service’s official login or API key flow.
+
+Overnight CLIs
+
+Installed means the command is on PATH. Copy a login command and run it in Terminal. This app does not log into Overnight accounts.
+
+Conversation language
+
+This changes Morrow’s interface language, not the model you use.
+
+English
+한국어
+What leaves this Mac
+
+Conversation history and approvals are stored in this Mac’s app data. When you request an answer or task, the required input and work content are sent to the selected AI service under that service’s data policy.

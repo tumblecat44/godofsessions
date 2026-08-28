@@ -56,8 +56,8 @@ Live + synthetic required (live drive proves reality, synthetic proves renderer 
 Renderer contract with synthetic GitHub and Morrow IPC (`drive.mjs`, `npm run verify:ui`):
 
 - [Overnight board](./overnight-board.md) covers today's list, one card per Overnight, status view, calendar.
-- [Settings CLIs](./settings-clis.md) covers PATH status for four official CLIs and no Safety check.
-- [Four routes](./four-routes.md) covers Claude Code, Codex, Grok Build, Pi Agent as the only startable workers.
+- [Settings CLIs](./settings-clis.md) covers PATH plus login status for Claude Code, Codex, and Grok Build, and Pi Agent as not ready.
+- [Four routes](./four-routes.md) covers Claude Code, Codex, Grok Build, and Pi Agent as the named routes. Pi Agent is not a startable worker.
 - [Morrow revise](./morrow-revise.md) covers chat replacing the tonight set without starting work.
 - [Kanban board](./kanban-tickets.md) covers the four-column Backlog / In Progress / In Review / Done board with drag-and-drop tickets.
 - [Live CLI](./live-cli.md) is red until a real main-process start runs an official CLI. Do not treat a synthetic completed as pass.

@@ -18,11 +18,11 @@ describe("CopyCommandButton", () => {
     vi.useRealTimers();
   });
 
-  it("shows a checkmark icon after copying, then returns to Copy command", async () => {
+  it("shows a checkmark icon after copying, then returns to Copy login", async () => {
     render(<CopyCommandButton command="codex login" language="en" />);
 
     const button = screen.getByRole("button", { name: "Copy codex login" });
-    expect(button).toHaveTextContent("Copy command");
+    expect(button).toHaveTextContent("Copy login");
     expect(button.querySelector("svg")).toBeNull();
 
     await act(async () => { button.click(); });
@@ -32,7 +32,7 @@ describe("CopyCommandButton", () => {
 
     act(() => { vi.advanceTimersByTime(1500); });
 
-    expect(button).toHaveTextContent("Copy command");
+    expect(button).toHaveTextContent("Copy login");
     expect(button.querySelector("svg")).toBeNull();
   });
 
@@ -40,7 +40,7 @@ describe("CopyCommandButton", () => {
     render(<CopyCommandButton command="claude auth login" language="ko" />);
 
     const button = screen.getByRole("button", { name: "claude auth login 복사" });
-    expect(button).toHaveTextContent("명령 복사");
+    expect(button).toHaveTextContent("로그인 복사");
 
     await act(async () => { button.click(); });
 

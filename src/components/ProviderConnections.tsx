@@ -43,14 +43,14 @@ export function ProviderConnections({ state, language = state.language, onConnec
   return (
     <div className={cn("provider-connections mt-4 grid grid-cols-2 gap-2 max-[900px]:grid-cols-1", compact && "is-compact mt-0 grid-cols-1 gap-2")}>
       {visible.map((provider) => (
-        <Surface className={cn("provider-card grid min-h-[76px] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] bg-white/[0.018] px-3 py-2.5 shadow-none", provider.connected && "is-connected border-teal/20 bg-teal/[0.025]")} key={provider.id}>
-          <div className={cn("provider-card__mark grid size-9 place-items-center rounded-[11px] border border-line font-mono text-[13px] font-semibold", markTone[provider.id] ?? "text-ink-faint", provider.connected && "border-teal/20")} aria-hidden="true">
+        <Surface className={cn("provider-card grid min-h-[56px] grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[8px] bg-white/[0.018] px-2.5 py-2 shadow-none", provider.connected && "is-connected border-teal/20 bg-teal/[0.025]")} key={provider.id}>
+          <div className={cn("provider-card__mark grid size-8 place-items-center rounded-[6px] border border-line font-mono text-[12px] font-medium", markTone[provider.id] ?? "text-ink-faint", provider.connected && "border-teal/20")} aria-hidden="true">
             <span className={`state-icon-swap ${provider.connected ? "is-active" : ""}`}>
               <span className="state-icon-swap__active"><Check size={17} /></span>
               <span className="state-icon-swap__inactive">{providerLetter(provider.name)}</span>
             </span>
           </div>
-          <div className="flex min-w-0 flex-col gap-0.5"><strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold">{provider.name}</strong><small className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-faint">{provider.connected ? (ko ? "Morrow가 사용할 준비됨" : "Ready for Morrow") : provider.authLabel ?? (ko ? "안전하게 연결" : "Connect securely")}</small></div>
+          <div className="flex min-w-0 flex-col gap-0.5"><strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">{provider.name}</strong><small className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-faint">{provider.connected ? (ko ? "Morrow가 사용할 준비됨" : "Ready for Morrow") : provider.authLabel ?? (ko ? "안전하게 연결" : "Connect securely")}</small></div>
           <div className="provider-card__actions flex items-center gap-1.5">
             {provider.connected ? compact ? <span className="provider-ready font-mono text-[9px] tracking-[0.12em] text-teal">{ko ? "연결됨" : "CONNECTED"}</span> : <Button size="sm" onClick={() => void onDisconnect(provider.id)}><LogOut size={13} />{ko ? "연결 해제" : "Disconnect"}</Button> : provider.authTypes.map((authType) => {
               const explanation = authType === "oauth"

@@ -1,5 +1,9 @@
 # Attended actions use ephemeral Codex exec
 
+- Status: superseded
+- Superseded by: [ADR 0056: Two AI runtimes](0056-two-ai-runtimes.md) for the
+  V2 desktop application. Morrow chat does not spawn Overnight CLIs.
+
 Morrow may run one immediate, attended Codex action when the operator turns on
 `ACTION`, reviews the visible workspace, and sends one exact objective. The
 activation is single-use: sending consumes it before the provider process

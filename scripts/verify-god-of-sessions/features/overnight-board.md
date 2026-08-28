@@ -27,7 +27,7 @@ Preconditions:
 
 - **Open Overnight.** Choose the nav button. Run `click --role button --name "Overnight"`. Heading level 1 is `Overnight` when no card is opened.
 - **Date control.** Wait for the calendar summary. Run `wait --role button --name "Choose Overnight date"` is wrong if the control is a `summary`. Use `text` or aria snapshot and require `Choose Overnight date`.
-- **Empty or setup.** Read the primary region `Overnights`. If no CLI is installed, heading `Put an Overnight CLI on this Mac` and a `Copy command` control. If CLIs can run but no conversation model is connected, heading `Connect a conversation model first` and button `Connect a model in Settings`. If CLIs can run, a model is connected, and tonight is empty, heading `No Overnight is ready tonight`. These are pass states, not bugs.
+- **Empty or setup.** Read the primary region `Overnights`. If no CLI is installed, heading `Put an Overnight CLI on this Mac` and a `Copy login` control. If CLIs can run but no conversation model is connected, heading `Connect a conversation model first` and button `Connect a model in Settings`. If CLIs can run, a model is connected, and tonight is empty, heading `No Overnight is ready tonight`. These are pass states, not bugs.
 - **No start here.** Run `absent --role button --name "Start Overnight"`. Start belongs on Ask Morrow as `Start N selected`.
 - **Open a card.** When cards exist, each shows `OVERNIGHT N` and an outcome. Click the card. Heading becomes that outcome. Button `All overnights` returns to the list. The opened card contains one Kanban.
 - **Proof.** Screenshot and aria named `overnight-board` of the list or the opened card. Artifacts include the Overnight heading and do not include a `Start Overnight` button.

@@ -1,4 +1,4 @@
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { Type } from "@earendil-works/pi-ai";
 import {
@@ -24,6 +24,9 @@ import type {
   OrchestrationSnapshot,
   OvernightBoardLane,
   OvernightBoardTicket,
+  OvernightCard,
+  OvernightNightRequest,
+  OvernightPlanTicket,
   OvernightRequestKind,
   OvernightPortfolioAssessmentSummary,
   OvernightPortfolioPlanSummary,
@@ -40,8 +43,10 @@ import {
   isOvernightExecutionProvider,
   parseOvernightBoardTicketId,
   parseOvernightId,
+  parseOvernightLocalDate,
 } from "../../src/shared/contracts";
 import { deferred, type Deferred } from "./deferred";
+import { isHomeExecutionRoot } from "./execution-root";
 import { PermissionPolicy, type ApprovalScope } from "./permission-policy";
 import {
   collectDailyContextForEvaluation,
@@ -61,6 +66,7 @@ import {
   type OvernightPortfolioAssessmentRecord,
 } from "./overnight-portfolio-ledger";
 import { OvernightStore } from "./overnight-store";
+import { OvernightNightShift } from "./overnight-night-shift";
 import {
   OvernightPortfolioService,
   type OvernightPortfolioContainmentControl,
@@ -88,7 +94,7 @@ When inspecting agent session stores such as .grok or .claude, focus on primary 
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
 Today's local-agent inventory is available to a private exact-coverage Overnight evaluator. It is background context, not proof that you opened another app live.
 When the user asks for overnight work, call prepare_overnight with only requestKind and a concise userGoal. Do not read files, run commands, inspect the repository, or synthesize candidate arrays merely to prepare this read-only recommendation. The evaluator, not this conversation, must account for every discovered session and preserve every independent task.
-Show up to three tonight recommendations on the Morrow chat. The user unchecks cards they do not want, then starts the checked ones. If they say a recommendation is low priority or too far away, prepare a different set. Claude Code, Codex, Grok Build, and Pi Agent are the Overnight CLIs. A route can run when its official CLI is installed. Never start Overnight from chat text such as “돌리기”. The checked-card button is the start. Overnight lists those started cards. Opening a card shows the outcome ticket and the morning-check ticket, each labeled with its CLI.
+Show up to three tonight recommendations on the Morrow chat. The user unchecks cards they do not want, then starts the checked ones. If they say a recommendation is low priority or too far away, prepare a different set. Chat, tools, and Overnight planning use the conversation model the user connected through the Pi Agent SDK. Overnight workers are Claude Code, Codex, and Grok Build when their official CLI is on PATH. Pi Agent is listed and is not an Overnight worker yet. Never start Overnight from chat text such as “돌리기”. The checked-card button is the start. Overnight lists those started cards. Opening a card shows the outcome ticket and the morning-check ticket, each labeled with its CLI.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
 type SendEvent = (event: MorrowEvent) => void;
@@ -362,6 +368,7 @@ export class MorrowService {
   private portfolioRecoveryScan?: Promise<void>;
   private portfolioPreparationInFlight?: Promise<OrchestrationSnapshot>;
   private initializePromise?: Promise<void>;
+  private readonly nightShift: OvernightNightShift;
 
   constructor(options: MorrowServiceOptions) {
     this.root = options.root;
@@ -418,10 +425,25 @@ export class MorrowService {
         }),
       });
     }
+    this.nightShift = new OvernightNightShift({
+      store: this.overnightStore,
+      dataDir: options.dataDir,
+      decompose: (card, providers) => this.decomposeOvernightPlan(card, providers),
+      availableProviders: () => {
+        const ready = this.portfolioRoutes
+          .filter((route) => route.status === "ready" && (route.provider === "claude" || route.provider === "codex"))
+          .map((route) => route.provider);
+        return ready.length > 0 ? ready : ["claude", "codex"];
+      },
+    });
   }
 
   executionRoot() {
     return this.root;
+  }
+
+  overnightStoreDirectory() {
+    return dirname(this.overnightStore.databasePath);
   }
 
   async initialize() {
@@ -434,6 +456,7 @@ export class MorrowService {
       // Create overnights.sqlite before ModelRuntime so launch leaves the file
       // even when later preference or runtime setup fails.
       this.overnightStore.open();
+      this.nightShift.start();
       const preferences = await this.readPreferences();
       this.language = preferences.language;
       this.onboardingComplete = preferences.onboardingComplete;
@@ -552,6 +575,7 @@ export class MorrowService {
     return {
       rootName: basename(this.root) || this.root,
       rootPath: this.root,
+      rootIsHome: isHomeExecutionRoot(this.root, homedir()),
       onboardingComplete: this.onboardingComplete,
       providers: visibleProviders,
       models,
@@ -941,6 +965,110 @@ export class MorrowService {
     return pending;
   }
 
+  /** M46: 예약 — create a purpose card, decompose it, cut the branch. */
+  async scheduleOvernightNight(request: OvernightNightRequest): Promise<OrchestrationSnapshot> {
+    const localDate = parseOvernightLocalDate(this.dailyContext.summary.date
+      || new Date().toISOString().slice(0, 10));
+    const generation = this.overnightStore.commitGeneration({
+      localDate,
+      cards: [{
+        goal: request.goal,
+        finishCondition: request.finishCondition,
+        workAi: request.workAi,
+        verifyAi: request.verifyAi,
+        stallHours: 0.5,
+        decisionsLog: [{
+          at: new Date().toISOString(),
+          kind: "proposed",
+          note: "사용자가 후보를 선택해 예약을 요청했습니다.",
+        }],
+      }],
+    });
+    const card = generation.cards[0];
+    try {
+      await this.nightShift.schedule({
+        cardId: card.id,
+        targetDirectory: request.targetDirectory,
+        startAt: request.startAt,
+        endAt: request.endAt,
+      });
+    } catch (reason) {
+      this.overnightStore.discard(card.id);
+      throw reason;
+    }
+    return this.combinedOrchestrationSnapshot(false);
+  }
+
+  async cancelOvernightNight(cardId: string): Promise<OrchestrationSnapshot> {
+    this.overnightStore.cancel(parseOvernightId(cardId));
+    return this.combinedOrchestrationSnapshot(false);
+  }
+
+  async overnightBranchLog(cardId: string): Promise<string> {
+    return this.nightShift.branchLog(parseOvernightId(cardId));
+  }
+
+  private snapshotOvernightCards(): OvernightCard[] {
+    try {
+      return [
+        ...this.overnightStore.listByStatus("scheduled"),
+        ...this.overnightStore.listByStatus("running"),
+        ...this.overnightStore.listByStatus("ran"),
+      ];
+    } catch {
+      return [];
+    }
+  }
+
+  /** JSON kanban decomposition with the same runtime that writes candidates. */
+  private async decomposeOvernightPlan(
+    card: OvernightCard,
+    providers: readonly OvernightExecutionProvider[],
+  ): Promise<readonly Omit<OvernightPlanTicket, "id" | "lane">[]> {
+    const runtime = this.requireRuntime();
+    const available = runtime.getAvailableSnapshot();
+    const model = this.session?.model
+      ?? available.find((candidate) => candidate.provider === this.selectedModel?.provider && candidate.id === this.selectedModel.id)
+      ?? available[0];
+    if (!model) throw new Error("계획을 분해할 모델이 없습니다.");
+    const prompt = [
+      "다음 밤샘 자동 개발 계획을 2~5개의 실행 카드로 분해하세요.",
+      `목표: ${card.goal}`,
+      `완료 조건: ${card.finishCondition}`,
+      `사용 가능한 실행 AI: ${providers.join(", ")}`,
+      "각 카드는 한 AI가 혼자 끝낼 수 있는 단위여야 합니다.",
+      `JSON 배열만 출력하세요: [{"title": "짧은 제목", "plan": "그 카드가 할 일을 구체적으로", "provider": "${providers[0]}"}]`,
+    ].join("\n");
+    const message = await runtime.completeSimple(model, {
+      systemPrompt: "You split one overnight plan into kanban work cards. Reply with a JSON array only.",
+      messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+    }, {
+      reasoning: "low",
+      maxTokens: 8_000,
+      cacheRetention: "none",
+      timeoutMs: 120_000,
+      maxRetries: 0,
+    });
+    const text = message.content
+      .map((item: { type: string; text?: string }) => (item.type === "text" ? item.text ?? "" : ""))
+      .join("");
+    const start = text.indexOf("[");
+    const end = text.lastIndexOf("]");
+    if (start < 0 || end <= start) throw new Error("분해 결과가 JSON 배열이 아닙니다.");
+    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+    if (!Array.isArray(parsed)) throw new Error("분해 결과가 JSON 배열이 아닙니다.");
+    return parsed.slice(0, 8).map((item) => {
+      const record = item as { title?: unknown; plan?: unknown; provider?: unknown };
+      const provider = providers.includes(record.provider as OvernightExecutionProvider)
+        ? record.provider as OvernightExecutionProvider
+        : providers[0];
+      if (typeof record.title !== "string" || typeof record.plan !== "string") {
+        throw new Error("분해 카드에 title/plan이 없습니다.");
+      }
+      return { title: record.title, plan: record.plan, provider };
+    });
+  }
+
   async startOvernightPortfolio(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary> {
     return this.overnightPortfolio.launch(planId, itemIds);
   }
@@ -998,11 +1126,12 @@ export class MorrowService {
 
   private async combinedOrchestrationSnapshot(refreshRoutes: boolean): Promise<OrchestrationSnapshot> {
     const routePromise = refreshRoutes
-      ? this.overnightPortfolioReadiness.inspectAll().then((readiness) => Promise.all(readiness.map(async ({ provider, label, status, reason }) => ({
+      ? this.overnightPortfolioReadiness.inspectAll().then((readiness) => Promise.all(readiness.map(async ({ provider, label, status, reason, authentication }) => ({
           provider,
           label,
           status,
           reason,
+          authentication: authentication ?? "unknown",
           verification: await this.observeProviderVerification(provider),
         } satisfies OvernightProviderRouteSummary))))
       : Promise.all(this.portfolioRoutes.map(async (route) => ({
@@ -1031,6 +1160,7 @@ export class MorrowService {
       portfolioAssessments: assessments.map(portfolioAssessmentSummary),
       portfolioPlans: plans,
       portfolioRuns: runs,
+      overnightCards: this.snapshotOvernightCards(),
     };
   }
 

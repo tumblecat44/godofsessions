@@ -4,6 +4,7 @@
 - Written: 2026-08-26
 - Contract baseline: 2026-08-26
 - Supersedes: [ADR 0053: Provider-neutral Overnight portfolio](0053-provider-neutral-overnight-portfolio.md) only where it advertises seven execution routes
+- Amended by: [ADR 0056: Two AI runtimes](0056-two-ai-runtimes.md) for Pi Agent Ready status
 
 ## Context
 
