@@ -481,6 +481,10 @@ export class MorrowService {
     }
   }
 
+  executionRoot() {
+    return this.root;
+  }
+
   async generateOvernightCandidatesNow(now = this.now()) {
     await generateOvernightCandidates({
       now,
