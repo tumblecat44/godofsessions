@@ -2806,7 +2806,7 @@ button:active:not(:disabled) {
   gap: 8px;
   color: var(--ink-muted);
   border-bottom: 1px solid var(--etched-edge-soft);
-  font: 650 12px "IBM Plex Sans", system-ui, sans-serif;
+  font: 650 12px inherit;
 }
 
 .overnight-kanban__column > header em {
@@ -2846,7 +2846,7 @@ button:active:not(:disabled) {
   border-radius: 999px;
   background: var(--signal-amber-soft);
   color: var(--signal-amber);
-  font: 650 10px "IBM Plex Sans", system-ui, sans-serif;
+  font: 650 10px inherit;
   text-transform: lowercase;
 }
 
@@ -2890,7 +2890,7 @@ button:active:not(:disabled) {
   border-radius: 10px;
   background: transparent;
   color: var(--ink-muted);
-  font: 550 12px "IBM Plex Sans", system-ui, sans-serif;
+  font: 550 12px inherit;
   text-align: left;
   cursor: pointer;
 }
