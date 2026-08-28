@@ -27,7 +27,7 @@ describe("GitHubAuthService", () => {
 
     const authorization = await service.begin();
     expect(authorization.userCode).toBe("ABCD-EFGH");
-    expect(openExternal).toHaveBeenCalledWith(GITHUB_DEVICE_URL);
+    expect(openExternal).not.toHaveBeenCalled();
     expect(String(requests[0]?.init?.body)).not.toContain("scope=");
 
     await expect(service.complete()).resolves.toEqual({
@@ -163,6 +163,25 @@ describe("GitHubAuthService", () => {
       responses: [json({ device_code: "device-code", user_code: "ABCD-EFGH", verification_uri: "https://example.invalid/device", expires_in: 900, interval: 5 })],
     });
     await expect(service.begin()).rejects.toThrow(/unexpected verification URL/);
+  });
+
+  it("does not auto-open the browser in begin() so the device code stays visible", async () => {
+    const dataDir = await temporaryDirectory();
+    const openExternal = vi.fn(async () => undefined);
+    const service = createService({
+      dataDir,
+      responses: [
+        json({ device_code: "device-code", user_code: "STAY-VISIBLE", verification_uri: GITHUB_DEVICE_URL, expires_in: 900, interval: 5 }),
+      ],
+      openExternal,
+    });
+
+    const authorization = await service.begin();
+    expect(authorization.userCode).toBe("STAY-VISIBLE");
+    expect(openExternal).not.toHaveBeenCalled();
+
+    await service.openDevicePage();
+    expect(openExternal).toHaveBeenCalledWith(GITHUB_DEVICE_URL);
   });
 });
 

@@ -133,7 +133,7 @@ export class GitHubAuthService {
     const interval = boundedNumber(value.interval, 1, 60, "poll interval");
     const expiresAt = this.now().getTime() + expiresIn * 1_000;
     this.pending = { deviceCode, userCode, verificationUri, expiresAt, intervalMs: interval * 1_000, cancelled: false };
-    await this.openExternal(GITHUB_DEVICE_URL);
+    // ponytail: don't auto-open browser here; let user see the device code first
     return { userCode, verificationUri, expiresAt: new Date(expiresAt).toISOString() };
   }
 
