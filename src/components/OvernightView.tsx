@@ -2,18 +2,20 @@ import { ChevronRight, CircleStop, Copy, MoonStar, TriangleAlert } from "lucide-
 import { useEffect, useMemo, useState } from "react";
 import type {
   AppLanguage,
+  OvernightBoardTicket,
   OrchestrationSnapshot,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioRunItemSummary,
   OvernightPortfolioRunSummary,
   OvernightProviderRouteSummary,
 } from "../shared/contracts";
+import { getMorrowBridge } from "../lib/bridge";
 import { overnightCliLoginCommand } from "../lib/overnight-cli";
 import { overnightTickets } from "../lib/overnight-tickets";
 import { startedRunItems, tonightPlanItems, visibleTonightPlan } from "../lib/tonight";
 import { CopyCommandButton } from "./CopyCommandButton";
 import { OvernightCalendarButton, OvernightDateEmptyState, overnightDateKey } from "./OvernightCalendar";
-import { OvernightKanban } from "./OvernightKanban";
+import { boardTicketsFromOvernightTickets, OvernightKanban } from "./OvernightKanban";
 import { Button } from "./ui/Button";
 
 interface OvernightViewProps {
@@ -150,9 +152,84 @@ function OvernightCard({ index, planItem, runItem, ko }: {
   ko: boolean;
 }) {
   const [copied, setCopied] = useState<"root" | "branch">();
+  const overnightId = planItem?.id ?? runItem?.itemId ?? `overnight-${index}`;
   const outcome = planItem?.outcome ?? runItem?.outcome ?? runItem?.title ?? (ko ? "보존된 Overnight" : "Retained Overnight");
+  const verification = planItem?.verification ?? runItem?.verification ?? (ko ? "아침 확인" : "Morning check");
   const providerLabel = planItem?.providerLabel ?? runItem?.providerLabel ?? (ko ? "작업자 확인 필요" : "Worker unknown");
+  const fallbackTickets = useMemo(
+    () => boardTicketsFromOvernightTickets(overnightTickets({ planItem, runItem, ko }), overnightId),
+    [ko, overnightId, planItem, runItem],
+  );
+  const [tickets, setTickets] = useState<OvernightBoardTicket[]>(fallbackTickets);
   const copy = async (kind: "root" | "branch", value: string) => { try { await navigator.clipboard.writeText(value); setCopied(kind); } catch { setCopied(undefined); } };
+
+  useEffect(() => {
+    let cancelled = false;
+    const bridge = getMorrowBridge();
+    const seed = {
+      overnightId,
+      goal: outcome,
+      finishCondition: verification,
+      providerLabel,
+    };
+    const load = bridge.ensureOvernightBoardTickets
+      ? bridge.ensureOvernightBoardTickets(seed)
+      : bridge.listOvernightBoardTickets?.(overnightId);
+    if (!load) {
+      setTickets(fallbackTickets);
+      return;
+    }
+    void load.then((next) => {
+      if (!cancelled && next.length > 0) setTickets(next);
+      else if (!cancelled) setTickets(fallbackTickets);
+    }).catch(() => {
+      if (!cancelled) setTickets(fallbackTickets);
+    });
+    return () => { cancelled = true; };
+  }, [fallbackTickets, overnightId, outcome, providerLabel, verification]);
+
+  const onMove = bridgeMoveAvailable()
+    ? async (move: { id: string; lane: OvernightBoardTicket["lane"]; sortOrder: number }) => {
+      setTickets((current) => current.map((ticket) => (
+        ticket.id === move.id ? { ...ticket, lane: move.lane, sortOrder: move.sortOrder } : ticket
+      )));
+      try {
+        const updated = await getMorrowBridge().moveOvernightBoardTicket!(move);
+        setTickets((current) => current.map((ticket) => ticket.id === updated.id ? updated : ticket));
+      } catch {
+        const listed = await getMorrowBridge().listOvernightBoardTickets?.(overnightId);
+        if (listed) setTickets(listed);
+      }
+    }
+    : (move: { id: string; lane: OvernightBoardTicket["lane"]; sortOrder: number }) => {
+      setTickets((current) => current.map((ticket) => (
+        ticket.id === move.id ? { ...ticket, lane: move.lane, sortOrder: move.sortOrder } : ticket
+      )));
+    };
+
+  const onAddItem = () => {
+    const title = ko ? "새 작업" : "New work item";
+    const bridge = getMorrowBridge();
+    if (bridge.addOvernightBoardTicket) {
+      void bridge.addOvernightBoardTicket({ overnightId, title, detail: "" }).then((ticket) => {
+        setTickets((current) => [...current, ticket]);
+      });
+      return;
+    }
+    setTickets((current) => [
+      ...current,
+      {
+        id: `local-${crypto.randomUUID()}` as OvernightBoardTicket["id"],
+        overnightId: overnightId as OvernightBoardTicket["overnightId"],
+        kind: "work",
+        title,
+        detail: "",
+        lane: "backlog",
+        sortOrder: current.filter((ticket) => ticket.lane === "backlog").length,
+      },
+    ]);
+  };
+
   return <article className={`portfolio-run-item is-${runItem?.status ?? "draft"}`} aria-label={ko ? `${outcome} Overnight` : `Overnight: ${outcome}`}>
     <header>
       <div><span>{`OVERNIGHT ${index + 1}`}</span><h3>{outcome}</h3></div>
@@ -160,7 +237,14 @@ function OvernightCard({ index, planItem, runItem, ko }: {
     <div className="flex flex-wrap gap-2 border-t border-line-soft px-4 py-3 text-[10px] text-ink-muted">
       <span className="inline-flex items-center gap-1.5"><MoonStar size={12} />{providerLabel}</span>
     </div>
-    <OvernightKanban tickets={overnightTickets({ planItem, runItem, ko })} outcome={outcome} ko={ko} />
+    <OvernightKanban
+      tickets={tickets}
+      providerLabel={providerLabel}
+      outcome={outcome}
+      ko={ko}
+      onMove={onMove}
+      onAddItem={onAddItem}
+    />
     <details className="border-t border-line-soft">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 text-[11px] font-semibold text-ink-muted hover:text-ink"><span>{ko ? "계획과 결과 보기" : "View plan and result"}</span><ChevronRight size={14} /></summary>
       <div className="grid gap-4 border-t border-line-soft p-4 text-[11px] leading-5">
@@ -173,6 +257,10 @@ function OvernightCard({ index, planItem, runItem, ko }: {
       </div>
     </details>
   </article>;
+}
+
+function bridgeMoveAvailable() {
+  return typeof getMorrowBridge().moveOvernightBoardTicket === "function";
 }
 
 function ActiveRunBar({ run, ko, onStop }: { run: OvernightPortfolioRunSummary; ko: boolean; onStop(runId: string): Promise<void> }) {

@@ -22,6 +22,8 @@ import type {
   ConversationSummary,
   MorrowEvent,
   OrchestrationSnapshot,
+  OvernightBoardLane,
+  OvernightBoardTicket,
   OvernightRequestKind,
   OvernightPortfolioAssessmentSummary,
   OvernightPortfolioPlanSummary,
@@ -33,7 +35,12 @@ import type {
   TranscriptMessage,
   TranscriptPart,
 } from "../../src/shared/contracts";
-import { isOvernightExecutionProvider } from "../../src/shared/contracts";
+import {
+  isOvernightBoardLane,
+  isOvernightExecutionProvider,
+  parseOvernightBoardTicketId,
+  parseOvernightId,
+} from "../../src/shared/contracts";
 import { deferred, type Deferred } from "./deferred";
 import { PermissionPolicy, type ApprovalScope } from "./permission-policy";
 import {
@@ -411,6 +418,10 @@ export class MorrowService {
         }),
       });
     }
+  }
+
+  executionRoot() {
+    return this.root;
   }
 
   async initialize() {
@@ -936,6 +947,53 @@ export class MorrowService {
 
   async stopOvernightPortfolio(runId: string): Promise<void> {
     await this.overnightPortfolio.stop(runId);
+  }
+
+  listOvernightBoardTickets(overnightId: string): OvernightBoardTicket[] {
+    return this.overnightStore.listBoardTickets(parseOvernightId(overnightId));
+  }
+
+  ensureOvernightBoardTickets(input: {
+    overnightId: string;
+    goal: string;
+    finishCondition: string;
+    providerLabel: string;
+  }): OvernightBoardTicket[] {
+    return this.overnightStore.ensureBoardTickets({
+      overnightId: parseOvernightId(input.overnightId),
+      goal: input.goal,
+      finishCondition: input.finishCondition,
+      providerLabel: input.providerLabel,
+    });
+  }
+
+  moveOvernightBoardTicket(input: {
+    id: string;
+    lane: OvernightBoardLane;
+    sortOrder: number;
+  }): OvernightBoardTicket {
+    if (!isOvernightBoardLane(input.lane)) {
+      throw new Error("Invalid overnight board lane.");
+    }
+    return this.overnightStore.moveTicket({
+      id: parseOvernightBoardTicketId(input.id),
+      lane: input.lane,
+      sortOrder: input.sortOrder,
+    });
+  }
+
+  addOvernightBoardTicket(input: {
+    overnightId: string;
+    title: string;
+    detail?: string;
+  }): OvernightBoardTicket {
+    return this.overnightStore.insertBoardTicket({
+      overnightId: parseOvernightId(input.overnightId),
+      kind: "work",
+      title: input.title,
+      detail: input.detail ?? "",
+      lane: "backlog",
+    });
   }
 
   private async combinedOrchestrationSnapshot(refreshRoutes: boolean): Promise<OrchestrationSnapshot> {

@@ -144,6 +144,42 @@ export function isOvernightDecisionKind(value: unknown): value is OvernightDecis
     && (OVERNIGHT_DECISION_KINDS as readonly string[]).includes(value);
 }
 
+/** Kanban lanes for one Overnight purpose card. Distinct from OvernightCard status. */
+export const OVERNIGHT_BOARD_LANES = ["backlog", "in_progress", "in_review", "done"] as const;
+export type OvernightBoardLane = typeof OVERNIGHT_BOARD_LANES[number];
+
+export type OvernightBoardTicketKind = "work" | "check";
+export const OVERNIGHT_BOARD_TICKET_KINDS = ["work", "check"] as const;
+
+export type OvernightBoardTicketId = string & { readonly __brand: "OvernightBoardTicketId" };
+
+export interface OvernightBoardTicket {
+  id: OvernightBoardTicketId;
+  overnightId: OvernightId;
+  kind: OvernightBoardTicketKind;
+  title: string;
+  detail: string;
+  lane: OvernightBoardLane;
+  sortOrder: number;
+}
+
+export function parseOvernightBoardTicketId(value: string): OvernightBoardTicketId {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("Invalid OvernightBoardTicketId");
+  }
+  return value as OvernightBoardTicketId;
+}
+
+export function isOvernightBoardLane(value: unknown): value is OvernightBoardLane {
+  return typeof value === "string"
+    && (OVERNIGHT_BOARD_LANES as readonly string[]).includes(value);
+}
+
+export function isOvernightBoardTicketKind(value: unknown): value is OvernightBoardTicketKind {
+  return typeof value === "string"
+    && (OVERNIGHT_BOARD_TICKET_KINDS as readonly string[]).includes(value);
+}
+
 export type OvernightCandidateOrigin = "continuation" | "follow_up" | "proactive" | "batch" | "routine";
 export type OvernightDisposition = "recommend" | "clarify" | "no_run";
 export type OvernightRequestKind = "discover" | "goal";
@@ -495,6 +531,24 @@ export interface MorrowBridge {
   verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
   startOvernightPortfolio(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary>;
   stopOvernightPortfolio(runId: string): Promise<void>;
+  listOvernightBoardTickets?(overnightId: string): Promise<OvernightBoardTicket[]>;
+  moveOvernightBoardTicket?(input: {
+    id: string;
+    lane: OvernightBoardLane;
+    sortOrder: number;
+  }): Promise<OvernightBoardTicket>;
+  addOvernightBoardTicket?(input: {
+    overnightId: string;
+    title: string;
+    detail?: string;
+  }): Promise<OvernightBoardTicket>;
+  /** Seeds work + check tickets when the board is empty. Idempotent. */
+  ensureOvernightBoardTickets?(input: {
+    overnightId: string;
+    goal: string;
+    finishCondition: string;
+    providerLabel: string;
+  }): Promise<OvernightBoardTicket[]>;
   openExternal(url: string): Promise<void>;
   revealRoot(): Promise<void>;
   onEvent(listener: (event: MorrowEvent) => void): () => void;

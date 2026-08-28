@@ -197,11 +197,11 @@ describe("Overnight one-button workspace", () => {
     const list = screen.getByRole("region", { name: "Overnights" });
     expect(within(list).getByText("First outcome")).toBeInTheDocument();
     expect(within(list).getByText("Second outcome")).toBeInTheDocument();
-    expect(within(list).queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+    expect(within(list).queryByRole("region", { name: /Board for/ })).not.toBeInTheDocument();
 
     fireEvent.click(within(list).getByRole("button", { name: /First outcome/ }));
     expect(screen.getAllByRole("heading", { name: "First outcome" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("region", { name: /Status for First outcome/ })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /Board for First outcome/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Second outcome/ })).not.toBeInTheDocument();
     const tickets = document.querySelectorAll(".overnight-kanban article");
     expect(tickets.length).toBeGreaterThanOrEqual(2);
@@ -263,7 +263,7 @@ describe("Overnight one-button workspace", () => {
     const list = screen.getByRole("region", { name: "Overnights" });
     expect(within(list).getByText("Repair the flow")).toBeInTheDocument();
     expect(within(list).getByText("Verify the copy")).toBeInTheDocument();
-    expect(within(list).queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+    expect(within(list).queryByRole("region", { name: /Board for/ })).not.toBeInTheDocument();
     expect(within(list).getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
 
@@ -361,7 +361,7 @@ describe("Overnight one-button workspace", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Overnight" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Start \d+ selected/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Board for/ })).not.toBeInTheDocument();
   });
 
   it("keeps stale cards visible and lets the launch boundary revalidate them when refresh fails", () => {
@@ -418,15 +418,15 @@ describe("Overnight one-button workspace", () => {
     render(<OvernightView {...props({ snapshot: snapshot({ portfolioPlans: [plan([first, second])] }) })} />);
 
     expect(screen.getByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Board for/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /First outcome/ }));
-    expect(screen.getByRole("region", { name: /Status for First outcome/ })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /Board for First outcome/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Second outcome/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "All overnights" }));
     expect(screen.getByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Board for/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Second outcome/ })).toBeInTheDocument();
   });
 });

@@ -199,6 +199,10 @@ async function proveKanbanTickets(page, app) {
   assert.ok(count >= 2, `one Overnight must split into tickets, found ${count}`);
   const text = await page.locator(".overnight-kanban").innerText();
   assert.match(text, /Claude Code|Codex|Grok Build|Pi Agent/);
+  assert.match(text, /Backlog/);
+  assert.match(text, /In Progress/);
+  assert.match(text, /In Review/);
+  assert.match(text, /Done/);
   await readStarted(app);
   process.stdout.write(`kanban-tickets passed. evidence: ${join(evidenceRoot, "kanban-tickets.png")}\n`);
 }
@@ -215,8 +219,39 @@ async function installSyntheticIpc(electronApp, fixture) {
       "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding",
       "morrow:refresh-daily-context", "morrow:prepare-overnight-portfolio", "morrow:start-overnight-portfolio", "morrow:stop-overnight-portfolio",
       "morrow:verify-overnight-provider", "morrow:open-external",
+      "morrow:list-overnight-board-tickets", "morrow:ensure-overnight-board-tickets",
+      "morrow:move-overnight-board-ticket", "morrow:add-overnight-board-ticket",
     ];
     for (const channel of channels) ipcMain.removeHandler(channel);
+    const boards = new Map();
+    const listBoard = (overnightId) => clone(boards.get(String(overnightId)) ?? []);
+    const ensureBoard = (input) => {
+      const overnightId = String(input.overnightId);
+      const existing = boards.get(overnightId);
+      if (existing?.length) return clone(existing);
+      const seeded = [
+        {
+          id: `${overnightId}-work`,
+          overnightId,
+          kind: "work",
+          title: String(input.goal),
+          detail: "",
+          lane: "backlog",
+          sortOrder: 0,
+        },
+        {
+          id: `${overnightId}-check`,
+          overnightId,
+          kind: "check",
+          title: String(input.finishCondition),
+          detail: "",
+          lane: "in_review",
+          sortOrder: 0,
+        },
+      ];
+      boards.set(overnightId, seeded);
+      return clone(seeded);
+    };
     const orchestration = () => ({
       context: state().context,
       providerRoutes: state().routes,
@@ -281,6 +316,40 @@ async function installSyntheticIpc(electronApp, fixture) {
       state().run = run;
       state().plan = { ...state().plan, status: "started" };
       return clone(run);
+    });
+    ipcMain.handle("morrow:list-overnight-board-tickets", (_event, overnightId) => listBoard(overnightId));
+    ipcMain.handle("morrow:ensure-overnight-board-tickets", (_event, input) => ensureBoard(input));
+    ipcMain.handle("morrow:move-overnight-board-ticket", (_event, input) => {
+      const id = String(input.id);
+      for (const [overnightId, tickets] of boards.entries()) {
+        const index = tickets.findIndex((ticket) => ticket.id === id);
+        if (index < 0) continue;
+        const next = {
+          ...tickets[index],
+          lane: String(input.lane),
+          sortOrder: Number(input.sortOrder),
+        };
+        tickets[index] = next;
+        boards.set(overnightId, tickets);
+        return clone(next);
+      }
+      throw new Error("board ticket not found");
+    });
+    ipcMain.handle("morrow:add-overnight-board-ticket", (_event, input) => {
+      const overnightId = String(input.overnightId);
+      const tickets = boards.get(overnightId) ?? [];
+      const ticket = {
+        id: `${overnightId}-added-${tickets.length + 1}`,
+        overnightId,
+        kind: "work",
+        title: String(input.title),
+        detail: input.detail === undefined ? "" : String(input.detail),
+        lane: "backlog",
+        sortOrder: tickets.filter((item) => item.lane === "backlog").length,
+      };
+      tickets.push(ticket);
+      boards.set(overnightId, tickets);
+      return clone(ticket);
     });
     for (const channel of ["morrow:abort", "morrow:set-model", "morrow:set-thinking", "morrow:answer-approval", "morrow:connect-provider", "morrow:answer-auth", "morrow:disconnect-provider", "morrow:finish-onboarding", "morrow:verify-overnight-provider", "morrow:open-external", "morrow:stop-overnight-portfolio"]) {
       ipcMain.handle(channel, () => undefined);

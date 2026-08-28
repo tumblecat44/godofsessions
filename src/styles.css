@@ -2775,31 +2775,130 @@ button:active:not(:disabled) {
 
 .overnight-date-empty p { max-width: 560px; margin: 7px 0 0; color: var(--ink-muted); font-size: 11px; line-height: 1.6; }
 
-.overnight-kanban { margin: 12px 14px; overflow: hidden; border: 1px solid var(--etched-edge-soft); border-radius: 9px; background: rgba(5, 8, 12, .26); }
+.overnight-kanban {
+  margin: 12px 14px;
+  overflow: hidden;
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 12px;
+  background: rgba(5, 8, 12, .26);
+}
 
-.overnight-kanban__lanes { padding: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; overflow-x: auto; }
+.overnight-kanban__lanes {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+}
 
-.overnight-kanban__lanes > section { min-width: 155px; border-radius: 8px; background: rgba(255, 255, 255, .014); }
+.overnight-kanban__column {
+  min-width: 220px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .014);
+}
 
-.overnight-kanban__lanes > section > header { min-height: 34px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; color: var(--ink-muted); border-bottom: 1px solid var(--etched-edge-soft); font: 650 8px "JetBrains Mono Variable", monospace; }
+.overnight-kanban__column > header {
+  min-height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--etched-edge-soft);
+  font: 650 12px inherit;
+}
 
-.overnight-kanban__lanes > section > div { min-height: 82px; padding: 7px; display: grid; align-content: start; gap: 6px; }
+.overnight-kanban__column > header em {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--signal-amber-soft);
+  color: var(--signal-amber);
+  font: 650 10px "JetBrains Mono Variable", monospace;
+  font-style: normal;
+  text-align: center;
+}
 
-.overnight-kanban__lanes article { position: relative; padding: 10px; overflow: hidden; border: 1px solid var(--etched-edge-soft); border-radius: 7px; background: var(--deck); }
+.overnight-kanban__cards {
+  min-height: 96px;
+  padding: 8px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
 
-.overnight-kanban__lanes article > i { position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--ink-faint); }
+.overnight-kanban__card {
+  padding: 10px 11px;
+  overflow: hidden;
+  border: 1px solid var(--etched-edge-soft);
+  border-radius: 12px;
+  background: var(--deck);
+  cursor: grab;
+}
 
-.overnight-kanban__lanes article.is-running > i, .overnight-kanban__lanes article.is-success > i, .overnight-kanban__lanes article.is-done > i { background: var(--signal-teal); }
+.overnight-kanban__card:active { cursor: grabbing; }
 
-.overnight-kanban__lanes article.is-failed > i, .overnight-kanban__lanes article.is-timed_out > i, .overnight-kanban__lanes article.is-failure > i { background: var(--signal-red); }
+.overnight-kanban__tag {
+  display: inline-flex;
+  margin-bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--signal-amber-soft);
+  color: var(--signal-amber);
+  font: 650 10px inherit;
+  text-transform: lowercase;
+}
 
-.overnight-kanban__lanes article strong { display: block; color: var(--ink-primary); font-size: 10px; }
+.overnight-kanban__card strong {
+  display: block;
+  color: var(--ink-primary);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
 
-.overnight-kanban__lanes article p { margin: 6px 0 0; overflow: hidden; color: var(--ink-muted); font-size: 9px; line-height: 1.5; }
+.overnight-kanban__card p {
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 
-.overnight-kanban__lanes article code { margin-top: 7px; display: block; overflow: hidden; color: var(--signal-teal); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.overnight-kanban__card > footer {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+}
 
-.overnight-kanban > footer { padding: 9px 11px; display: flex; align-items: flex-start; gap: 7px; color: var(--ink-muted); border-top: 1px solid var(--etched-edge-soft); font-size: 9px; line-height: 1.45; }
+.overnight-kanban__card code {
+  overflow: hidden;
+  color: var(--signal-amber);
+  font: 550 10px "JetBrains Mono Variable", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overnight-kanban__add {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px dashed var(--etched-edge-soft);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: 550 12px inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.overnight-kanban__add:hover {
+  border-color: rgba(231, 168, 77, .35);
+  color: var(--signal-amber);
+}
 
 .overnight-pulse {
   position: fixed;
