@@ -4,9 +4,11 @@ import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   OVERNIGHT_EXECUTION_PROVIDERS,
+  isOvernightBoardLane,
   type BootstrapState,
   type MorrowEvent,
   type OrchestrationSnapshot,
+  type OvernightBoardLane,
   type OvernightExecutionProvider,
   type ThinkingLevel,
 } from "../src/shared/contracts";
@@ -239,6 +241,40 @@ function registerIpc() {
   handle("morrow:stop-overnight-portfolio", async (_event, value) => {
     await service().stopOvernightPortfolio(boundedId(value, "overnight portfolio run id"));
     await orchestrationSnapshotWithPowerProtection();
+  });
+  handle("morrow:list-overnight-board-tickets", (_event, value) => (
+    service().listOvernightBoardTickets(boundedId(value, "overnight board id"))
+  ));
+  handle("morrow:ensure-overnight-board-tickets", (_event, value) => {
+    const input = record(value, "overnight board ensure");
+    return service().ensureOvernightBoardTickets({
+      overnightId: boundedId(input.overnightId, "overnight board id"),
+      goal: text(input.goal, "overnight board goal", 8_192),
+      finishCondition: text(input.finishCondition, "overnight board finish condition", 8_192),
+      providerLabel: text(input.providerLabel, "overnight board provider label", 200),
+    });
+  });
+  handle("morrow:move-overnight-board-ticket", (_event, value) => {
+    const input = record(value, "overnight board move");
+    const lane = text(input.lane, "overnight board lane", 32);
+    if (!isOvernightBoardLane(lane)) throw new Error("Invalid overnight board lane.");
+    if (typeof input.sortOrder !== "number" || !Number.isFinite(input.sortOrder)) {
+      throw new Error("Invalid overnight board sort order.");
+    }
+    return service().moveOvernightBoardTicket({
+      id: boundedId(input.id, "overnight board ticket id"),
+      lane: lane as OvernightBoardLane,
+      sortOrder: input.sortOrder,
+    });
+  });
+  handle("morrow:add-overnight-board-ticket", (_event, value) => {
+    const input = record(value, "overnight board add");
+    const detail = input.detail === undefined ? undefined : text(input.detail, "overnight board detail", 8_192);
+    return service().addOvernightBoardTicket({
+      overnightId: boundedId(input.overnightId, "overnight board id"),
+      title: text(input.title, "overnight board title", 8_192),
+      detail,
+    });
   });
   handle("morrow:open-external", (_event, value) => {
     const parsed = new URL(text(value, "external URL", 8_192));

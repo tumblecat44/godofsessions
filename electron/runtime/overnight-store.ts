@@ -3,11 +3,17 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  isOvernightBoardLane,
+  isOvernightBoardTicketKind,
   isOvernightDecisionKind,
   isOvernightExecutionProvider,
   isOvernightStatus,
+  parseOvernightBoardTicketId,
   parseOvernightId,
   parseOvernightLocalDate,
+  type OvernightBoardLane,
+  type OvernightBoardTicket,
+  type OvernightBoardTicketKind,
   type OvernightCard,
   type OvernightCardDraft,
   type OvernightCardRevision,
@@ -240,6 +246,19 @@ export class OvernightStore {
       CREATE INDEX IF NOT EXISTS overnight_local_date_idx ON overnight(local_date);
       CREATE INDEX IF NOT EXISTS overnight_generation_id_idx ON overnight(generation_id);
       CREATE INDEX IF NOT EXISTS overnight_generation_local_date_idx ON overnight_generation(local_date);
+
+      CREATE TABLE IF NOT EXISTS overnight_board_ticket (
+        id TEXT PRIMARY KEY,
+        overnight_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('work','check')),
+        title TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        lane TEXT NOT NULL CHECK (lane IN ('backlog','in_progress','in_review','done')),
+        sort_order REAL NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS overnight_board_ticket_lane_idx
+        ON overnight_board_ticket(overnight_id, lane, sort_order);
     `);
     this.database = database;
   }
@@ -402,6 +421,104 @@ export class OvernightStore {
     return this.applyLifecycle(id, { type: "mark_ran" });
   }
 
+  listBoardTickets(overnightId: OvernightId): OvernightBoardTicket[] {
+    const database = this.requireOpen();
+    const id = parseOvernightId(overnightId);
+    const rows = database.prepare(`
+      SELECT id, overnight_id, kind, title, detail, lane, sort_order
+      FROM overnight_board_ticket
+      WHERE overnight_id = ?
+      ORDER BY lane ASC, sort_order ASC, id ASC
+    `).all(id);
+    return rows.map(parseBoardTicketRow);
+  }
+
+  insertBoardTicket(input: {
+    overnightId: OvernightId;
+    kind: OvernightBoardTicketKind;
+    title: string;
+    detail: string;
+    lane?: OvernightBoardLane;
+  }): OvernightBoardTicket {
+    const database = this.requireOpen();
+    const overnightId = parseOvernightId(input.overnightId);
+    if (!isOvernightBoardTicketKind(input.kind)) {
+      throw new Error(`알 수 없는 board ticket kind입니다: ${String(input.kind)}`);
+    }
+    const lane = input.lane ?? "backlog";
+    if (!isOvernightBoardLane(lane)) {
+      throw new Error(`알 수 없는 board lane입니다: ${String(lane)}`);
+    }
+    const title = requireString(input.title, "title");
+    const detail = requireString(input.detail, "detail");
+    const sortOrder = this.nextSortOrder(overnightId, lane);
+    const id = parseOvernightBoardTicketId(this.createId());
+    database.prepare(`
+      INSERT INTO overnight_board_ticket (
+        id, overnight_id, kind, title, detail, lane, sort_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, overnightId, input.kind, title, detail, lane, sortOrder);
+    return this.requireBoardTicket(id);
+  }
+
+  /** Only legal lane changer for board tickets. */
+  moveTicket(input: {
+    id: OvernightBoardTicket["id"];
+    lane: OvernightBoardLane;
+    sortOrder: number;
+  }): OvernightBoardTicket {
+    const database = this.requireOpen();
+    const id = parseOvernightBoardTicketId(input.id);
+    if (!isOvernightBoardLane(input.lane)) {
+      throw new Error(`알 수 없는 board lane입니다: ${String(input.lane)}`);
+    }
+    if (typeof input.sortOrder !== "number" || !Number.isFinite(input.sortOrder)) {
+      throw new Error("sortOrder는 유한한 숫자여야 합니다.");
+    }
+    this.requireBoardTicket(id);
+    database.prepare(`
+      UPDATE overnight_board_ticket
+      SET lane = ?, sort_order = ?
+      WHERE id = ?
+    `).run(input.lane, input.sortOrder, id);
+    return this.requireBoardTicket(id);
+  }
+
+  /**
+   * When the board is empty, seed a work ticket (backlog) and a check ticket
+   * (in_review). Idempotent when tickets already exist.
+   */
+  ensureBoardTickets(input: {
+    overnightId: OvernightId;
+    goal: string;
+    finishCondition: string;
+    providerLabel: string;
+  }): OvernightBoardTicket[] {
+    const overnightId = parseOvernightId(input.overnightId);
+    const existing = this.listBoardTickets(overnightId);
+    if (existing.length > 0) return existing;
+
+    const goal = requireString(input.goal, "goal");
+    const finishCondition = requireString(input.finishCondition, "finishCondition");
+    requireString(input.providerLabel, "providerLabel");
+
+    this.insertBoardTicket({
+      overnightId,
+      kind: "work",
+      title: goal,
+      detail: "",
+      lane: "backlog",
+    });
+    this.insertBoardTicket({
+      overnightId,
+      kind: "check",
+      title: finishCondition,
+      detail: "",
+      lane: "in_review",
+    });
+    return this.listBoardTickets(overnightId);
+  }
+
   /**
    * Revise editable fields. Only legal while status === "candidate".
    * Status cannot be patched; use lifecycle methods.
@@ -475,10 +592,61 @@ export class OvernightStore {
     return card;
   }
 
+  private requireBoardTicket(id: OvernightBoardTicket["id"]): OvernightBoardTicket {
+    const database = this.requireOpen();
+    const ticketId = parseOvernightBoardTicketId(id);
+    const row = database.prepare(`
+      SELECT id, overnight_id, kind, title, detail, lane, sort_order
+      FROM overnight_board_ticket
+      WHERE id = ?
+    `).get(ticketId);
+    if (row === undefined) {
+      throw new Error("이 board ticket을 찾을 수 없습니다.");
+    }
+    return parseBoardTicketRow(row);
+  }
+
+  private nextSortOrder(overnightId: OvernightId, lane: OvernightBoardLane): number {
+    const database = this.requireOpen();
+    const row = database.prepare(`
+      SELECT MAX(sort_order) AS max_sort
+      FROM overnight_board_ticket
+      WHERE overnight_id = ? AND lane = ?
+    `).get(overnightId, lane) as { max_sort: number | null } | undefined;
+    const max = row?.max_sort;
+    if (typeof max !== "number" || !Number.isFinite(max)) return 0;
+    return max + 1;
+  }
+
   private requireOpen(): DatabaseSync {
     if (!this.database) {
       throw new Error("OvernightStore가 열려 있지 않습니다. open()을 먼저 호출하세요.");
     }
     return this.database;
   }
+}
+
+function parseBoardTicketRow(value: unknown): OvernightBoardTicket {
+  const row = asRecord(value, "overnight_board_ticket");
+  const kind = row.kind;
+  if (!isOvernightBoardTicketKind(kind)) {
+    throw new Error(`알 수 없는 board ticket kind입니다: ${String(kind)}`);
+  }
+  const lane = row.lane;
+  if (!isOvernightBoardLane(lane)) {
+    throw new Error(`알 수 없는 board lane입니다: ${String(lane)}`);
+  }
+  const sortOrder = row.sort_order;
+  if (typeof sortOrder !== "number" || !Number.isFinite(sortOrder)) {
+    throw new Error("sort_order가 올바르지 않습니다.");
+  }
+  return {
+    id: parseOvernightBoardTicketId(requireString(row.id, "id")),
+    overnightId: parseOvernightId(requireString(row.overnight_id, "overnight_id")),
+    kind,
+    title: requireString(row.title, "title"),
+    detail: requireString(row.detail, "detail"),
+    lane,
+    sortOrder,
+  };
 }

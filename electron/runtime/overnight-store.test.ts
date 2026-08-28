@@ -207,4 +207,103 @@ describe("OvernightStore", () => {
     expect(second).toEqual(first);
     expect(second.status).toBe("deleted");
   });
+
+  it("inserts, lists, and moves board tickets; ensure is idempotent", async () => {
+    const { store } = await setup({ createId: (() => {
+      let n = 0;
+      return () => `id-${++n}`;
+    })() });
+    const overnightId = store.commitGeneration({
+      localDate: parseOvernightLocalDate("2026-08-28"),
+      cards: [draft()],
+    }).cards[0]!.id;
+
+    const seeded = store.ensureBoardTickets({
+      overnightId,
+      goal: "Ship the login fix",
+      finishCondition: "npm test",
+      providerLabel: "Claude Code",
+    });
+    expect(seeded).toHaveLength(2);
+    expect(seeded.map((ticket) => [ticket.kind, ticket.lane, ticket.title])).toEqual([
+      ["work", "backlog", "Ship the login fix"],
+      ["check", "in_review", "npm test"],
+    ]);
+
+    const again = store.ensureBoardTickets({
+      overnightId,
+      goal: "ignored",
+      finishCondition: "ignored",
+      providerLabel: "Codex",
+    });
+    expect(again).toEqual(seeded);
+
+    const added = store.insertBoardTicket({
+      overnightId,
+      kind: "work",
+      title: "Extra backlog item",
+      detail: "manual",
+    });
+    expect(added.lane).toBe("backlog");
+    expect(added.sortOrder).toBe(1);
+
+    const moved = store.moveTicket({
+      id: added.id,
+      lane: "in_progress",
+      sortOrder: 0,
+    });
+    expect(moved.lane).toBe("in_progress");
+    expect(moved.sortOrder).toBe(0);
+
+    const listed = store.listBoardTickets(overnightId);
+    expect(listed.find((ticket) => ticket.id === added.id)?.lane).toBe("in_progress");
+  });
+
+  it("rejects unknown board lane and kind at the parse boundary", async () => {
+    const { store, dataDir } = await setup();
+    store.close();
+
+    const database = new DatabaseSync(join(dataDir, "overnight", "overnights.sqlite"));
+    expect(() => {
+      database.prepare(`
+        INSERT INTO overnight_board_ticket (
+          id, overnight_id, kind, title, detail, lane, sort_order
+        ) VALUES ('t1', 'ov-1', 'work', 't', 'd', 'waiting', 0)
+      `).run();
+    }).toThrow(/CHECK constraint failed/u);
+
+    expect(() => {
+      database.prepare(`
+        INSERT INTO overnight_board_ticket (
+          id, overnight_id, kind, title, detail, lane, sort_order
+        ) VALUES ('t2', 'ov-1', 'task', 't', 'd', 'backlog', 0)
+      `).run();
+    }).toThrow(/CHECK constraint failed/u);
+    database.close();
+
+    const reopened = new OvernightStore({
+      dataDir,
+      now: () => new Date("2026-08-28T12:00:00.000Z"),
+    });
+    reopened.open();
+    const overnightId = reopened.commitGeneration({
+      localDate: parseOvernightLocalDate("2026-08-28"),
+      cards: [draft()],
+    }).cards[0]!.id;
+
+    expect(() => reopened.moveTicket({
+      id: "missing",
+      lane: "backlog",
+      sortOrder: 0,
+    })).toThrow(/찾을 수 없습니다/u);
+
+    expect(() => reopened.insertBoardTicket({
+      overnightId,
+      kind: "work",
+      title: "x",
+      detail: "y",
+      lane: "waiting" as never,
+    })).toThrow(/알 수 없는 board lane/u);
+    reopened.close();
+  });
 });

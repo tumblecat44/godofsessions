@@ -59,7 +59,7 @@ Renderer contract with synthetic GitHub and Morrow IPC (`drive.mjs`, `npm run ve
 - [Settings CLIs](./settings-clis.md) covers PATH status for four official CLIs and no Safety check.
 - [Four routes](./four-routes.md) covers Claude Code, Codex, Grok Build, Pi Agent as the only startable workers.
 - [Morrow revise](./morrow-revise.md) covers chat replacing the tonight set without starting work.
-- [Status list](./kanban-tickets.md) covers work plus morning check in waiting/working/result. This is a status list, not split engineering tickets.
+- [Kanban board](./kanban-tickets.md) covers the four-column Backlog / In Progress / In Review / Done board with drag-and-drop tickets.
 - [Live CLI](./live-cli.md) is red until a real main-process start runs an official CLI. Do not treat a synthetic completed as pass.
 
 Manual after real GitHub in the isolated profile (`gos-verify.mjs`):
