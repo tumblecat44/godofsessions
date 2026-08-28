@@ -35,6 +35,7 @@ interface OvernightViewProps {
   onStopPortfolio(runId: string): Promise<void>;
   onReviseCard?(card: OvernightCard, patch: OvernightCardRevision): Promise<void>;
   onDiscardCard?(card: OvernightCard): Promise<void>;
+  onHelp?(goal: string): void;
 }
 const activeRunStatuses = new Set<OvernightPortfolioRunSummary["status"]>(["starting", "running", "stopping"]);
 
@@ -154,6 +155,7 @@ export function OvernightView(props: OvernightViewProps) {
                 await props.onDiscardCard(selected.card);
                 setSelected(undefined);
               }}
+              onHelp={props.onHelp}
             />
           ) : (
             <PurposeRunDetail card={selected.card} index={selected.index} ko={ko} />

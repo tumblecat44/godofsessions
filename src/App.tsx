@@ -402,6 +402,10 @@ function App() {
           const orchestration = await bridge.discardOvernightCard({ id: card.id });
           transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
         }}
+        onHelp={(goal) => {
+          setDraft(`${goal} 수정하고 작업하고 있는데 도와주세요`);
+          changeView("chat");
+        }}
       />
       {view === "settings" ? (
         <SettingsView

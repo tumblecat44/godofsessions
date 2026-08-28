@@ -7,6 +7,7 @@ Tonight's set is Morrow's recommendation, not a portfolio editor. If the user sa
 - `replace-set` prepares a new draft after a revision turn and drops the previous runnable Night Plan.
 - `no-chat-start` ignores "돌리기", "start overnight", or similar as an execution command.
 - `keep-checkboxes` still shows at most three checked cards after the replacement.
+- `candidate-help` opens Ask Morrow from a candidate Help button with `{goal} 수정하고 작업하고 있는데 도와주세요` drafted, not sent.
 
 ## How to get to it (user POV)
 

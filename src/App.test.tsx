@@ -8,6 +8,10 @@ import type {
   GitHubAuthState,
   MorrowBridge,
   MorrowEvent,
+  OvernightCard,
+  OvernightGenerationId,
+  OvernightId,
+  OvernightLocalDate,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
@@ -222,6 +226,48 @@ describe("App Overnight integration", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Morrow could not confirm the stop. Work may still be running; check its status and try again.");
     expect(screen.queryByText(/private stop detail/u)).not.toBeInTheDocument();
+  });
+
+  it("fills Ask Morrow with a help draft from a candidate without starting Overnight", async () => {
+    const candidate: OvernightCard = {
+      id: "card-help" as OvernightId,
+      generationId: "gen-help" as OvernightGenerationId,
+      localDate: context.date as OvernightLocalDate,
+      status: "candidate",
+      goal: "Fix the hover",
+      finishCondition: "Hover works",
+      workAi: "codex",
+      verifyAi: "codex",
+      stallHours: 0,
+      decisionsLog: [],
+      createdAt: "2026-08-26T21:00:00.000Z",
+      updatedAt: "2026-08-26T21:00:00.000Z",
+    };
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      selectedModel: { provider: "test", id: "model" },
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready", verification: { state: "verified", canVerify: true } }],
+        overnightCards: [candidate],
+      }),
+    });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      startOvernightPortfolio: vi.fn(async () => { throw new Error("should not start"); }),
+      sendMessage: vi.fn(async () => undefined),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Fix the hover/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+
+    expect(screen.getByRole("textbox")).toHaveValue("Fix the hover 수정하고 작업하고 있는데 도와주세요");
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
+    expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
   });
 
   it("does not auto-prepare overnight when a conversation model connects", async () => {

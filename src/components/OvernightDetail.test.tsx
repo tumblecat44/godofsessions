@@ -74,11 +74,30 @@ describe("OvernightDetail", () => {
       language="en"
       onSave={vi.fn(async () => undefined)}
       onDelete={vi.fn(async () => undefined)}
+      onHelp={vi.fn()}
     />);
 
     expect(screen.getByText("Finished purpose")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Help" })).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("Finished purpose")).toBeDisabled();
+  });
+
+  it("requests help with the current goal without saving", () => {
+    const onHelp = vi.fn();
+    const onSave = vi.fn(async () => undefined);
+    render(<OvernightDetail
+      card={card({ goal: "Fix the hover" })}
+      index={0}
+      language="en"
+      onSave={onSave}
+      onDelete={vi.fn(async () => undefined)}
+      onHelp={onHelp}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    expect(onHelp).toHaveBeenCalledWith("Fix the hover");
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

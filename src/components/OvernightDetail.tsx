@@ -21,6 +21,7 @@ export interface OvernightDetailProps {
   language: AppLanguage;
   onSave(patch: OvernightCardRevision): Promise<void>;
   onDelete(): Promise<void>;
+  onHelp?(goal: string): void;
 }
 
 export function OvernightDetail(props: OvernightDetailProps) {
@@ -181,6 +182,11 @@ export function OvernightDetail(props: OvernightDetailProps) {
           <Button variant="danger" disabled={working} onClick={() => void remove()}>
             {ko ? "삭제" : "Delete"}
           </Button>
+          {props.onHelp && (
+            <Button variant="secondary" disabled={working} onClick={() => props.onHelp?.(props.card.goal)}>
+              {ko ? "도움" : "Help"}
+            </Button>
+          )}
         </div>
       )}
     </article>
