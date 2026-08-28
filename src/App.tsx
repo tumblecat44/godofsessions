@@ -45,7 +45,6 @@ function App() {
   const overnightPollInFlight = useRef(false);
   const overnightPollGeneration = useRef(0);
   const overnightPreparationInFlight = useRef(false);
-  const automaticallyPreparedContext = useRef<string | undefined>(undefined);
   const interfaceLanguage: AppLanguage = state?.language ?? (navigator.language.toLowerCase().startsWith("ko") ? "ko" : "en");
   const ko = interfaceLanguage === "ko";
 
@@ -139,23 +138,6 @@ function App() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!state?.onboardingComplete || !canPrepareOvernight || !hasReadyOvernightWorker || activePortfolioRun || conversation?.busy) return;
-    const contextKey = `${state.orchestration.context.date}:${state.orchestration.context.generatedAt}`;
-    const currentAssessment = state.orchestration.portfolioAssessments.find((assessment) => assessment.contextGeneratedAt === state.orchestration.context.generatedAt);
-    const hasLivePlan = state.orchestration.portfolioPlans.some((plan) => plan.status === "draft" && Date.now() < Date.parse(plan.expiresAt));
-    const assessmentPlanRan = Boolean(currentAssessment?.planId
-      && state.orchestration.portfolioRuns.some((run) => run.planId === currentAssessment.planId));
-    const expiredPreparedPlan = currentAssessment?.disposition === "recommend"
-      && Boolean(currentAssessment.planId)
-      && !hasLivePlan
-      && !assessmentPlanRan;
-    if (hasLivePlan || assessmentPlanRan || (currentAssessment && !expiredPreparedPlan)) return;
-    const preparationKey = `${contextKey}:${currentAssessment?.id ?? "new"}`;
-    if (automaticallyPreparedContext.current === preparationKey) return;
-    automaticallyPreparedContext.current = preparationKey;
-    void prepareOvernight();
-  }, [activePortfolioRun?.id, canPrepareOvernight, conversation?.busy, hasReadyOvernightWorker, prepareOvernight, state?.onboardingComplete, state?.orchestration.context.date, state?.orchestration.context.generatedAt, state?.orchestration.portfolioAssessments, state?.orchestration.portfolioPlans, state?.orchestration.portfolioRuns]);
   useEffect(() => {
     if (!activePortfolioRun) return;
     let disposed = false;
@@ -398,7 +380,6 @@ function App() {
         preparing={overnightPreparing}
         error={overnightError}
         onPrepare={async () => {
-          automaticallyPreparedContext.current = undefined;
           await prepareOvernight();
         }}
         onAddOvernight={async (goal) => {

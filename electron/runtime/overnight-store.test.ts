@@ -306,4 +306,79 @@ describe("OvernightStore", () => {
     })).toThrow(/알 수 없는 board lane/u);
     reopened.close();
   });
+
+  it("replaceCandidates writes only candidate rows and upserts one generation per date", async () => {
+    const { store } = await setup();
+    const localDate = parseOvernightLocalDate("2026-08-28");
+    const first = store.replaceCandidates({
+      localDate,
+      cards: [
+        draft({ goal: "first-a" }),
+        draft({ goal: "first-b" }),
+        draft({ goal: "first-c" }),
+      ],
+    });
+    expect(first.cards).toHaveLength(3);
+    expect(store.listCards(localDate).map((card) => card.goal)).toEqual([
+      "first-a",
+      "first-b",
+      "first-c",
+    ]);
+
+    const second = store.replaceCandidates({
+      localDate,
+      cards: [draft({ goal: "second-only" })],
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.cards).toHaveLength(1);
+    expect(store.listCards(localDate).map((card) => card.goal)).toEqual(["second-only"]);
+    expect(store.generationForDate(localDate)?.id).toBe(first.id);
+  });
+
+  it("replaceCandidates preserves running rows while replacing other candidates", async () => {
+    const { store } = await setup();
+    const localDate = parseOvernightLocalDate("2026-08-28");
+    const seeded = store.replaceCandidates({
+      localDate,
+      cards: [
+        draft({ goal: "keep-running" }),
+        draft({ goal: "replace-me" }),
+      ],
+    });
+    const runningId = seeded.cards[0]!.id;
+    store.beginRun(runningId);
+
+    const replaced = store.replaceCandidates({
+      localDate,
+      cards: [draft({ goal: "fresh-candidate" })],
+    });
+    expect(replaced.cards.map((card) => card.goal)).toEqual(["fresh-candidate"]);
+    expect(store.getCard(runningId)).toMatchObject({
+      id: runningId,
+      status: "running",
+      goal: "keep-running",
+    });
+    expect(store.listCards(localDate).map((card) => ({ goal: card.goal, status: card.status }))).toEqual([
+      { goal: "keep-running", status: "running" },
+      { goal: "fresh-candidate", status: "candidate" },
+    ]);
+  });
+
+  it("replaceCandidates allows an empty card list as an idempotent catch-up marker", async () => {
+    const { store } = await setup();
+    const localDate = parseOvernightLocalDate("2026-08-28");
+    store.replaceCandidates({
+      localDate,
+      cards: [draft({ goal: "leftover" })],
+    });
+
+    const empty = store.replaceCandidates({ localDate, cards: [] });
+    expect(empty.cards).toEqual([]);
+    expect(store.listCards(localDate)).toEqual([]);
+    expect(store.generationForDate(localDate)?.id).toBe(empty.id);
+
+    const again = store.replaceCandidates({ localDate, cards: [] });
+    expect(again.id).toBe(empty.id);
+    expect(store.generationForDate(localDate)?.id).toBe(empty.id);
+  });
 });

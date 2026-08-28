@@ -245,7 +245,8 @@ export class OvernightStore {
 
       CREATE INDEX IF NOT EXISTS overnight_local_date_idx ON overnight(local_date);
       CREATE INDEX IF NOT EXISTS overnight_generation_id_idx ON overnight(generation_id);
-      CREATE INDEX IF NOT EXISTS overnight_generation_local_date_idx ON overnight_generation(local_date);
+      CREATE UNIQUE INDEX IF NOT EXISTS overnight_generation_local_date_uidx
+        ON overnight_generation(local_date);
 
       CREATE TABLE IF NOT EXISTS overnight_board_ticket (
         id TEXT PRIMARY KEY,
@@ -270,8 +271,105 @@ export class OvernightStore {
   }
 
   /**
+   * Replace only `candidate` rows for `localDate` in one transaction.
+   * Upserts the single generation row for that date. Empty `cards` clears
+   * leftover candidates and still records the generation.
+   */
+  replaceCandidates(input: CommitOvernightGenerationInput): OvernightGeneration {
+    const database = this.requireOpen();
+    const localDate = parseOvernightLocalDate(input.localDate);
+    if (input.cards.length > 3) {
+      throw new Error("Overnight 후보는 하루 최대 3개입니다.");
+    }
+
+    const createdAt = this.now().toISOString();
+    const cards: OvernightCard[] = [];
+
+    database.exec("BEGIN");
+    try {
+      const existingValue = database.prepare(`
+        SELECT id, local_date, created_at
+        FROM overnight_generation
+        WHERE local_date = ?
+      `).get(localDate);
+
+      let generationId: OvernightGenerationId;
+      if (existingValue === undefined) {
+        generationId = parseOvernightGenerationId(this.createId());
+        database.prepare(
+          "INSERT INTO overnight_generation (id, local_date, created_at) VALUES (?, ?, ?)",
+        ).run(generationId, localDate, createdAt);
+      } else {
+        const existing = parseGenerationRow(existingValue);
+        generationId = existing.id;
+        database.prepare(
+          "UPDATE overnight_generation SET created_at = ? WHERE id = ?",
+        ).run(createdAt, generationId);
+      }
+
+      database.prepare(
+        "DELETE FROM overnight WHERE local_date = ? AND status = 'candidate'",
+      ).run(localDate);
+
+      const insertCard = database.prepare(`
+        INSERT INTO overnight (
+          id, generation_id, local_date, status, goal, finish_condition,
+          work_ai, verify_ai, stall_hours, decisions_log, created_at, updated_at
+        ) VALUES (?, ?, ?, 'candidate', ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const draft of input.cards) {
+        const workAi = requireProvider(draft.workAi, "workAi");
+        const verifyAi = requireProvider(draft.verifyAi, "verifyAi");
+        const stallHours = assertFiniteNonNegativeStallHours(draft.stallHours);
+        const decisionsLog = serializeDecisionsLog(draft.decisionsLog);
+        const id = parseOvernightId(this.createId());
+        insertCard.run(
+          id,
+          generationId,
+          localDate,
+          draft.goal,
+          draft.finishCondition,
+          workAi,
+          verifyAi,
+          stallHours,
+          decisionsLog,
+          createdAt,
+          createdAt,
+        );
+        cards.push(parseOvernightRow({
+          id,
+          generation_id: generationId,
+          local_date: localDate,
+          status: "candidate",
+          goal: draft.goal,
+          finish_condition: draft.finishCondition,
+          work_ai: workAi,
+          verify_ai: verifyAi,
+          stall_hours: stallHours,
+          decisions_log: decisionsLog,
+          created_at: createdAt,
+          updated_at: createdAt,
+        }));
+      }
+
+      database.exec("COMMIT");
+      return {
+        id: generationId,
+        localDate,
+        createdAt,
+        cards,
+      };
+    } catch (reason) {
+      database.exec("ROLLBACK");
+      throw reason;
+    }
+  }
+
+  /**
    * Insert a new generation for `localDate` and N candidate cards in one
    * transaction. Does not mutate prior generations for that date.
+   * Prefer `replaceCandidates` for the nightly generate path.
    */
   commitGeneration(input: CommitOvernightGenerationInput): OvernightGeneration {
     const database = this.requireOpen();
