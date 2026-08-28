@@ -5,10 +5,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   OVERNIGHT_EXECUTION_PROVIDERS,
   isOvernightBoardLane,
+  isOvernightDecisionKind,
+  isOvernightExecutionProvider,
+  parseOvernightId,
   type BootstrapState,
   type MorrowEvent,
   type OrchestrationSnapshot,
   type OvernightBoardLane,
+  type OvernightCardRevision,
+  type OvernightDecisionEntry,
   type OvernightExecutionProvider,
   type ThinkingLevel,
 } from "../src/shared/contracts";
@@ -158,6 +163,41 @@ function boolean(value: unknown, label: string) {
   return value;
 }
 
+function overnightCardRevision(value: unknown): OvernightCardRevision {
+  const input = plainRecord(value, "overnight card patch");
+  const patch: OvernightCardRevision = {};
+  if (input.goal !== undefined) patch.goal = text(input.goal, "goal", 4_000);
+  if (input.finishCondition !== undefined) patch.finishCondition = text(input.finishCondition, "finishCondition", 4_000);
+  if (input.workAi !== undefined) {
+    if (!isOvernightExecutionProvider(input.workAi)) throw new Error("Invalid workAi.");
+    patch.workAi = input.workAi;
+  }
+  if (input.verifyAi !== undefined) {
+    if (!isOvernightExecutionProvider(input.verifyAi)) throw new Error("Invalid verifyAi.");
+    patch.verifyAi = input.verifyAi;
+  }
+  if (input.stallHours !== undefined) {
+    if (typeof input.stallHours !== "number" || !Number.isFinite(input.stallHours) || input.stallHours < 0) {
+      throw new Error("Invalid stallHours.");
+    }
+    patch.stallHours = input.stallHours;
+  }
+  if (input.appendDecisions !== undefined) {
+    if (!Array.isArray(input.appendDecisions)) throw new Error("Invalid appendDecisions.");
+    patch.appendDecisions = input.appendDecisions.map((entry): OvernightDecisionEntry => {
+      const recordEntry = plainRecord(entry, "decision entry");
+      const kind = recordEntry.kind;
+      if (!isOvernightDecisionKind(kind)) throw new Error("Invalid decision kind.");
+      return {
+        at: text(recordEntry.at, "decision at", 64),
+        kind,
+        note: text(recordEntry.note, "decision note", 4_000),
+      };
+    });
+  }
+  return patch;
+}
+
 function handle(channel: string, action: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => unknown) {
   ipcMain.handle(channel, async (event, ...args) => {
     assertTrustedSender(event);
@@ -225,6 +265,17 @@ function registerIpc() {
       throw new Error("Invalid overnight provider.");
     }
     return service().verifyOvernightProvider(value as OvernightExecutionProvider);
+  });
+  handle("morrow:revise-overnight-card", (_event, value) => {
+    const input = plainRecord(value, "overnight card revision");
+    return service().reviseOvernightCard(
+      parseOvernightId(boundedId(input.id, "overnight card id")),
+      overnightCardRevision(input.patch),
+    );
+  });
+  handle("morrow:discard-overnight-card", (_event, value) => {
+    const input = plainRecord(value, "overnight card discard");
+    return service().discardOvernightCard(parseOvernightId(boundedId(input.id, "overnight card id")));
   });
   handle("morrow:start-overnight-portfolio", async (_event, planId, itemIds) => {
     const selected = Array.isArray(itemIds)

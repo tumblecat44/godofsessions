@@ -190,6 +190,9 @@ describe("OvernightStore", () => {
     ]);
     expect(revised.updatedAt).toBe("2026-08-28T13:00:00.000Z");
 
+    expect(() => store.revise(cardId, { goal: "   " })).toThrow(/목표는 비워 둘 수 없습니다/u);
+    expect(store.getCard(cardId)?.goal).toBe("updated goal");
+
     store.beginRun(cardId);
     store.markRan(cardId);
     expect(() => store.revise(cardId, { goal: "too late" })).toThrow(/후보 상태가 아닌/u);

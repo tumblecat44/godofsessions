@@ -392,6 +392,16 @@ function App() {
           try { await stopOvernightPortfolio(runId); }
           catch { transitionState(() => setOvernightError(overnightStopFailureMessage(state.language))); }
         }}
+        onReviseCard={async (card, patch) => {
+          if (!bridge.reviseOvernightCard) throw new Error(state.language === "ko" ? "후보를 저장할 수 없습니다." : "Cannot save this candidate.");
+          const orchestration = await bridge.reviseOvernightCard({ id: card.id, patch });
+          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
+        }}
+        onDiscardCard={async (card) => {
+          if (!bridge.discardOvernightCard) throw new Error(state.language === "ko" ? "후보를 삭제할 수 없습니다." : "Cannot delete this candidate.");
+          const orchestration = await bridge.discardOvernightCard({ id: card.id });
+          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
+        }}
       />
       {view === "settings" ? (
         <SettingsView

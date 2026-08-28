@@ -5,6 +5,7 @@ import type {
   OvernightBoardTicket,
   OrchestrationSnapshot,
   OvernightCard,
+  OvernightCardRevision,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioRunItemSummary,
   OvernightPortfolioRunSummary,
@@ -16,6 +17,7 @@ import { overnightTickets } from "../lib/overnight-tickets";
 import { startedRunItems, tonightPlanItems, visibleTonightPlan } from "../lib/tonight";
 import { CopyCommandButton } from "./CopyCommandButton";
 import { OvernightCalendarButton, OvernightDateEmptyState, overnightDateKey } from "./OvernightCalendar";
+import { OvernightDetail } from "./OvernightDetail";
 import { boardTicketsFromOvernightTickets, OvernightKanban } from "./OvernightKanban";
 import { Button } from "./ui/Button";
 
@@ -31,8 +33,9 @@ interface OvernightViewProps {
   onOpenSettings(): void;
   onOpenChat?(): void;
   onStopPortfolio(runId: string): Promise<void>;
+  onReviseCard?(card: OvernightCard, patch: OvernightCardRevision): Promise<void>;
+  onDiscardCard?(card: OvernightCard): Promise<void>;
 }
-
 const activeRunStatuses = new Set<OvernightPortfolioRunSummary["status"]>(["starting", "running", "stopping"]);
 
 type SelectedOvernight =
@@ -92,9 +95,14 @@ export function OvernightView(props: OvernightViewProps) {
   useEffect(() => {
     if (!selected) return;
     if (selected.kind === "candidate") {
-      const stillThere = todayCandidates.some((card) => card.id === selected.card.id)
-        || todayPurposeRuns.some((card) => card.id === selected.card.id);
-      if (!stillThere) setSelected(undefined);
+      const updated = [...todayCandidates, ...todayPurposeRuns].find((card) => card.id === selected.card.id);
+      if (!updated) {
+        setSelected(undefined);
+        return;
+      }
+      if (updated !== selected.card) {
+        setSelected({ ...selected, card: updated });
+      }
       return;
     }
     const runStillThere = legacyCards.some((card) => card.key === selected.key)
@@ -132,7 +140,24 @@ export function OvernightView(props: OvernightViewProps) {
         {props.error && <div className="overnight-error flex items-center justify-between gap-3" role="alert"><span>{props.error}</span><button type="button" className="shrink-0 font-semibold underline underline-offset-2" onClick={() => void props.onPrepare()}>{ko ? "다시 시도" : "Try again"}</button></div>}
 
         {selected?.kind === "candidate" ? (
-          <CandidateDetail card={selected.card} index={selected.index} ko={ko} />
+          selected.card.status === "candidate" ? (
+            <OvernightDetail
+              card={selected.card}
+              index={selected.index}
+              language={props.language}
+              onSave={async (patch) => {
+                if (!props.onReviseCard) return;
+                await props.onReviseCard(selected.card, patch);
+              }}
+              onDelete={async () => {
+                if (!props.onDiscardCard) return;
+                await props.onDiscardCard(selected.card);
+                setSelected(undefined);
+              }}
+            />
+          ) : (
+            <PurposeRunDetail card={selected.card} index={selected.index} ko={ko} />
+          )
         ) : selected?.kind === "run" ? (
           <OvernightRunDetail index={selected.index} planItem={selected.planItem} runItem={selected.runItem} ko={ko} />
         ) : today ? (
@@ -331,7 +356,7 @@ function TodayBoard({
   );
 }
 
-function CandidateDetail({ card, index, ko }: { card: OvernightCard; index: number; ko: boolean }) {
+function PurposeRunDetail({ card, index, ko }: { card: OvernightCard; index: number; ko: boolean }) {
   return (
     <article className="portfolio-run-item is-draft" aria-label={ko ? `${card.goal} Overnight` : `Overnight: ${card.goal}`}>
       <header>
@@ -340,8 +365,12 @@ function CandidateDetail({ card, index, ko }: { card: OvernightCard; index: numb
           <h3>{card.goal}</h3>
         </div>
       </header>
-      <div className="flex flex-wrap gap-2 border-t border-line-soft px-4 py-3 text-[10px] text-ink-muted">
-        <span className="inline-flex items-center gap-1.5"><MoonStar size={12} />{card.workAi}</span>
+      <div className="grid gap-3 border-t border-line-soft px-4 py-4 text-[11px] leading-5 text-ink-muted">
+        <p><strong className="text-ink-faint">{ko ? "상태" : "Status"}</strong> {card.status}</p>
+        <p><strong className="text-ink-faint">{ko ? "끝나는 조건" : "Finish condition"}</strong> {card.finishCondition || (ko ? "없음" : "None")}</p>
+        <p><strong className="text-ink-faint">{ko ? "작업 AI" : "Work AI"}</strong> {card.workAi}</p>
+        <p><strong className="text-ink-faint">{ko ? "검증 AI" : "Verify AI"}</strong> {card.verifyAi}</p>
+        <p><strong className="text-ink-faint">{ko ? "중단 시간" : "Stall hours"}</strong> {card.stallHours}</p>
       </div>
     </article>
   );

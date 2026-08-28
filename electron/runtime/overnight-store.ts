@@ -627,6 +627,9 @@ export class OvernightStore {
     if (card.status !== "candidate") {
       throw new Error("후보 상태가 아닌 Overnight은 수정할 수 없습니다.");
     }
+    if (typeof patch.goal === "string" && patch.goal.trim().length === 0) {
+      throw new Error("목표는 비워 둘 수 없습니다.");
+    }
 
     const goal = patch.goal ?? card.goal;
     const finishCondition = patch.finishCondition ?? card.finishCondition;

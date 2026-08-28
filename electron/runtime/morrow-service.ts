@@ -29,7 +29,9 @@ import type {
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
   OvernightCard,
+  OvernightCardRevision,
   OvernightExecutionProvider,
+  OvernightId,
   OvernightProviderRouteSummary,
   OvernightProviderVerificationSummary,
   ThinkingLevel,
@@ -494,6 +496,16 @@ export class MorrowService {
         return recommendation;
       },
     });
+  }
+
+  async reviseOvernightCard(id: OvernightId, patch: OvernightCardRevision): Promise<OrchestrationSnapshot> {
+    this.overnightStore.revise(parseOvernightId(id), patch);
+    return this.combinedOrchestrationSnapshot(false);
+  }
+
+  async discardOvernightCard(id: OvernightId): Promise<OrchestrationSnapshot> {
+    this.overnightStore.discard(parseOvernightId(id));
+    return this.combinedOrchestrationSnapshot(false);
   }
 
   private async catchUpOvernightCandidatesIfNeeded() {
