@@ -103,7 +103,6 @@ function props(overrides: Partial<React.ComponentProps<typeof OvernightView>> = 
     preparing: false,
     onPrepare: vi.fn(async () => undefined),
     onOpenSettings: vi.fn(),
-    onStartPortfolio: vi.fn(async () => undefined),
     onStopPortfolio: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -247,8 +246,7 @@ describe("Overnight one-button workspace", () => {
 
   it("keeps a failed start simple and retryable without exposing runtime errors", async () => {
     const item = planItem("first", "Retryable outcome", "codex");
-    const start = vi.fn(async () => { throw new Error("Error invoking remote method: private runtime detail"); });
-    render(<OvernightView {...props({ snapshot: snapshot({ portfolioPlans: [plan([item])] }), onStartPortfolio: start })} />);
+    render(<OvernightView {...props({ snapshot: snapshot({ portfolioPlans: [plan([item])] }) })} />);
 
     expect(screen.getByText("Retryable outcome")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Overnight" })).not.toBeInTheDocument();
@@ -358,8 +356,12 @@ describe("Overnight one-button workspace", () => {
     const item = planItem("first", "Blocked until checked", "codex");
     render(<OvernightView {...props({ snapshot: snapshot({ portfolioPlans: [plan([item])] }) })} />);
 
+    expect(screen.getByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Blocked until checked")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Overnight" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Start \d+ selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
   });
 
   it("keeps stale cards visible and lets the launch boundary revalidate them when refresh fails", () => {
@@ -385,5 +387,33 @@ describe("Overnight one-button workspace", () => {
     expect(screen.getByRole("region", { name: "Overnights" })).toBe(list);
     expect(screen.getByText("Short-lived purpose")).toBeInTheDocument();
     expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("does not fill an empty night with vacant overnight slots", () => {
+    render(<OvernightView {...props()} />);
+
+    expect(screen.getByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No Overnight is ready tonight" })).toBeInTheDocument();
+    expect(screen.queryByText("Empty")).not.toBeInTheDocument();
+    expect(screen.queryByText("OVERNIGHT 1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Start \d+ selected/ })).not.toBeInTheDocument();
+  });
+
+  it("opens one kanban from the list and returns to Overnight", () => {
+    const first = planItem("first", "First outcome", "claude");
+    const second = planItem("second", "Second outcome", "grok");
+    render(<OvernightView {...props({ snapshot: snapshot({ portfolioPlans: [plan([first, second])] }) })} />);
+
+    expect(screen.getByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /First outcome/ }));
+    expect(screen.getByRole("region", { name: /Status for First outcome/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Second outcome/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All overnights" }));
+    expect(screen.getByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Status for/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Second outcome/ })).toBeInTheDocument();
   });
 });

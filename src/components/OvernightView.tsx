@@ -15,7 +15,6 @@ import { CopyCommandButton } from "./CopyCommandButton";
 import { OvernightCalendarButton, OvernightDateEmptyState, overnightDateKey } from "./OvernightCalendar";
 import { OvernightKanban } from "./OvernightKanban";
 import { Button } from "./ui/Button";
-import { Surface } from "./ui/Surface";
 
 interface OvernightViewProps {
   hidden?: boolean;
@@ -27,7 +26,6 @@ interface OvernightViewProps {
   onPrepare(): Promise<void>;
   onOpenSettings(): void;
   onOpenChat?(): void;
-  onStartPortfolio?(planId: string, itemIds?: string[]): Promise<void>;
   onStopPortfolio(runId: string): Promise<void>;
 }
 
@@ -76,8 +74,7 @@ export function OvernightView(props: OvernightViewProps) {
     <main className="overnight-view h-dvh overflow-y-auto bg-night px-[clamp(32px,5vw,80px)] pb-16 pt-[clamp(58px,7vh,82px)] text-ink max-[1120px]:px-9" hidden={props.hidden}>
       <header className="overnight-head mx-auto grid w-full max-w-[1080px] grid-cols-[minmax(0,1fr)_auto] items-end gap-8 border-b border-line pb-7">
         <div>
-          <span className="eyebrow font-mono text-[10px] font-semibold tracking-[0.16em] text-amber">MORROW · OVERNIGHT</span>
-          <h1 className="mt-3 text-[clamp(40px,4.6vw,58px)] font-medium leading-[0.96] tracking-[-0.055em]">
+          <h1 className="text-[clamp(32px,3.6vw,48px)] font-medium leading-[0.96] tracking-[-0.05em]">
             {selectedCard ? (selectedCard.planItem?.outcome ?? selectedCard.runItem?.outcome ?? "Overnight") : "Overnight"}
           </h1>
           <p className="mt-3 max-w-[680px] text-sm leading-6 text-ink-muted">
@@ -93,20 +90,20 @@ export function OvernightView(props: OvernightViewProps) {
         )}
       </header>
 
-      <Surface className="overnight-section overnight-primary-state portfolio-primary !overflow-visible" aria-label={ko ? "Overnights" : "Overnights"}>
+      <section className="overnight-list mx-auto mt-8 w-full max-w-[1080px]" aria-label={ko ? "Overnights" : "Overnights"}>
         {selectedActiveRun && !selectedCard && <ActiveRunBar run={selectedActiveRun} ko={ko} onStop={props.onStopPortfolio} />}
 
         {props.error && <div className="overnight-error flex items-center justify-between gap-3" role="alert"><span>{props.error}</span><button type="button" className="shrink-0 font-semibold underline underline-offset-2" onClick={() => void props.onPrepare()}>{ko ? "다시 시도" : "Try again"}</button></div>}
 
         {selectedCard ? (
           <OvernightCard index={selectedCard.index} planItem={selectedCard.planItem} runItem={selectedCard.runItem} ko={ko} />
-        ) : (
-          <div className="grid gap-3" aria-label={ko ? "선택한 날짜의 Overnight" : "Overnights for selected date"}>
+        ) : cards.length > 0 ? (
+          <ul className="grid gap-2" aria-label={ko ? "선택한 날짜의 Overnight" : "Overnights for selected date"}>
             {cards.map((card) => (
-              <button
+              <li key={card.key}>
+                <button
                 type="button"
-                key={card.key}
-                className="flex w-full items-center justify-between gap-4 rounded-[12px] border border-line bg-surface/50 px-4 py-3.5 text-left transition-[background-color,border-color] duration-150 ease-morrow hover:border-white/15 hover:bg-surface-raised"
+                className="flex w-full items-center justify-between gap-4 rounded-[12px] border border-line bg-transparent px-4 py-3.5 text-left transition-[background-color,border-color] duration-150 ease-morrow hover:border-white/15 hover:bg-surface"
                 onClick={() => setSelectedKey(card.key)}
               >
                 <span className="min-w-0">
@@ -116,11 +113,10 @@ export function OvernightView(props: OvernightViewProps) {
                 </span>
                 <ChevronRight size={16} className="shrink-0 text-ink-faint" />
               </button>
+              </li>
             ))}
-          </div>
-        )}
-
-        {cards.length === 0 && !selectedCard && (
+          </ul>
+        ) : (
           <EmptyToday
             date={selectedDate}
             today={today}
@@ -132,7 +128,7 @@ export function OvernightView(props: OvernightViewProps) {
             onOpenChat={props.onOpenChat}
           />
         )}
-      </Surface>
+      </section>
     </main>
   );
 }
