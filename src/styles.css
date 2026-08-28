@@ -45,7 +45,7 @@
   background: var(--void);
 }
 
-.chat-workspace[hidden] { display: none; }
+.chat-workspace[hidden] { display: none; view-transition-name: none; }
 
 .morrow-chat-head {
   min-height: 92px;
@@ -9462,6 +9462,7 @@ button:active:not(:disabled) {
 
 .overnight-view[hidden] {
   display: none;
+  view-transition-name: none;
 }
 
 .overnight-head {

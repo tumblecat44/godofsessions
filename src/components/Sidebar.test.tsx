@@ -74,4 +74,14 @@ describe("V2 navigation", () => {
     expect(screen.getByRole("button", { name: "Overnight" })).toHaveTextContent("Overnight");
     expect(screen.queryByLabelText("Overnight 날짜 선택")).not.toBeInTheDocument();
   });
+
+  it("renders the complete Korean sidebar without crashing", () => {
+    render(<Sidebar view="settings" language="ko" conversations={conversations} {...noop} />);
+
+    expect(screen.getByRole("button", { name: "Morrow에게 묻기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overnight" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "설정" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "새 대화" })).toBeInTheDocument();
+    expect(screen.getByText("대화", { selector: "span" })).toBeInTheDocument();
+  });
 });

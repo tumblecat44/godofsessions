@@ -34,6 +34,87 @@ const state: BootstrapState = {
   },
 };
 
+describe("Settings language toggle", () => {
+  it("renders the complete shell in Korean without crashing", () => {
+    const koreanState = { ...state, language: "ko" as const };
+    render(
+      <SettingsView
+        state={koreanState}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={vi.fn(async () => undefined)}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "파일 작업 폴더" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "GitHub 계정" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "대화 언어" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "한국어" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "English" })).toBeInTheDocument();
+  });
+
+  it("switches from English to Korean and back without blanking the view", async () => {
+    let currentLanguage = "en" as "en" | "ko";
+    const onLanguage = vi.fn(async (lang: "en" | "ko") => { currentLanguage = lang; });
+    
+    const { rerender } = render(
+      <SettingsView
+        state={{ ...state, language: "en" }}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={onLanguage}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+    
+    fireEvent.click(screen.getByRole("button", { name: "한국어" }));
+    await waitFor(() => expect(onLanguage).toHaveBeenCalledWith("ko"));
+
+    rerender(
+      <SettingsView
+        state={{ ...state, language: "ko" }}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={onLanguage}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "연결과 기본 설정" })).toBeInTheDocument();
+    
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    await waitFor(() => expect(onLanguage).toHaveBeenCalledWith("en"));
+
+    rerender(
+      <SettingsView
+        state={{ ...state, language: "en" }}
+        githubProfile={{ id: 1, login: "synthetic-user" }}
+        onConnect={vi.fn(async () => undefined)}
+        onDisconnect={vi.fn(async () => undefined)}
+        onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onLanguage={onLanguage}
+        onManageGitHub={vi.fn(async () => undefined)}
+        onLogoutGitHub={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+  });
+});
+
 describe("Settings user-facing safety contract", () => {
   it("explains the exact file boundary and honest data transfer without implementation slogans", () => {
     render(
