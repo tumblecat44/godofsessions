@@ -10,9 +10,9 @@ import {
 function route(
   provider: OvernightProviderRouteSummary["provider"],
   status: OvernightProviderRouteSummary["status"],
-  label = provider,
+  label?: string,
 ): OvernightProviderRouteSummary {
-  return { provider, label, status };
+  return { provider, label: label ?? provider, status };
 }
 
 describe("official Overnight CLIs", () => {
