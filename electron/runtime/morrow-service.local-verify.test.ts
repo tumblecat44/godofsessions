@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,6 +98,7 @@ describe("local verify tonight plan", () => {
     });
     try {
       await service.initialize();
+      expect(existsSync(join(dataDir, "overnight", "overnights.sqlite"))).toBe(true);
       const bootstrap = await service.bootstrap();
       expect(bootstrap.models).toHaveLength(0);
       expect(proposals).toHaveLength(1);
