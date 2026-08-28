@@ -13,6 +13,8 @@ const skillRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = process.env.GOS_VERIFY_REPO ?? join(skillRoot, "../../..");
 const verifyHome = process.env.GOS_VERIFY_HOME ?? join(tmpdir(), "godofsessions-verify");
 const currentPath = join(verifyHome, "current");
+// ponytail: durable evidence path inside repo survives cleanup and /tmp wipe
+const durableEvidenceRoot = process.env.GOS_VERIFY_EVIDENCE ?? join(repoRoot, ".verify", "evidence");
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -21,7 +23,7 @@ await dispatch(command, argv.slice(1));
 
 async function dispatch(commandName, args) {
   if (commandName === "_hold") return hold(args[0]);
-  if (commandName === "launch") return launch();
+  if (commandName === "launch") return launch(args.includes("--local-verify"));
   if (commandName === "doctor") return doctor(await loadSession());
   if (commandName === "drive") return drive(args[0]);
   if (commandName === "screenshot") return screenshot(flag(args, "--name") ?? "screen");
@@ -36,12 +38,14 @@ async function dispatch(commandName, args) {
 
 function usage(code) {
   process.stderr.write(`Usage: gos-verify.mjs <launch|doctor|drive|screenshot|aria|click|wait|absent|text|cleanup> [args]
-  drive github-identity-gate
+  launch --local-verify          bypass GitHub gate with MORROW_VERIFY_IDENTITY=local
+  drive github-identity-gate     verify GitHub gate blocks Morrow/Overnight
+  drive tonight-home             verify tonight cards (requires --local-verify or GitHub identity)
   click --role button --name "Continue with GitHub"
   wait --role heading --name "Start with GitHub."
   absent --role button --name "Ask Morrow"
   screenshot --name github-gate
-Evidence stays under $GOS_VERIFY_HOME (default /tmp/godofsessions-verify). Cleanup never deletes it.
+Evidence stays under .verify/evidence/<run-id>/ (durable) or $GOS_VERIFY_HOME. Cleanup never deletes it.
 `);
   process.exit(code);
 }
@@ -51,12 +55,13 @@ function flag(args, name) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
-async function launch() {
+async function launch(localVerify = false) {
   await mkdir(verifyHome, { recursive: true });
   await assertBuilt();
   const runId = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const sandbox = await mkdtemp(join(verifyHome, `${runId}-`));
-  const evidenceDir = join(verifyHome, runId);
+  // ponytail: use durable evidence path inside repo when available
+  const evidenceDir = join(durableEvidenceRoot, runId);
   await mkdir(evidenceDir, { recursive: true });
   const session = {
     runId,
@@ -67,6 +72,7 @@ async function launch() {
     repoRoot,
     holdPid: 0,
     startedAt: new Date().toISOString(),
+    localVerify,
   };
   await Promise.all([mkdir(session.userData), mkdir(session.workspace)]);
   await writeFile(join(sandbox, "session.json"), JSON.stringify(session, null, 2));
@@ -89,16 +95,19 @@ async function launch() {
 async function hold(sandbox) {
   if (!sandbox) throw new Error("hold requires a sandbox path");
   const session = JSON.parse(await readFile(join(sandbox, "session.json"), "utf8"));
+  const env = {
+    ...sanitizedEnvironment(),
+    LANG: "en_US.UTF-8",
+    LC_ALL: "en_US.UTF-8",
+    MORROW_ROOT: session.workspace,
+  };
+  // ponytail: bypass GitHub gate with existing adoptLocalVerifyIdentity
+  if (session.localVerify) env.MORROW_VERIFY_IDENTITY = "local";
   const app = await electron.launch({
     executablePath: electronPath,
     args: [session.repoRoot, `--user-data-dir=${session.userData}`, "--lang=en-US"],
     cwd: session.repoRoot,
-    env: {
-      ...sanitizedEnvironment(),
-      LANG: "en_US.UTF-8",
-      LC_ALL: "en_US.UTF-8",
-      MORROW_ROOT: session.workspace,
-    },
+    env,
   });
   const page = await app.firstWindow();
   await writeFile(join(sandbox, "ready"), `${process.pid}\n`);
@@ -173,32 +182,108 @@ async function doctor(session) {
 }
 
 async function drive(feature) {
-  if (feature !== "github-identity-gate") {
-    throw new Error(`drive recipes in this helper: github-identity-gate (got ${feature ?? "none"})`);
+  const supported = ["github-identity-gate", "tonight-home"];
+  if (!supported.includes(feature)) {
+    throw new Error(`drive recipes in this helper: ${supported.join(", ")} (got ${feature ?? "none"})`);
   }
   const owned = !(await exists(currentPath));
   if (owned) await launch();
   const session = await loadSession();
   try {
     await doctor(session);
-    await rpc(session, { op: "wait", role: "heading", name: "/GitHub/" });
-    await rpc(session, { op: "wait", role: "button", name: "/GitHub/" });
-    const body = await rpc(session, { op: "text" });
-    if (!/APP IDENTITY · NO REPOSITORY ACCESS|앱 사용자 확인 · 저장소 접근 없음/u.test(body)) {
-      throw new Error("GitHub identity eyebrow is missing");
+    if (feature === "github-identity-gate") {
+      await driveGithubIdentityGate(session);
+    } else if (feature === "tonight-home") {
+      await driveTonightHome(session);
     }
-    if ((await rpc(session, { op: "count", role: "button", name: "Ask Morrow" })) !== 0) {
-      throw new Error("Ask Morrow leaked past the identity gate");
-    }
-    if ((await rpc(session, { op: "count", role: "button", name: "Overnight" })) !== 0) {
-      throw new Error("Overnight leaked past the identity gate");
-    }
-    const shot = await rpc(session, { op: "screenshot", name: "github-identity-gate" });
-    const ariaPath = await rpc(session, { op: "aria", name: "github-identity-gate" });
-    process.stdout.write(`drive github-identity-gate pass\nscreenshot ${shot}\naria ${ariaPath}\n`);
   } finally {
     if (owned) await cleanup(session);
   }
+}
+
+async function driveGithubIdentityGate(session) {
+  await rpc(session, { op: "wait", role: "heading", name: "/GitHub/" });
+  await rpc(session, { op: "wait", role: "button", name: "/GitHub/" });
+  const body = await rpc(session, { op: "text" });
+  if (!/APP IDENTITY · NO REPOSITORY ACCESS|앱 사용자 확인 · 저장소 접근 없음/u.test(body)) {
+    throw new Error("GitHub identity eyebrow is missing");
+  }
+  if ((await rpc(session, { op: "count", role: "button", name: "Ask Morrow" })) !== 0) {
+    throw new Error("Ask Morrow leaked past the identity gate");
+  }
+  if ((await rpc(session, { op: "count", role: "button", name: "Overnight" })) !== 0) {
+    throw new Error("Overnight leaked past the identity gate");
+  }
+  const shot = await rpc(session, { op: "screenshot", name: "github-identity-gate" });
+  const ariaPath = await rpc(session, { op: "aria", name: "github-identity-gate" });
+  process.stdout.write(`drive github-identity-gate pass\nscreenshot ${shot}\naria ${ariaPath}\n`);
+}
+
+async function driveTonightHome(session) {
+  let body = await rpc(session, { op: "text" });
+
+  // Check if we're past the GitHub gate
+  const hasGithubGate = /Start with GitHub|GitHub로 계속/u.test(body);
+  if (hasGithubGate) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-blocked-github" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-blocked-github" });
+    process.stdout.write(`tonight-home INCONCLUSIVE\nprecondition: GitHub identity required (use --local-verify on launch)\nobserved: GitHub gate is showing\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  // Click through onboarding if present (Continue buttons, then Look around without a model)
+  for (let step = 0; step < 5; step += 1) {
+    const continueCount = await rpc(session, { op: "count", role: "button", name: "Continue" });
+    if (continueCount === 0) break;
+    await rpc(session, { op: "click", role: "button", name: "Continue" });
+    await sleep(300);
+  }
+  const lookAroundCount = await rpc(session, { op: "count", role: "button", name: "/Look around without a model|Enter the room/" });
+  if (lookAroundCount > 0) {
+    await rpc(session, { op: "click", role: "button", name: "/Look around without a model|Enter the room/" });
+    await sleep(500);
+  }
+
+  // Wait for Ask Morrow to appear (we're past onboarding)
+  try {
+    await rpc(session, { op: "wait", role: "button", name: "Ask Morrow", timeout: 10_000 });
+  } catch {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-no-ask-morrow" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-no-ask-morrow" });
+    process.stdout.write(`tonight-home INCONCLUSIVE\nprecondition: Ask Morrow not visible after onboarding\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  // Re-read body after onboarding
+  body = await rpc(session, { op: "text" });
+
+  // Check for the "Connect a conversation model" state - this is the RED case
+  // ponytail: handle both ASCII apostrophe (') and Unicode right single quote (')
+  const noModelConnected = /Connect a conversation model to see tonight.s 3 cards/u.test(body);
+  if (noModelConnected) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-no-model" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-no-model" });
+    process.stdout.write(`tonight-home RED\nobserved: "Connect a conversation model to see tonight's 3 cards"\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Check for tonight cards region (ARIA label, look for TONIGHT header text)
+  const hasTonightRegion = /TONIGHT/u.test(body);
+  if (!hasTonightRegion) {
+    const shot = await rpc(session, { op: "screenshot", name: "tonight-home-no-cards" });
+    const ariaPath = await rpc(session, { op: "aria", name: "tonight-home-no-cards" });
+    process.stdout.write(`tonight-home RED\nobserved: Tonight section not found\nevidence: ${shot}\naria: ${ariaPath}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Success: we have tonight cards visible
+  const shot = await rpc(session, { op: "screenshot", name: "tonight-home" });
+  const ariaPath = await rpc(session, { op: "aria", name: "tonight-home" });
+  process.stdout.write(`tonight-home pass\nscreenshot ${shot}\naria ${ariaPath}\n`);
 }
 
 async function screenshot(name) {

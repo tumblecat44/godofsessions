@@ -1,0 +1,92 @@
+- complementary:
+  - strong: GOD OF SESSIONS
+  - text: MORROW · NIGHT CONTROL
+  - navigation "Workspace":
+    - button "Ask Morrow":
+      - img
+      - text: Ask Morrow
+    - button "Overnight":
+      - img
+      - text: Overnight
+    - button "Settings":
+      - img
+      - text: Settings
+  - region "Conversations":
+    - img
+    - text: CONVERSATIONS
+    - button "New conversation":
+      - img
+      - text: New conversation
+    - paragraph: Your first conversation will settle here.
+- main:
+  - strong: MORROW
+  - strong: EXECUTION ROOT
+  - text: ·
+  - code: /tmp/godofsessions-verify/1787874231867-3a3b52a4-wiGFF0/workspace
+  - region "Tonight's overnights":
+    - text: TONIGHT
+    - heading "Connect a conversation model to see tonight’s 3 cards" [level=2]
+    - paragraph: Connect one below. Morrow then picks up to 3 cards. Read them, uncheck any, press Start.
+    - strong: Anthropic
+    - text: Anthropic (Claude Pro/Max)
+    - button "Use a Anthropic API key · API usage is billed separately by the provider":
+      - img
+      - text: API key
+    - button "Sign in with your Anthropic account or subscription":
+      - img
+      - text: Sign in
+    - strong: OpenAI Codex
+    - text: OpenAI (ChatGPT Plus/Pro)
+    - button "Sign in with your OpenAI Codex account or subscription":
+      - img
+      - text: Sign in
+    - strong: OpenAI
+    - text: OpenAI API key
+    - button "Use a OpenAI API key · API usage is billed separately by the provider":
+      - img
+      - text: API key
+    - strong: GitHub Copilot
+    - text: GitHub Copilot
+    - button "Use a GitHub Copilot API key · API usage is billed separately by the provider":
+      - img
+      - text: API key
+    - button "Sign in with your GitHub Copilot account or subscription":
+      - img
+      - text: Sign in
+    - strong: Google
+    - text: Gemini API key
+    - button "Use a Google API key · API usage is billed separately by the provider":
+      - img
+      - text: API key
+    - strong: xAI
+    - text: Sign in with SuperGrok or X Premium
+    - button "Use a xAI API key · API usage is billed separately by the provider":
+      - img
+      - text: API key
+    - button "Sign in with your xAI account or subscription":
+      - img
+      - text: Sign in
+    - button "Show 34 more providers"
+  - img "Morrow waiting beside a small light"
+  - text: MORROW IS HERE MORROW
+  - heading "What shall we untangle together?" [level=1]
+  - paragraph: You can simply talk. When tonight’s cards are visible, read them and press Start, or tell me here if they are wrong. I only reach for files or commands when you ask, and I pause before changing anything.
+  - img
+  - strong: Give Morrow a voice first
+  - text: Connect one in the Tonight section above. Anything you typed here will stay put.
+  - button "Connect model":
+    - img
+    - text: Connect model
+  - textbox "Talk to Morrow about anything…"
+  - button "Connect a model" [disabled]:
+    - text: Connect a model
+    - img
+  - combobox "Response depth" [disabled]:
+    - option "Fastest" [selected]
+    - option "Faster"
+    - option "Light review"
+    - option "Balanced"
+    - option "Deeper · slower"
+    - option "Very deep · slower"
+    - option "Deepest · slowest"
+  - button "Send" [disabled]

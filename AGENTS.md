@@ -73,3 +73,26 @@ forbidden from spawning its own subagents. It is not a cloud service.
   be private.
 - Do not add a dependency or asset without checking its license and recording
   any required notice.
+
+## Definition of Done
+
+Compile passing and tests green is not done. A change is done when:
+
+- **Finish condition in PR.** The PR description states the finish condition a
+  stranger can check without trusting the author.
+- **UI changes need action+result+GIF.** An action still, a result still, and a
+  GIF showing the transition. A final screenshot alone is incomplete.
+- **Embeds must render on the PR.** A stranger must see the pictures on GitHub
+  without cloning. Local-only or `/tmp/` evidence is not done. Gitignored paths
+  do not count. Commit evidence to a tracked path (e.g. `docs/verify/`) and
+  embed it in the PR body.
+- **Author is not the merge verifier.** The author of the PR does not declare
+  the map honest. A second person runs the verification.
+- **Related feature-map entry must be driven.** If the change touches a mapped
+  feature, drive that feature before marking done. For features marked
+  "Live + synthetic required" in `.grok/skills/verify-god-of-sessions/features/`,
+  a synthetic-only pass is incomplete.
+
+Live drive is: Launch → Doctor → Drive → Evidence → Cleanup → confirm evidence
+exists. If preconditions are unmet (no display, no GitHub, no model), report
+the run as RED or INCONCLUSIVE with the unmet precondition, not as pass.

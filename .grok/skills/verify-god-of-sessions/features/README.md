@@ -49,9 +49,12 @@ Live isolated Electron (`gos-verify.mjs`):
 
 - [GitHub identity gate](./github-identity-gate.md) covers the first-run GitHub screen and that Morrow and Overnight stay hidden until sign-in.
 
+Live + synthetic required (live drive proves reality, synthetic proves renderer contract):
+
+- [Tonight home](./tonight-home.md) covers Morrow as home, three checked cards, uncheck, start checked only. **Synthetic-only is incomplete.** Live drive must show actual tonight cards, not the "Connect a conversation model" provider grid.
+
 Renderer contract with synthetic GitHub and Morrow IPC (`drive.mjs`, `npm run verify:ui`):
 
-- [Tonight home](./tonight-home.md) covers Morrow as home, three checked cards, uncheck, start checked only.
 - [Overnight board](./overnight-board.md) covers today's list, one card per Overnight, status view, calendar.
 - [Settings CLIs](./settings-clis.md) covers PATH status for four official CLIs and no Safety check.
 - [Four routes](./four-routes.md) covers Claude Code, Codex, Grok Build, Pi Agent as the only startable workers.
