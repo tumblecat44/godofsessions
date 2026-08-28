@@ -45,3 +45,15 @@ test("uses only the requested open-source trust line and explains the reference 
   assert.ok(html.indexOf("WHY $500?") > html.indexOf("OPEN SOURCE."));
   assert.doesNotMatch(html, /local[- ]first/i);
 });
+
+test("download CTAs follow the Worker mac route with no client artifact probe", async () => {
+  const main = await readFile(new URL("./src/main.ts", import.meta.url), "utf8");
+  const downloadHrefs = [...html.matchAll(/href="([^"]+)"[^>]*>Download for macOS/g)].map(
+    (match) => match[1],
+  );
+
+  assert.equal(downloadHrefs.length, 3);
+  assert.ok(downloadHrefs.every((href) => href === "/download/mac"));
+  assert.doesNotMatch(html, /data-artifact-href|data-download-link/);
+  assert.doesNotMatch(main, /checksum\.txt|preventDefault|data-download-link|artifactHref/);
+});
