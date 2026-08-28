@@ -146,11 +146,9 @@ function App() {
     const hasLivePlan = state.orchestration.portfolioPlans.some((plan) => plan.status === "draft" && Date.now() < Date.parse(plan.expiresAt));
     const assessmentPlanRan = Boolean(currentAssessment?.planId
       && state.orchestration.portfolioRuns.some((run) => run.planId === currentAssessment.planId));
-    const expiredPreparedPlan = currentAssessment?.disposition === "recommend"
-      && Boolean(currentAssessment.planId)
-      && !hasLivePlan
-      && !assessmentPlanRan;
-    if (hasLivePlan || assessmentPlanRan || (currentAssessment && !expiredPreparedPlan)) return;
+    // Tonight must not open empty: with no live plan and no run for this
+    // context, prepare again — once per launch per context (ref below).
+    if (hasLivePlan || assessmentPlanRan) return;
     const preparationKey = `${contextKey}:${currentAssessment?.id ?? "new"}`;
     if (automaticallyPreparedContext.current === preparationKey) return;
     automaticallyPreparedContext.current = preparationKey;
@@ -396,6 +394,10 @@ function App() {
         tonightPreparing={overnightPreparing}
         hasReadyOvernightWorker={hasReadyOvernightWorker}
         onStartTonight={startOvernightPortfolio}
+        onPrepareTonight={async () => {
+          automaticallyPreparedContext.current = undefined;
+          await prepareOvernight();
+        }}
         onScheduleTonight={async (request) => {
           const orchestration = await bridge.scheduleOvernightNight(request);
           transitionState(() => setState((current) => current ? { ...current, orchestration } : current));

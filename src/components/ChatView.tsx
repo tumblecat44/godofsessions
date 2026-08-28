@@ -29,6 +29,7 @@ interface ChatViewProps {
   hasReadyOvernightWorker?: boolean;
   onStartTonight?(planId: string, itemIds: string[]): Promise<void>;
   onScheduleTonight?(request: OvernightNightRequest): Promise<void>;
+  onPrepareTonight?(): Promise<void>;
 }
 const FOLLOW_BOTTOM_THRESHOLD = 80;
 
@@ -124,6 +125,7 @@ export function ChatView(props: ChatViewProps) {
               disabled={Boolean(props.conversation?.busy)}
               onStart={props.onStartTonight}
               onSchedule={props.onScheduleTonight}
+              onPrepare={props.onPrepareTonight}
               rootPath={props.state.rootPath}
               needsConversationModel={!canChat}
               needsOvernightWorker={props.hasReadyOvernightWorker === false}
@@ -142,7 +144,7 @@ export function ChatView(props: ChatViewProps) {
             <article className={cn(
               `morrow-message morrow-message--${message.role}`,
               "my-3",
-              message.role === "user" ? "ml-auto flex w-fit max-w-[min(58%,620px)] flex-col items-end gap-2 rounded-none border-0 bg-transparent p-0 shadow-none" : "grid w-full max-w-[800px] grid-cols-[34px_minmax(0,1fr)] gap-4",
+              message.role === "user" ? "ml-auto mr-[34px] flex w-fit max-w-[min(58%,620px)] flex-col items-end gap-2 rounded-none border-0 bg-transparent p-0 shadow-none" : "grid w-full max-w-[800px] grid-cols-[34px_minmax(0,1fr)] gap-4",
               knownMessages.current.ids.has(message.id) ? "" : "is-entering",
             )} key={message.id}>
               {message.role === "assistant" ? (

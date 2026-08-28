@@ -21,6 +21,7 @@ export function TonightPlan({
   disabled,
   onStart,
   onSchedule,
+  onPrepare,
   rootPath,
   needsConversationModel,
   needsOvernightWorker,
@@ -32,6 +33,7 @@ export function TonightPlan({
   disabled?: boolean;
   onStart(planId: string, itemIds: string[]): Promise<void>;
   onSchedule?(request: OvernightNightRequest): Promise<void>;
+  onPrepare?(): Promise<unknown> | unknown;
   rootPath?: string;
   needsConversationModel?: boolean;
   needsOvernightWorker?: boolean;
@@ -109,6 +111,11 @@ export function TonightPlan({
         )}
         {needsConversationModel && onOpenSettings && items.length === 0 ? (
           <Button variant="primary" className="shrink-0" onClick={onOpenSettings}>{ko ? "설정에서 모델 연결" : "Connect a model in Settings"}</Button>
+        ) : null}
+        {onPrepare && items.length === 0 && !needsConversationModel && !needsOvernightWorker ? (
+          <Button variant="primary" className="shrink-0" disabled={preparing || disabled} onClick={() => void onPrepare()}>
+            {preparing ? (ko ? "고르는 중…" : "Choosing…") : (ko ? "오늘 세션으로 추천 받기" : "Recommend from today's sessions")}
+          </Button>
         ) : null}
       </div>
       <div className="grid grid-cols-3 gap-2">
