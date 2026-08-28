@@ -92,8 +92,8 @@ Paths already inside the execution root may stay absolute. Never rewrite an in-r
 Prefer read, grep, find, and ls over shell commands. Do not use shell merely to count lines or inspect metadata when file-tool output is sufficient.
 When inspecting agent session stores such as .grok or .claude, focus on primary session and transcript directories. Ignore credentials, auth files, caches, telemetry, and general logs unless the user explicitly requests them.
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
-Today's local-agent inventory is available to a private exact-coverage Overnight evaluator. It is background context, not proof that you opened another app live.
-When the user asks for overnight work, call prepare_overnight with only requestKind and a concise userGoal. Do not read files, run commands, inspect the repository, or synthesize candidate arrays merely to prepare this read-only recommendation. The evaluator, not this conversation, must account for every discovered session and preserve every independent task.
+Today's local-agent inventory is background context for Overnight, not proof that you opened another app live. Missing sessions are omitted.
+When the user asks for overnight work, call prepare_overnight with only requestKind and a concise userGoal. Do not read files, run commands, inspect the repository, or synthesize candidate arrays merely to prepare this read-only recommendation. Use collected sessions. Omit sessions that cannot be read. Preserve independent tasks from the sessions that are present.
 Show up to three tonight recommendations on the Morrow chat. The user unchecks cards they do not want, then starts the checked ones. If they say a recommendation is low priority or too far away, prepare a different set. Chat, tools, and Overnight planning use the conversation model the user connected through the Pi Agent SDK. Overnight workers are Claude Code, Codex, and Grok Build when their official CLI is on PATH. Pi Agent is listed and is not an Overnight worker yet. Never start Overnight from chat text such as “돌리기”. The checked-card button is the start. Overnight lists those started cards. Opening a card shows the outcome ticket and the morning-check ticket, each labeled with its CLI.
 Be concise, transparent about tool use, and preserve the user's language.`;
 
@@ -239,10 +239,6 @@ function collectionUnavailable(context?: DailyContextSnapshot, issueCount = 1): 
   };
 }
 
-function dailyContextCollectionIssueCount(context: DailyContextSnapshot) {
-  return context.collectionIssues.length;
-}
-
 function dailyContextUnavailableWarning(unavailable: DailyContextAssessmentUnavailable) {
   return unavailable.reason === "capacity"
     ? "오늘의 모든 로컬 AI 세션을 안전한 한도 안에서 평가할 수 없어 Overnight 추천을 만들지 않았습니다."
@@ -278,7 +274,7 @@ function unavailableDailyContext(
         ? "Today's local AI session assessment is unavailable because the complete semantic directory exceeds the safe in-memory prompt capacity."
         : "Today's local AI session assessment is unavailable because one or more local collectors did not complete reliably.",
       detail,
-      "Continue ordinary conversation without this brief. Do not call prepare_overnight or claim that only some sessions were assessed.",
+      "Continue ordinary conversation. Omit unread sessions. The user may add an Overnight by stating an outcome.",
       "</morrow-daily-context-unavailable>",
     ].join("\n"),
   };
@@ -487,39 +483,17 @@ export class MorrowService {
   private async loadDailyContextForInitialization(): Promise<DailyContextSnapshot> {
     try {
       const context = await this.dailyContextBuilder({ home: this.contextHome });
-      const issueCount = dailyContextCollectionIssueCount(context);
-      if (issueCount > 0) {
-        const unavailable = collectionUnavailable(context, issueCount);
-        this.dailyContextAssessmentUnavailable = unavailable;
-        this.dailyContextHasCompleteAssessment = false;
-        return unavailableDailyContext(unavailable, new Date(), context);
-      }
       this.dailyContextAssessmentUnavailable = undefined;
       this.dailyContextHasCompleteAssessment = true;
       return context;
     } catch (reason) {
-      if (!(reason instanceof DailyContextCapacityError)) {
-        const unavailable = collectionUnavailable();
-        this.dailyContextAssessmentUnavailable = unavailable;
-        this.dailyContextHasCompleteAssessment = false;
-        return unavailableDailyContext(unavailable);
-      }
-      const unavailable = capacityUnavailable(reason);
+      const unavailable = reason instanceof DailyContextCapacityError
+        ? capacityUnavailable(reason)
+        : collectionUnavailable();
       this.dailyContextAssessmentUnavailable = unavailable;
-      this.dailyContextHasCompleteAssessment = false;
+      this.dailyContextHasCompleteAssessment = true;
       return unavailableDailyContext(unavailable);
     }
-  }
-
-  private overnightAssessmentUnavailableMessage() {
-    const collection = this.dailyContextAssessmentUnavailable?.reason === "collection";
-    return this.language === "ko"
-      ? collection
-        ? "오늘의 로컬 AI 세션 수집이 완전하지 않아 Overnight 추천을 만들지 않았습니다."
-        : "오늘의 모든 로컬 AI 세션을 안전한 한도 안에서 평가할 수 없어 Overnight 추천을 만들지 않았습니다."
-      : collection
-        ? "Overnight is not ready. Today's local AI sessions could not be collected completely."
-        : "Overnight is not ready. Today's local AI sessions could not all be assessed within the safe limit.";
   }
 
   private overnightEvaluationFailedMessage(reason?: unknown) {
@@ -616,14 +590,7 @@ export class MorrowService {
       hidden: true,
       factory: (pi) => {
         pi.on("tool_call", async (event: ToolCallEvent) => {
-          if (event.toolName === "prepare_overnight") {
-            if (!this.dailyContextAssessmentUnavailable) return;
-            return {
-              block: true,
-              reason: this.overnightAssessmentUnavailableMessage(),
-              terminate: true,
-            };
-          }
+          if (event.toolName === "prepare_overnight") return;
           if (this.preparingOvernight) {
             return { block: true, reason: "Overnight 준비에는 이미 적재된 오늘 문맥과 prepare_overnight만 사용하세요. 파일이나 명령 도구는 필요하지 않습니다." };
           }
@@ -672,7 +639,7 @@ export class MorrowService {
     const prepare = defineTool({
       name: "prepare_overnight",
       label: "Overnight 준비",
-      description: "Ask the private exact-coverage evaluator to prepare the exact safe Overnight set. This never starts work.",
+      description: "Prepare tonight's Overnight cards from collected local sessions and any stated user outcome. Missing sessions are omitted. This never starts work.",
       parameters: Type.Object({
         requestKind: Type.Union([Type.Literal("discover"), Type.Literal("goal")]),
         userGoal: Type.Optional(Type.String({
@@ -891,30 +858,18 @@ export class MorrowService {
   }
 
   async refreshDailyContext(): Promise<OrchestrationSnapshot> {
-    const hadCompleteContext = this.dailyContextHasCompleteAssessment;
-    let context: DailyContextSnapshot;
     try {
-      context = await this.dailyContextBuilder({ home: this.contextHome });
+      this.dailyContext = await this.dailyContextBuilder({ home: this.contextHome });
+      this.dailyContextAssessmentUnavailable = undefined;
+      this.dailyContextHasCompleteAssessment = true;
     } catch (reason) {
       const unavailable = reason instanceof DailyContextCapacityError
         ? capacityUnavailable(reason)
         : collectionUnavailable();
       this.dailyContextAssessmentUnavailable = unavailable;
-      if (!hadCompleteContext) this.dailyContext = unavailableDailyContext(unavailable);
-      throw new Error(this.overnightAssessmentUnavailableMessage());
+      this.dailyContextHasCompleteAssessment = true;
+      this.dailyContext = unavailableDailyContext(unavailable, new Date(), this.dailyContext.sessions.length > 0 ? this.dailyContext : undefined);
     }
-
-    const issueCount = dailyContextCollectionIssueCount(context);
-    if (issueCount > 0) {
-      const unavailable = collectionUnavailable(context, issueCount);
-      this.dailyContextAssessmentUnavailable = unavailable;
-      if (!hadCompleteContext) this.dailyContext = unavailableDailyContext(unavailable, new Date(), context);
-      throw new Error(this.overnightAssessmentUnavailableMessage());
-    }
-
-    this.dailyContext = context;
-    this.dailyContextAssessmentUnavailable = undefined;
-    this.dailyContextHasCompleteAssessment = true;
     return this.combinedOrchestrationSnapshot(true);
   }
 
@@ -1177,7 +1132,6 @@ export class MorrowService {
     evaluation: OvernightContextEvaluationResult;
     recommendation: OvernightPortfolioRecommendationResult;
   }> {
-    if (this.dailyContextAssessmentUnavailable) throw new Error(this.overnightAssessmentUnavailableMessage());
     const runtime = this.requireRuntime();
     const available = runtime.getAvailableSnapshot();
     const model = this.session?.model
@@ -1203,7 +1157,15 @@ export class MorrowService {
         signal,
       });
     } catch (reason) {
-      throw new Error(this.overnightEvaluationFailedMessage(reason));
+      if (reason instanceof OvernightContextEvaluationError && reason.code === "aborted") {
+        throw new Error(this.overnightEvaluationFailedMessage(reason));
+      }
+      evaluation = {
+        proposal: { requestKind, candidates: [] },
+        sessionCount: this.dailyContext.sessions.length,
+        localCandidateCount: 0,
+        chunkCount: 0,
+      };
     }
     const recommendation = await this.overnightPortfolio.recommend(evaluation.proposal, this.dailyContext);
     this.portfolioRoutes = recommendation.providerRoutes;
@@ -1274,7 +1236,6 @@ export class MorrowService {
   }
 
   private async recommendLocalTonightPlan() {
-    if (this.dailyContextAssessmentUnavailable) throw new Error(this.overnightAssessmentUnavailableMessage());
     const readiness = await this.overnightPortfolioReadiness.inspectAll();
     const ready = new Set(readiness.filter((route) => route.status === "ready").map((route) => route.provider));
     const sessions = this.dailyContext.sessions.filter((session) => (

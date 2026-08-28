@@ -897,7 +897,7 @@ describe("Morrow service dogfood", () => {
     expect(observedSystemPrompt).toContain("never retry the same effect through another tool");
     expect(observedSystemPrompt).toContain("Never rewrite an in-root absolute path as a ../ path");
     expect(observedSystemPrompt).toContain("Ignore credentials, auth files, caches, telemetry, and general logs");
-    expect(observedSystemPrompt).toContain("private exact-coverage Overnight evaluator");
+    expect(observedSystemPrompt).toContain("Missing sessions are omitted");
     expect(observedSystemPrompt).toContain("Do not read files, run commands, inspect the repository, or synthesize candidate arrays");
     expect(observedSystemPrompt).toContain("Overnight workers are Claude Code, Codex, and Grok Build");
     expect(observedSystemPrompt).toContain("Pi Agent is listed and is not an Overnight worker yet");
@@ -1175,9 +1175,8 @@ describe("Morrow service dogfood", () => {
       await service.initialize();
       await service.startConversation();
       await service.sendMessage("오늘 Overnight 후보를 모두 평가해줘.");
-      expect(portfolio.getLastProposal()).toBeUndefined();
+      expect(portfolio.getLastProposal()?.candidates ?? []).toEqual([]);
       const snapshot = await service.orchestrationSnapshot();
-      expect(snapshot.portfolioAssessments).toEqual([]);
       expect(snapshot.portfolioPlans).toEqual([]);
       expect(JSON.stringify(service.currentConversation())).not.toContain("PRIVATE_MODEL_FAILURE_MARKER");
       expect(JSON.stringify(service.currentConversation())).toContain("부분 결과로 계획을 만들지 않고");
@@ -1394,7 +1393,7 @@ describe("Morrow service dogfood", () => {
     }
   }, 25_000);
 
-  it("keeps the last complete context visible when a refresh is partial, then clears the Overnight block after a complete refresh", async () => {
+  it("uses collected sessions when a refresh is partial, then replaces them after a complete refresh", async () => {
     const base = await mkdtemp(join(tmpdir(), "morrow-collection-refresh-"));
     const root = join(base, "root");
     const dataDir = join(base, "data");
@@ -1421,7 +1420,7 @@ describe("Morrow service dogfood", () => {
       prompt: `<morrow-daily-context>${recoveredPromptMarker}</morrow-daily-context>`,
     });
     let buildCount = 0;
-    const contexts = [original, partial, partial, recovered];
+    const contexts = [original, partial, recovered];
     const portfolio = portfolioFixture();
     const faux = fauxProvider({
       provider: "morrow-collection-refresh",
@@ -1471,30 +1470,16 @@ describe("Morrow service dogfood", () => {
     expect(beforeRefresh.totalSessions).toBe(2);
     expect(beforeRefresh.sessions.map((session) => session.id)).toEqual(["codex:original-one", "claude:original-two"]);
 
-    await expect(service.refreshDailyContext()).rejects.toThrow("Overnight 추천을 만들지 않았습니다");
-    const stale = await service.orchestrationSnapshot();
-    expect(stale.context).toMatchObject({
-      date: original.summary.date,
-      generatedAt: original.summary.generatedAt,
-      totalSessions: 2,
-      providerCounts: { codex: 1, claude: 1 },
-    });
-    expect(stale.context.sessions.map((session) => session.id)).toEqual(["codex:original-one", "claude:original-two"]);
-    expect(stale.context.warnings).toContainEqual(expect.stringContaining("수집이 완전하지 않아 Overnight 추천을 만들지 않았습니다"));
+    const partialRefresh = await service.refreshDailyContext();
+    expect(partialRefresh.context.sessions.map((session) => session.id)).toEqual(["claude:partial-only"]);
+    expect(partialRefresh.context.warnings).toContainEqual("Claude transcript collection was incomplete.");
 
     await service.startConversation();
-    await service.sendMessage("새로고침이 실패했어도 일반 대화는 계속해줘.");
-    expect(observedSystemPrompt).toContain(originalPromptMarker);
-    expect(observedSystemPrompt).not.toContain(partialPromptMarker);
+    await service.sendMessage("부분 수집이어도 일반 대화는 계속해줘.");
+    expect(observedSystemPrompt).toContain(partialPromptMarker);
+    expect(observedSystemPrompt).not.toContain(originalPromptMarker);
     await service.sendMessage("Overnight 포트폴리오를 준비해줘.");
-    expect(portfolio.getLastProposal()).toBeUndefined();
-    expect((await service.orchestrationSnapshot()).portfolioAssessments).toEqual([]);
-    await expect(access(join(dataDir, "overnight", "portfolios"))).rejects.toThrow();
-
-    await expect(service.refreshDailyContext()).rejects.toThrow("Overnight 추천을 만들지 않았습니다");
-    expect((await service.orchestrationSnapshot()).context.sessions.map((session) => session.id)).toEqual([
-      "codex:original-one", "claude:original-two",
-    ]);
+    expect(portfolio.getLastProposal()?.candidates[0].stableKey).toBe("collection-guard");
 
     const refreshed = await service.refreshDailyContext();
     expect(refreshed.context).toMatchObject({
@@ -1508,7 +1493,7 @@ describe("Morrow service dogfood", () => {
     expect(portfolio.getLastProposal()?.candidates[0].stableKey).toBe("collection-guard");
   });
 
-  it("keeps chat available but fails Overnight closed when the daily-context builder fails unexpectedly", async () => {
+  it("keeps chat available and still prepares Overnight when the daily-context builder fails unexpectedly", async () => {
     const base = await mkdtemp(join(tmpdir(), "morrow-unknown-context-"));
     const root = join(base, "root");
     const dataDir = join(base, "data");
@@ -1564,11 +1549,11 @@ describe("Morrow service dogfood", () => {
     expect(observedSystemPrompt).toContain("<morrow-daily-context-unavailable>");
     expect(observedSystemPrompt).not.toContain(privateMarker);
     await service.sendMessage("Overnight 포트폴리오를 준비해줘.");
-    expect(portfolio.getLastProposal()).toBeUndefined();
-    expect((await service.orchestrationSnapshot()).portfolioAssessments).toEqual([]);
+    expect(portfolio.getLastProposal()?.candidates ?? []).toEqual([]);
+    expect(JSON.stringify(service.currentConversation().messages)).not.toContain(privateMarker);
   });
 
-  it("keeps chat available but refuses Overnight without writing when the complete daily assessment exceeds capacity", async () => {
+  it("keeps chat available and still prepares Overnight when the complete daily assessment exceeds capacity", async () => {
     const base = await mkdtemp(join(tmpdir(), "morrow-capacity-guard-"));
     const root = join(base, "root");
     const dataDir = join(base, "data");
@@ -1641,22 +1626,12 @@ describe("Morrow service dogfood", () => {
 
     await service.sendMessage("Overnight 포트폴리오를 준비해줘.");
     const transcript = JSON.stringify(service.currentConversation().messages);
-    expect(transcript).toContain("세션을 안전한 한도 안에서 평가할 수 없어");
     expect(transcript).not.toContain(privateMarker);
-    expect(portfolio.getLastProposal()).toBeUndefined();
+    expect(portfolio.getLastProposal()?.candidates ?? []).toEqual([]);
     const snapshot = await service.orchestrationSnapshot();
-    expect(snapshot.portfolioAssessments).toEqual([]);
-    expect(snapshot.portfolioPlans).toEqual([]);
-
-    let refreshError = "";
-    try {
-      await service.refreshDailyContext();
-    } catch (reason) {
-      refreshError = reason instanceof Error ? reason.message : String(reason);
-    }
-    expect(refreshError).toContain("Overnight 추천을 만들지 않았습니다");
-    expect(refreshError.length).toBeLessThan(500);
-    expect(refreshError).not.toContain(privateMarker);
-    await expect(access(join(dataDir, "overnight", "portfolios"))).rejects.toThrow();
+    expect(snapshot.context.warnings.join("\n")).not.toContain(privateMarker);
+    await expect(service.refreshDailyContext()).resolves.toMatchObject({
+      context: { warnings: [expect.stringContaining("Overnight 추천을 만들지 않았습니다")] },
+    });
   });
 });
