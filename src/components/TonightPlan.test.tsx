@@ -81,7 +81,7 @@ describe("TonightPlan", () => {
   });
 
   it("puts conversation-model connect controls in the tonight region when Morrow has no voice", () => {
-    const onConnect = vi.fn(async () => undefined);
+    const onOpenSettings = vi.fn();
     render(
       <TonightPlan
         language="en"
@@ -103,14 +103,19 @@ describe("TonightPlan", () => {
             portfolioRuns: [],
           },
         }}
-        onConnect={onConnect}
+        onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
+        onOpenSettings={onOpenSettings}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Connect a conversation model to see tonight’s 3 cards" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Sign in with your Anthropic/ }));
-    expect(onConnect).toHaveBeenCalledWith("anthropic", "oauth");
+    expect(screen.getByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
+    expect(screen.getByText("OVERNIGHT 1")).toBeInTheDocument();
+    expect(screen.getByText("OVERNIGHT 2")).toBeInTheDocument();
+    expect(screen.getByText("OVERNIGHT 3")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: /Start / })).not.toBeInTheDocument();
   });
 });

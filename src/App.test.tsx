@@ -321,12 +321,12 @@ describe("App Overnight integration", () => {
     const { default: App } = await import("./App");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Connect a conversation model to see tonight’s 3 cards" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Sign in with your Anthropic/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
     expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
-    expect(screen.getByRole("heading", { name: "Connect a conversation model to see tonight’s 3 cards" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 
