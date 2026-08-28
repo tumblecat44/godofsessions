@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -26,6 +26,7 @@ describe("Overnight worktree manager", () => {
     const allocation = await manager.allocate(snapshot, "run-1", "item-1");
     expect(allocation).toEqual(planned);
     expect(allocation.executionRoot).not.toBe(await realpath(fixture.repository));
+    expect(allocation.executionRoot).toContain(join("overnight", "worktrees", "run-1", "item-1"));
     expect(allocation.branch).toBe("morrow/overnight/run-1/item-1");
     expect((await git(["-C", allocation.executionRoot, "rev-parse", "HEAD"])).trim()).toBe(snapshot.repositoryRevision);
     expect(await realpath(join(allocation.executionRoot, "README.md"))).toBe(join(await realpath(allocation.executionRoot), "README.md"));
@@ -49,37 +50,51 @@ describe("Overnight worktree manager", () => {
     expect(await git(["-C", fixture.repository, "status", "--porcelain=v1"])).toBe("");
   });
 
-  it("keeps a dirty or non-git root shared so uncommitted context is not silently dropped", async () => {
+  it("keeps dirty main files in place and still allocates an isolated worktree from the frozen HEAD", async () => {
     const fixture = await gitFixture();
     await writeFile(join(fixture.repository, "README.md"), "dirty\n");
+    await writeFile(join(fixture.repository, "dirty-only.txt"), "uncommitted\n");
     const dirtyManager = new OvernightWorktreeManager({ root: fixture.repository, dataDir: fixture.dataDir });
     const dirty = await dirtyManager.inspect();
-    expect(dirty).toMatchObject({ isolation: "shared", reason: "dirty_git_worktree" });
-    const dirtyAllocation = await dirtyManager.allocate(dirty, "run-2", "item-2");
-    expect(dirtyAllocation.executionRoot).toBe(await realpath(fixture.repository));
-    expect(dirtyManager.resultMetadata(dirtyAllocation)).toEqual({
-      executionRoot: await realpath(fixture.repository),
-      worktreeKey: await realpath(fixture.repository),
-      baseRevision: dirty.repositoryRevision,
-      integrationStatus: "shared_workspace",
-    });
+    expect(dirty).toMatchObject({ isolation: "isolated", reason: "dirty_git_worktree" });
 
-    const plainRoot = join(fixture.base, "plain");
-    await mkdir(plainRoot);
-    const plain = await new OvernightWorktreeManager({ root: plainRoot, dataDir: fixture.dataDir }).inspect();
-    expect(plain).toMatchObject({ isolation: "shared", reason: "not_a_git_worktree" });
+    const dirtyAllocation = await dirtyManager.allocate(dirty, "run-2", "item-2");
+    expect(dirtyAllocation.executionRoot).not.toBe(await realpath(fixture.repository));
+    expect(dirtyAllocation.executionRoot).toContain(join("overnight", "worktrees", "run-2", "item-2"));
+    expect(dirtyAllocation.branch).toBe("morrow/overnight/run-2/item-2");
+    expect((await git(["-C", dirtyAllocation.executionRoot, "rev-parse", "HEAD"])).trim()).toBe(dirty.repositoryRevision);
+    expect(await git(["-C", fixture.repository, "status", "--porcelain=v1"])).toMatch(/dirty-only\.txt/u);
+    expect(await git(["-C", fixture.repository, "status", "--porcelain=v1"])).toMatch(/README\.md/u);
+    await expect(access(join(dirtyAllocation.executionRoot, "dirty-only.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(dirtyAllocation.executionRoot, "README.md"), "utf8")).toBe("fixture\n");
+    expect(dirtyManager.resultMetadata(dirtyAllocation)).toEqual({
+      executionRoot: dirtyAllocation.executionRoot,
+      worktreeKey: dirtyAllocation.worktreeKey,
+      branch: "morrow/overnight/run-2/item-2",
+      baseRevision: dirty.repositoryRevision,
+      integrationStatus: "not_integrated",
+    });
   });
 
-  it("canonicalizes a shared root so launch hashes match inspect", async () => {
+  it("refuses to allocate when the root is not a git worktree", async () => {
     const fixture = await gitFixture();
     const plainRoot = join(fixture.base, "plain");
     await mkdir(plainRoot);
     const manager = new OvernightWorktreeManager({ root: plainRoot, dataDir: fixture.dataDir });
-    const inspected = await manager.inspect();
-    const unresolved = { ...inspected, root: plainRoot, workspaceKey: plainRoot };
-    const allocation = await manager.allocate(unresolved, "run-canon", "item-canon");
-    expect(allocation.executionRoot).toBe(inspected.root);
-    expect(allocation.worktreeKey).toBe(inspected.root);
+    const plain = await manager.inspect();
+    expect(plain).toMatchObject({ isolation: "shared", reason: "not_a_git_worktree" });
+    await expect(manager.allocate(plain, "run-plain", "item-plain")).rejects.toThrow(/git 저장소/u);
+    await expect(() => manager.plannedAllocation(plain, "run-plain", "item-plain")).toThrow(/git 저장소/u);
+  });
+
+  it("returns the planned allocation when the same run and item worktree already exists", async () => {
+    const fixture = await gitFixture();
+    const manager = new OvernightWorktreeManager({ root: fixture.repository, dataDir: fixture.dataDir });
+    const snapshot = await manager.inspect();
+    const first = await manager.allocate(snapshot, "run-idempotent", "item-idempotent");
+    const second = await manager.allocate(snapshot, "run-idempotent", "item-idempotent");
+    expect(second).toEqual(first);
+    expect(second.executionRoot).toBe(first.executionRoot);
   });
 
   it("rejects path-like run and item identifiers before creating anything", async () => {
@@ -110,3 +125,4 @@ async function git(args: readonly string[]) {
   const { stdout } = await execFileAsync("git", [...args], { encoding: "utf8", timeout: 10_000 });
   return stdout;
 }
+

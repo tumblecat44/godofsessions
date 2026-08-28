@@ -624,7 +624,7 @@ export class OvernightPortfolioService {
       let resultMetadata: OvernightWorkspaceResultMetadata = {
         executionRoot: "approved-private-root",
         worktreeKey: item.worktreeKey,
-        integrationStatus: item.isolation === "shared" ? "shared_workspace" : "not_integrated",
+        integrationStatus: "not_integrated",
       };
       resultMetadataByItem.set(item.id, resultMetadata);
       const transitioned = await this.ledger.writeItemState(
