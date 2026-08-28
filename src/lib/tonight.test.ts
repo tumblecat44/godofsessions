@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OvernightPortfolioPlanSummary, OvernightPortfolioRunItemSummary } from "../shared/contracts";
-import { startedRunItems, tonightPlanItems } from "./tonight";
+import { startedRunItems, tonightPlanItems, visibleTonightPlan } from "./tonight";
 
 function plan(): OvernightPortfolioPlanSummary {
   const item = (id: string, outcome: string): OvernightPortfolioPlanSummary["items"][number] => ({
@@ -59,5 +59,35 @@ describe("tonight visibility", () => {
       { itemId: "four", provider: "pi", providerLabel: "Pi Agent", status: "skipped" },
     ];
     expect(startedRunItems(items).map((item) => item.itemId)).toEqual(["two", "three"]);
+  });
+
+  it("picks the newest live draft even when an older draft is listed first", () => {
+    const older = plan();
+    const newer: OvernightPortfolioPlanSummary = {
+      ...plan(),
+      id: "revised-plan",
+      createdAt: "2026-08-27T01:00:00.000Z",
+      items: plan().items.slice(0, 2).map((item, index) => ({
+        ...item,
+        id: index === 0 ? "new-1" : "new-2",
+        stableKey: index === 0 ? "new-1" : "new-2",
+        outcome: index === 0 ? "Replace the login work with a closer deadline" : "Ship the docs pass tonight",
+        title: index === 0 ? "Replace the login work with a closer deadline" : "Ship the docs pass tonight",
+      })),
+    };
+    const visible = visibleTonightPlan([older, newer], []);
+    expect(visible?.id).toBe("revised-plan");
+    expect(tonightPlanItems(visible).map((item) => item.outcome)).toEqual([
+      "Replace the login work with a closer deadline",
+      "Ship the docs pass tonight",
+    ]);
+    expect(tonightPlanItems(visible).some((item) => item.outcome === "Ship the login fix")).toBe(false);
+  });
+
+  it("ignores expired and already-started drafts when choosing tonight", () => {
+    const expired = { ...plan(), id: "expired", expiresAt: "2026-08-27T00:00:00.000Z", createdAt: "2026-08-27T02:00:00.000Z" };
+    const started = { ...plan(), id: "started-plan", createdAt: "2026-08-27T03:00:00.000Z" };
+    const live = { ...plan(), id: "live-plan", createdAt: "2026-08-27T01:00:00.000Z" };
+    expect(visibleTonightPlan([expired, started, live], [{ planId: "started-plan" }], Date.parse("2026-08-27T04:00:00.000Z"))?.id).toBe("live-plan");
   });
 });

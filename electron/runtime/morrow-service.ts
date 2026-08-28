@@ -747,7 +747,7 @@ export class MorrowService {
       this.session.sessionManager.appendSessionInfo(sessionTitle(text));
     }
     this.preparingOvernight = isOvernightPreparationRequest(text);
-    this.preparingOvernightUserGoal = this.preparingOvernight ? text : undefined;
+    this.preparingOvernightUserGoal = text;
     try {
       await this.session.prompt(text, this.session.isStreaming ? { streamingBehavior: "followUp" } : undefined);
     } finally {
@@ -1108,6 +1108,11 @@ function portfolioAssessmentSummary(
   };
 }
 
+export function isTonightRevisionRequest(text: string) {
+  return /(?:이거\s*빼|다른\s*(?:거|것|일|세트|카드)|다른\s*걸|recommend\s+something\s+else|(?:the\s+)?wrong\s+job|too\s+far(?:\s+away)?|isn'?t\s+important|중요하지\s*않|너무\s*멀)/iu.test(text);
+}
+
 export function isOvernightPreparationRequest(text: string) {
-  return /(?:\bovernight\b|오버나이트|밤새|밤샘|무인\s*(?:실행|작업)|자리를\s*비운\s*동안|(?:오늘|금일)\s*밤[^.!?\n]{0,80}(?:맡|작업|실행|계획)|\bunattended\s+(?:work|run|execution)\b|\b(?:run|work|plan)\b[^.!?\n]{0,80}\btonight\b)/iu.test(text);
+  return /(?:\bovernight\b|오버나이트|밤새|밤샘|무인\s*(?:실행|작업)|자리를\s*비운\s*동안|(?:오늘|금일)\s*밤[^.!?\n]{0,80}(?:맡|작업|실행|계획)|\bunattended\s+(?:work|run|execution)\b|\b(?:run|work|plan)\b[^.!?\n]{0,80}\btonight\b)/iu.test(text)
+    || isTonightRevisionRequest(text);
 }

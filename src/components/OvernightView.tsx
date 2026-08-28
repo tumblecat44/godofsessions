@@ -10,7 +10,7 @@ import type {
 } from "../shared/contracts";
 import { overnightCliLoginCommand } from "../lib/overnight-cli";
 import { overnightTickets } from "../lib/overnight-tickets";
-import { startedRunItems, tonightPlanItems } from "../lib/tonight";
+import { startedRunItems, tonightPlanItems, visibleTonightPlan } from "../lib/tonight";
 import { CopyCommandButton } from "./CopyCommandButton";
 import { OvernightCalendarButton, OvernightDateEmptyState, overnightDateKey } from "./OvernightCalendar";
 import { OvernightKanban } from "./OvernightKanban";
@@ -45,10 +45,10 @@ export function OvernightView(props: OvernightViewProps) {
     .filter((run) => overnightDateKey(run.startedAt, props.snapshot.context.timeZone) === selectedDate)
     .sort((left, right) => Number(activeRunStatuses.has(right.status)) - Number(activeRunStatuses.has(left.status)) || right.startedAt.localeCompare(left.startedAt)), [props.snapshot.context.timeZone, runs, selectedDate]);
   const selectedActiveRun = selectedRuns.find((run) => activeRunStatuses.has(run.status));
-  const livePlan = plans.find((plan) => plan.status === "draft"
-    && !runs.some((run) => run.planId === plan.id)
-    && Date.now() < Date.parse(plan.expiresAt)
-    && overnightDateKey(plan.createdAt, props.snapshot.context.timeZone) === selectedDate);
+  const livePlan = visibleTonightPlan(
+    plans.filter((plan) => overnightDateKey(plan.createdAt, props.snapshot.context.timeZone) === selectedDate),
+    runs,
+  );
   const runCards = selectedRuns.flatMap((run) => {
     const plan = plans.find((candidate) => candidate.id === run.planId);
     return startedRunItems(run.items).map((item) => ({ run, item, planItem: plan?.items.find((candidate) => candidate.id === item.itemId) }));
