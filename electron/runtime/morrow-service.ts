@@ -922,6 +922,11 @@ export class MorrowService {
     return this.combinedOrchestrationSnapshot(false);
   }
 
+  /** Settings에서 요청하는 실시간 재확인: PATH 탐색과 로그인 프로브를 다시 돌린다. */
+  async refreshOvernightProviderRoutes(): Promise<OrchestrationSnapshot> {
+    return this.combinedOrchestrationSnapshot(true);
+  }
+
   async prepareOvernightPortfolio(userGoal?: string): Promise<OrchestrationSnapshot> {
     if (this.portfolioPreparationInFlight) return this.portfolioPreparationInFlight;
     const pending = (async () => {

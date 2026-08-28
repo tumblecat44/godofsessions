@@ -11,17 +11,24 @@ afterEach(async () => {
 });
 
 describe("common-sense Overnight control plane", () => {
-  it("keeps Pi Agent blocked because the conversation SDK is not a worker", async () => {
+  it("checks the pi terminal CLI on PATH but keeps Overnight dispatch gated", async () => {
     const dir = await mkdtemp(join(tmpdir(), "gos-common-sense-"));
     tempDirs.push(dir);
     const hostPath = join(dir, "overnight-provider-host.js");
+    const piBin = join(dir, "pi");
     await writeFile(hostPath, "export {}\n");
-    const plane = createCommonSenseOvernightControlPlane({ providerHostPath: hostPath }).create();
+    await writeFile(piBin, "ok\n");
+    await chmod(piBin, 0o755);
+    const plane = createCommonSenseOvernightControlPlane({
+      providerHostPath: hostPath,
+      resolveExecutable: async (provider) => provider === "pi" ? piBin : undefined,
+    }).create();
 
     await expect(plane.readiness.inspect("pi")).resolves.toMatchObject({
       provider: "pi",
       status: "blocked",
-      reason: expect.stringMatching(/conversation SDK is not an Overnight worker/i),
+      reason: expect.stringMatching(/not wired up yet/i),
+      checks: { installation: "verified" },
     });
     await expect(plane.containmentControl.prepareApprovedLaunch({
       planId: "plan",
@@ -36,6 +43,23 @@ describe("common-sense Overnight control plane", () => {
     })).resolves.toMatchObject({
       status: "blocked",
       provider: "pi",
+    });
+  });
+
+  it("reports a missing pi terminal CLI as setup_required", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gos-common-sense-"));
+    tempDirs.push(dir);
+    const hostPath = join(dir, "overnight-provider-host.js");
+    await writeFile(hostPath, "export {}\n");
+    const plane = createCommonSenseOvernightControlPlane({
+      providerHostPath: hostPath,
+      resolveExecutable: async () => undefined,
+    }).create();
+
+    await expect(plane.readiness.inspect("pi")).resolves.toMatchObject({
+      provider: "pi",
+      status: "setup_required",
+      checks: { installation: "missing" },
     });
   });
 

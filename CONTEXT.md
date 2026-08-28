@@ -55,6 +55,19 @@ conversation runtime. GitHub identity is not an AI runtime. Cursor, Hermes,
 and OpenClaw are evidence only.
 _Avoid_: one AI, unqualified AI, mixing Pi Agent SDK with Overnight Pi Agent
 
+**Morrow vs 사용자 로컬 AI (canonical names)**
+Every AI in this product is one of exactly two things, and code, docs, UI
+copy, and commit messages use these names:
+- **Morrow** — the AI the app itself runs to provide features: the
+  conversation runtime (Pi Agent SDK model connected in Settings). Chat,
+  candidate generation, plan revision, and kanban decomposition are Morrow.
+- **사용자 로컬 AI** — the AI programs the user installed on their own
+  machine: overnight workers (Claude Code, Codex, Grok Build CLIs) and the
+  local session history read as evidence (Claude, Codex, Grok, Cursor,
+  Hermes, OpenClaw, Pi sessions).
+_Avoid_: "AI" without a qualifier, "the model" when either side could be
+meant, calling an overnight worker Morrow, calling Morrow a worker
+
 **Skill**
 An Agent Skills document discovered under `<root>/.agents/skills` or
 `~/.agents/skills`. Pi `.pi` extension, prompt, and theme discovery is disabled

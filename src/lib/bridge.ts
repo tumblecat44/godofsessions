@@ -65,6 +65,7 @@ function previewBridge(): MorrowBridge {
     disconnectProvider: async () => undefined,
     finishOnboarding: async () => undefined,
     refreshDailyContext: async () => demoState.orchestration,
+    refreshOvernightProviders: async () => demoState.orchestration,
     prepareOvernightPortfolio: async (_userGoal?: string) => demoState.orchestration,
     verifyOvernightProvider: async () => { throw new Error("Overnight provider verification is only available in the desktop app."); },
     startOvernightPortfolio: async (_planId, _itemIds) => { throw new Error("Overnight portfolio runs are only available in the desktop app."); },

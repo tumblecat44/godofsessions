@@ -45,7 +45,7 @@ export function createCommonSenseOvernightControlPlane(options: {
       return {
         status: "blocked",
         provider,
-        reason: "Pi Agent Overnight execution is not available. Morrow's conversation SDK is not an Overnight worker.",
+        reason: "Pi Agent Overnight execution is not wired up yet.",
       };
     }
     const executable = await find(provider);
@@ -66,13 +66,26 @@ export function createCommonSenseOvernightControlPlane(options: {
   async function inspectReadiness(provider: OvernightExecutionProvider): Promise<OvernightProviderReadiness> {
     const route = overnightProviderRoute(provider);
     if (route.adapterKind === "embedded-sdk") {
+      // Pi runs as Morrow's conversation engine and as the pi terminal CLI.
+      // Report the real PATH check; Overnight dispatch itself is still gated.
+      const piExecutable = await find(provider);
+      if (!piExecutable) {
+        return {
+          provider,
+          label: route.label,
+          status: "setup_required",
+          reason: `${route.label} terminal CLI (pi) is not installed.`,
+          authentication: "unknown",
+          checks: { installation: "missing", authentication: "unverified", containment: "unverified" },
+        };
+      }
       return {
         provider,
         label: route.label,
         status: "blocked",
-        reason: "Pi Agent Overnight execution is not available. Morrow's conversation SDK is not an Overnight worker.",
+        reason: "Pi Agent Overnight execution is not wired up yet.",
         authentication: "unknown",
-        checks: { installation: "missing", authentication: "unverified", containment: "unverified" },
+        checks: { installation: "verified", authentication: "unverified", containment: "unverified" },
       };
     }
     const executable = await find(provider);
@@ -245,7 +258,6 @@ function launchArtifacts(
 }
 
 async function resolveExecutable(provider: OvernightExecutionProvider) {
-  if (overnightProviderRoute(provider).adapterKind === "embedded-sdk") return undefined;
   return findOnPath(overnightProviderRoute(provider).executableNames);
 }
 

@@ -1,3 +1,4 @@
+import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 import { officialOvernightCliCards, overnightCliRowCopy } from "../lib/overnight-cli";
@@ -9,16 +10,19 @@ import { Button } from "./ui/Button";
 function SettingsGroup({
   title,
   id,
+  action,
   children,
 }: {
   title: string;
   id?: string;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="settings-section overflow-hidden rounded-panel border border-line bg-surface" id={id}>
-      <div className="border-b border-line px-3 py-2">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
         <h2 className="text-[13px] font-medium tracking-tight text-ink">{title}</h2>
+        {action}
       </div>
       <div>{children}</div>
     </section>
@@ -74,6 +78,7 @@ export function SettingsView({
   githubOffline,
   onConnect,
   onDisconnect,
+  onRefreshOvernightProviders,
   onLanguage,
   onManageGitHub,
   onLogoutGitHub,
@@ -86,6 +91,7 @@ export function SettingsView({
   onConnect(providerId: string, authType: "api_key" | "oauth"): Promise<void>;
   onDisconnect(providerId: string): Promise<void>;
   onVerifyOvernightProvider(provider: OvernightExecutionProvider): Promise<void>;
+  onRefreshOvernightProviders(): Promise<void>;
   onLanguage(language: AppLanguage): Promise<void>;
   onManageGitHub(): Promise<void>;
   onLogoutGitHub(): Promise<void>;
@@ -96,6 +102,28 @@ export function SettingsView({
   const connectedCount = state.providers.filter((provider) => provider.connected).length;
   const [modelPickerOpen, setModelPickerOpen] = useState(connectedCount === 0);
   const previousConnectedCount = useRef(connectedCount);
+  const [overnightChecking, setOvernightChecking] = useState(false);
+  const refreshOvernightRef = useRef(onRefreshOvernightProviders);
+  refreshOvernightRef.current = onRefreshOvernightProviders;
+
+  const recheckOvernight = async () => {
+    setOvernightChecking(true);
+    try {
+      await refreshOvernightRef.current();
+    } finally {
+      setOvernightChecking(false);
+    }
+  };
+
+  // Settings가 열릴 때마다 캐시가 아니라 실제 PATH·로그인 상태를 다시 확인한다.
+  useEffect(() => {
+    let cancelled = false;
+    setOvernightChecking(true);
+    void refreshOvernightRef.current().finally(() => {
+      if (!cancelled) setOvernightChecking(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const previous = previousConnectedCount.current;
@@ -142,18 +170,31 @@ export function SettingsView({
           ) : null}
         </SettingsGroup>
 
-        <SettingsGroup title="Overnight">
+        <SettingsGroup
+          title="Overnight"
+          action={
+            <Button size="sm" disabled={overnightChecking} onClick={() => void recheckOvernight()}>
+              {overnightChecking
+                ? (ko ? "확인 중…" : "Checking…")
+                : (ko ? "다시 확인" : "Check again")}
+            </Button>
+          }
+        >
           {officialOvernightCliCards(state.orchestration.providerRoutes).map((cli) => {
-            const row = overnightCliRowCopy(cli, state.language);
+            const row = overnightCliRowCopy(cli, state.language, overnightChecking);
             return (
               <SettingsRow
                 key={cli.provider}
                 label={cli.label}
-                value={<OvernightCliStatus tone={row.tone}>{row.status}</OvernightCliStatus>}
+                value={<OvernightCliStatus tone={row.tone} spinning={row.checking}>{row.status}</OvernightCliStatus>}
                 detail={row.detail}
               >
                 {row.showLogin && cli.loginCommand
-                  ? <CopyCommandButton command={cli.loginCommand} language={state.language} />
+                  ? <CopyCommandButton
+                      command={cli.loginCommand}
+                      language={state.language}
+                      label={cli.kind === "cli-pending" ? (ko ? "설치 복사" : "Copy install") : undefined}
+                    />
                   : null}
               </SettingsRow>
             );
@@ -216,9 +257,11 @@ export function SettingsView({
 
 function OvernightCliStatus({
   tone,
+  spinning,
   children,
 }: {
   tone: "ready" | "action" | "muted";
+  spinning?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -231,13 +274,17 @@ function OvernightCliStatus({
       )}
       role="status"
     >
-      <i
-        className={cn(
-          "size-1.5 rounded-full",
-          tone === "ready" ? "bg-teal" : tone === "action" ? "bg-amber" : "bg-ink-faint",
-        )}
-        aria-hidden
-      />
+      {spinning ? (
+        <LoaderCircle className="size-3 animate-spin" aria-hidden />
+      ) : (
+        <i
+          className={cn(
+            "size-1.5 rounded-full",
+            tone === "ready" ? "bg-teal" : tone === "action" ? "bg-amber" : "bg-ink-faint",
+          )}
+          aria-hidden
+        />
+      )}
       {children}
     </span>
   );

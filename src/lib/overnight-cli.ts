@@ -9,7 +9,9 @@ export const OFFICIAL_OVERNIGHT_CLIS = [
   { provider: "claude", label: "Claude Code", kind: "cli" },
   { provider: "codex", label: "Codex", kind: "cli" },
   { provider: "grok", label: "Grok Build", kind: "cli" },
-  { provider: "pi", label: "Pi Agent", kind: "conversation-sdk" },
+  // Pi runs as Morrow's conversation engine and as the pi terminal CLI;
+  // its Overnight dispatch is still being wired up.
+  { provider: "pi", label: "Pi Agent", kind: "cli-pending" },
 ] as const;
 
 export type OvernightWorkerKind = (typeof OFFICIAL_OVERNIGHT_CLIS)[number]["kind"];
@@ -22,15 +24,15 @@ export function overnightCliLoginCommand(provider: OvernightExecutionProvider) {
   if (provider === "claude") return "claude auth login";
   if (provider === "codex") return "codex login";
   if (provider === "grok") return "grok login";
+  if (provider === "pi") return "npm install -g @earendil-works/pi-coding-agent";
   return undefined;
 }
 
-/** PATH presence for CLI workers. Conversation-sdk routes are not PATH CLIs. */
+/** PATH presence for CLI workers: the backend reports missing as setup_required. */
 export function overnightCliInstalledOnPath(
-  provider: OvernightExecutionProvider,
+  _provider: OvernightExecutionProvider,
   route?: Pick<OvernightProviderRouteSummary, "status">,
 ) {
-  if (overnightWorkerKind(provider) === "conversation-sdk") return route?.status === "ready";
   return route?.status === "ready" || route?.status === "blocked";
 }
 
@@ -57,8 +59,16 @@ export function overnightCliUsableForOvernight(
   installed: boolean,
   authentication: OvernightCliLoginState,
 ) {
-  if (kind === "conversation-sdk") return false;
+  if (kind === "cli-pending") return false;
   return installed && authentication === "signed_in";
+}
+
+export interface OvernightCliRowCopy {
+  status: string;
+  tone: "ready" | "action" | "muted";
+  showLogin: boolean;
+  detail?: string;
+  checking?: boolean;
 }
 
 export function overnightCliRowCopy(
@@ -69,14 +79,35 @@ export function overnightCliRowCopy(
     loginCommand?: string;
   },
   language: AppLanguage,
-) {
+  checking = false,
+): OvernightCliRowCopy {
   const ko = language === "ko";
-  if (cli.kind === "conversation-sdk") {
+  if (checking) {
     return {
-      status: ko ? "Overnight에 아직 없음" : "Not ready for Overnight",
+      status: ko ? "확인 중" : "Checking",
       tone: "muted" as const,
       showLogin: false,
-      detail: ko ? "대화 SDK입니다. Overnight 작업자가 아닙니다." : "Conversation SDK only. Not a worker yet.",
+      checking: true,
+    };
+  }
+  if (cli.kind === "cli-pending") {
+    if (!cli.installed) {
+      return {
+        status: ko ? "없음" : "Not installed",
+        tone: "muted" as const,
+        showLogin: Boolean(cli.loginCommand),
+        detail: ko
+          ? "Morrow의 대화 엔진이자 터미널 pi CLI입니다. pi CLI를 설치하면 여기서 확인됩니다."
+          : "Powers Morrow conversations and runs as the pi terminal CLI. Install the pi CLI to check it here.",
+      };
+    }
+    return {
+      status: ko ? "Overnight 연결 준비 중" : "Overnight hookup in progress",
+      tone: "muted" as const,
+      showLogin: false,
+      detail: ko
+        ? "로컬 pi CLI를 찾았습니다. Overnight 실행 연결은 준비 중입니다."
+        : "Found the local pi CLI. Overnight execution wiring is in progress.",
     };
   }
   if (!cli.installed) {
@@ -101,8 +132,11 @@ export function overnightCliRowCopy(
     };
   }
   return {
-    status: ko ? "확인 중" : "Checking",
-    tone: "muted" as const,
+    status: ko ? "확인 안 됨" : "Couldn’t check",
+    tone: "action" as const,
     showLogin: false,
+    detail: ko
+      ? "로그인 상태를 확인하지 못했습니다. 다시 확인을 눌러 주세요."
+      : "Sign-in state didn’t resolve. Press Check again.",
   };
 }

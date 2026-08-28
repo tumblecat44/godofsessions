@@ -580,6 +580,8 @@ export interface MorrowBridge {
   disconnectProvider(providerId: string): Promise<void>;
   finishOnboarding(input: { language: AppLanguage }): Promise<void>;
   refreshDailyContext(): Promise<OrchestrationSnapshot>;
+  /** Re-runs the PATH lookup and sign-in probes for every Overnight worker. */
+  refreshOvernightProviders(): Promise<OrchestrationSnapshot>;
   /** Read-only assessment used to keep the one-click Overnight launch ready. */
   prepareOvernightPortfolio(userGoal?: string): Promise<OrchestrationSnapshot>;
   verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;

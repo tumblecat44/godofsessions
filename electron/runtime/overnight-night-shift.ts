@@ -46,6 +46,9 @@ export interface NightShiftOptions {
   availableProviders: () => readonly OvernightExecutionProvider[];
   now?: () => Date;
   log?: (message: string) => void;
+  /** Test-only overrides; production uses the 60s clock and 30m watch. */
+  clockIntervalMs?: number;
+  watchIntervalMs?: number;
 }
 
 interface ActiveNight {
@@ -76,6 +79,8 @@ export class OvernightNightShift {
   private readonly active = new Map<string, ActiveNight>();
   private lastWatchAt = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private readonly clockIntervalMs: number;
+  private readonly watchIntervalMs: number;
 
   constructor(options: NightShiftOptions) {
     this.store = options.store;
@@ -84,11 +89,13 @@ export class OvernightNightShift {
     this.availableProviders = options.availableProviders;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? (() => {});
+    this.clockIntervalMs = options.clockIntervalMs ?? CLOCK_INTERVAL_MS;
+    this.watchIntervalMs = options.watchIntervalMs ?? WATCH_INTERVAL_MS;
   }
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => { void this.tick().catch((reason) => this.log(String(reason))); }, CLOCK_INTERVAL_MS);
+    this.timer = setInterval(() => { void this.tick().catch((reason) => this.log(String(reason))); }, this.clockIntervalMs);
     void this.tick().catch((reason) => this.log(String(reason)));
   }
 
@@ -150,7 +157,7 @@ export class OvernightNightShift {
         void this.finish(card.id, "종료 시간이 되어 WIP를 커밋하고 정지했습니다.").catch((reason) => this.log(String(reason)));
       }
     }
-    if (now.getTime() - this.lastWatchAt >= WATCH_INTERVAL_MS) {
+    if (now.getTime() - this.lastWatchAt >= this.watchIntervalMs) {
       this.lastWatchAt = now.getTime();
       this.watch();
     }
@@ -193,6 +200,7 @@ export class OvernightNightShift {
 
   private async runTickets(card: OvernightCard, night: ActiveNight): Promise<void> {
     let tickets = [...card.tickets];
+    const retried = new Set<string>();
     for (let index = 0; index < tickets.length; index += 1) {
       if (night.stopping) return;
       if (tickets[index].lane === "done") continue;
@@ -200,6 +208,12 @@ export class OvernightNightShift {
       const succeeded = await this.runTicket(card, tickets[index], night)
         .catch((reason) => { this.log(String(reason)); return false; });
       if (night.stopping) return;
+      if (!succeeded && night.restartedTicketIds.has(tickets[index].id) && !retried.has(tickets[index].id)) {
+        // The watch killed a silent worker; give the ticket one fresh run.
+        retried.add(tickets[index].id);
+        index -= 1;
+        continue;
+      }
       tickets = this.moveLane(card.id, tickets, index, succeeded ? "done" : "failed");
       await this.commitTicket(night.workDir, tickets[index], succeeded);
     }
@@ -247,7 +261,7 @@ export class OvernightNightShift {
       }
       const working = card.tickets.find((ticket) => ticket.lane === "working");
       const silentMs = Date.now() - night.lastOutputAt;
-      if (working && night.child && silentMs >= WATCH_INTERVAL_MS && !night.restartedTicketIds.has(working.id)) {
+      if (working && night.child && silentMs >= this.watchIntervalMs && !night.restartedTicketIds.has(working.id)) {
         night.restartedTicketIds.add(working.id);
         this.store.appendDecisions(card.id, [{
           at: this.now().toISOString(),

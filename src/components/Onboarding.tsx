@@ -218,8 +218,8 @@ export function Onboarding({
               </h1>
               <p className="mt-3 max-w-[520px] text-[13px] leading-5 text-ink-muted">
                 {ko
-                  ? "Morrow가 Claude Code, Codex, Grok Build, Pi Agent를 이름으로 둡니다. PATH에 있는 CLI만 달립니다. Pi Agent는 아직 Overnight 작업자가 아닙니다. 보이는 그대로 한 번 눌러 시작하세요."
-                  : "Morrow names Claude Code, Codex, Grok Build, and Pi Agent. Only a CLI on PATH can run. Pi Agent is not a worker yet. Press once to start the visible set."}
+                  ? "Morrow가 Claude Code, Codex, Grok Build, Pi Agent를 이름으로 둡니다. PATH에 있는 CLI만 달립니다. Pi Agent의 Overnight 연결은 준비 중입니다. 보이는 그대로 한 번 눌러 시작하세요."
+                  : "Morrow names Claude Code, Codex, Grok Build, and Pi Agent. Only a CLI on PATH can run. Pi Agent's Overnight hookup is in progress. Press once to start the visible set."}
               </p>
               <div className="onboarding-safety-list mt-7 border-t border-line-soft">
                 {[

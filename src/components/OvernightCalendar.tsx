@@ -2,7 +2,6 @@ import { CalendarDays, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { DayPicker, type DayButtonProps } from "react-day-picker";
 import { ko as koLocale } from "react-day-picker/locale";
-import "react-day-picker/style.css";
 import { startedRunItems, tonightPlanItems } from "../lib/tonight";
 import type { OvernightPortfolioPlanSummary, OvernightPortfolioRunSummary } from "../shared/contracts";
 

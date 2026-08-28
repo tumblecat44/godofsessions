@@ -3,6 +3,20 @@
 Before changing this repository, read `OPEN_SOURCE_BOUNDARY.md`. It is the
 authoritative rule for deciding what may be committed to the public project.
 
+## Terminology: two AIs, two names
+
+This product contains exactly two kinds of AI. Never say "AI" without
+qualifying which one (full definitions in `CONTEXT.md`, "Morrow vs 사용자
+로컬 AI"):
+
+- **Morrow** — the AI the app runs to provide its own features (the
+  conversation runtime: the Pi Agent SDK model connected in Settings). Chat,
+  Overnight candidate generation, plan revision, and kanban decomposition
+  are all Morrow.
+- **사용자 로컬 AI** — AI programs the user installed themselves: the
+  overnight worker CLIs (Claude Code, Codex, Grok Build) and the local AI
+  session history read as evidence.
+
 ## Project identity
 
 God of Sessions V2 is an MIT-licensed, local-first Electron home for

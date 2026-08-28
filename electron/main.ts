@@ -218,6 +218,7 @@ function registerIpc() {
     return service().finishOnboarding(language);
   });
   handle("morrow:refresh-daily-context", () => service().refreshDailyContext());
+  handle("morrow:refresh-overnight-providers", () => service().refreshOvernightProviderRoutes());
   handle("morrow:prepare-overnight-portfolio", (_event, value) => {
     if (typeof value !== "string" || value.trim() === "") return service().prepareOvernightPortfolio();
     return service().prepareOvernightPortfolio(text(value, "overnight goal", 4_000));

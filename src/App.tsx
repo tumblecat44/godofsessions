@@ -440,6 +440,10 @@ function App() {
             const orchestration = await bridge.verifyOvernightProvider(provider);
             transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
           }}
+          onRefreshOvernightProviders={async () => {
+            const orchestration = await bridge.refreshOvernightProviders();
+            updateStateWithoutTransition(() => setState((current) => current ? { ...current, orchestration } : current));
+          }}
           onLanguage={async (language) => {
             await bridge.finishOnboarding({ language });
             transitionState(() => setState((current) => current ? { ...current, language } : current));

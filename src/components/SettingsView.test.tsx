@@ -45,6 +45,7 @@ describe("Settings language toggle", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -76,6 +77,7 @@ describe("Settings language toggle", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={onLanguage}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -95,6 +97,7 @@ describe("Settings language toggle", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={onLanguage}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -114,6 +117,7 @@ describe("Settings language toggle", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={onLanguage}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -134,6 +138,7 @@ describe("Settings user-facing safety contract", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -155,8 +160,9 @@ describe("Settings user-facing safety contract", () => {
     expect(document.body).not.toHaveTextContent(/local first|local by default|Pi SDK|Pi runtime/i);
   });
 
-  it("always lists the four official Overnight CLIs from PATH, not a canary", () => {
+  it("always lists the four official Overnight CLIs from PATH, not a canary", async () => {
     const verify = vi.fn(async () => undefined);
+    const refresh = vi.fn(async () => undefined);
     render(
       <SettingsView
         state={{
@@ -178,6 +184,7 @@ describe("Settings user-facing safety contract", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={verify}
+        onRefreshOvernightProviders={refresh}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -186,24 +193,28 @@ describe("Settings user-facing safety contract", () => {
     );
 
     const overnight = screen.getByRole("heading", { name: "Overnight" }).closest(".settings-section");
+    // Opening Settings runs one real re-check; wait for it to settle.
+    await waitFor(() => expect(overnight).toHaveTextContent("Ready for Overnight"));
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(overnight).toHaveTextContent("Claude Code");
     expect(overnight).toHaveTextContent("Codex");
     expect(overnight).toHaveTextContent("Grok Build");
     expect(overnight).toHaveTextContent("Pi Agent");
     expect(overnight).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
     expect(overnight).not.toHaveTextContent(/Installed means the command is on PATH/);
-    expect(overnight).toHaveTextContent("Ready for Overnight");
     expect(overnight).toHaveTextContent("Not installed");
     expect(overnight).toHaveTextContent("Sign in from Terminal");
-    expect(overnight).toHaveTextContent("Not ready for Overnight");
-    expect(overnight).toHaveTextContent("Conversation SDK only. Not a worker yet.");
+    expect(overnight).not.toHaveTextContent("Checking");
+    expect(overnight).not.toHaveTextContent(/Conversation SDK only|not a worker/i);
+    expect(overnight).toHaveTextContent("Powers Morrow conversations and runs as the pi terminal CLI.");
     expect(overnight).not.toHaveTextContent(/Bundled with Morrow/i);
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy claude auth login" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy codex login" })).toHaveTextContent("Copy login");
     expect(screen.getByRole("button", { name: "Copy grok login" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Copy .*Pi|bundled/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy npm install -g @earendil-works/pi-coding-agent" })).toHaveTextContent("Copy install");
     expect(overnight).not.toHaveTextContent(/Safety check|OS containment|canary/i);
-    expect(overnight?.querySelectorAll("button")).toHaveLength(2);
+    expect(overnight?.querySelectorAll("button")).toHaveLength(4);
     expect(overnight?.querySelector("button[aria-label^='Connect']")).toBeNull();
     expect(screen.getByRole("button", { name: /Sign in with your Anthropic/ })).toBeInTheDocument();
     expect(verify).not.toHaveBeenCalled();
@@ -223,6 +234,7 @@ describe("Settings user-facing safety contract", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -252,6 +264,7 @@ describe("Settings user-facing safety contract", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={onDisconnect}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}
@@ -282,6 +295,7 @@ describe("Settings user-facing safety contract", () => {
         onConnect={vi.fn(async () => undefined)}
         onDisconnect={vi.fn(async () => undefined)}
         onVerifyOvernightProvider={vi.fn(async () => undefined)}
+        onRefreshOvernightProviders={vi.fn(async () => undefined)}
         onLanguage={vi.fn(async () => undefined)}
         onManageGitHub={vi.fn(async () => undefined)}
         onLogoutGitHub={vi.fn(async () => undefined)}

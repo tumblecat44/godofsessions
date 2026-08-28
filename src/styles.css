@@ -1791,6 +1791,8 @@ button:active:not(:disabled) {
 
 .overnight-calendar__popover { position: absolute; top: calc(100% + 8px); right: 0; width: 322px; padding: 12px; color: var(--ink-primary); border: 1px solid var(--etched-edge); border-radius: 13px; background: rgba(16, 20, 27, .985); box-shadow: 0 28px 75px rgba(0, 0, 0, .5); }
 
+.overnight-calendar__popover button { min-width: 0; min-height: 0; border: 0; background: none; }
+
 .overnight-calendar__popover .rdp-root { --rdp-accent-color: var(--signal-amber); --rdp-accent-background-color: var(--signal-amber-soft); --rdp-day-width: 42px; --rdp-day-height: 40px; --rdp-day_button-width: 39px; --rdp-day_button-height: 39px; --rdp-day_button-border-radius: 8px; --rdp-nav_button-width: 30px; --rdp-nav_button-height: 30px; --rdp-outside-opacity: .44; --rdp-today-color: var(--ink-secondary); --rdp-weekday-opacity: 1; font-size: 10px; }
 
 .overnight-calendar__popover .rdp-month_caption { height: 34px; font-size: 12px; font-weight: 700; }

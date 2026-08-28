@@ -75,6 +75,7 @@ function morrowBridge(overrides: Partial<MorrowBridge> = {}): MorrowBridge {
     disconnectProvider: vi.fn(async () => undefined),
     finishOnboarding: vi.fn(async () => undefined),
     refreshDailyContext: vi.fn(async () => orchestration()),
+    refreshOvernightProviders: vi.fn(async () => orchestration()),
     prepareOvernightPortfolio: vi.fn(async () => orchestration()),
     verifyOvernightProvider: vi.fn(async () => orchestration()),
     startOvernightPortfolio: vi.fn(async () => { throw new Error("not prepared"); }),
@@ -273,6 +274,7 @@ describe("App Overnight integration", () => {
     const bridge = morrowBridge({
       bootstrap: vi.fn(async () => initial),
       refreshDailyContext: vi.fn(async () => initial.orchestration),
+      refreshOvernightProviders: vi.fn(async () => initial.orchestration),
       prepareOvernightPortfolio: vi.fn(() => preparation),
     });
     window.morrow = bridge;

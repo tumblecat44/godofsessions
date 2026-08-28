@@ -51,7 +51,7 @@ const ROUTES = {
     provider: "pi",
     label: "Pi Agent",
     adapterKind: "embedded-sdk",
-    executableNames: [],
+    executableNames: ["pi"],
     launchMode: "@earendil-works/pi-coding-agent createAgentSession",
     receiptProtocol: "sdk-events",
   },

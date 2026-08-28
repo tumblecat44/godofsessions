@@ -419,7 +419,7 @@ function EmptyToday({ date, today, preparing, canPrepare, routes, ko, onOpenSett
               <li key={route.provider} className="flex items-center justify-between gap-3 rounded-[10px] border border-line bg-surface/50 px-3 py-2">
                 <span className="min-w-0">
                   <strong className="block text-[13px]">{route.label}</strong>
-                  <small className="block font-mono text-[10px] text-ink-faint">{command ?? (ko ? "대화 SDK · Overnight 작업자 아님" : "Conversation SDK · not a worker")}</small>
+                  <small className="block font-mono text-[10px] text-ink-faint">{command ?? (ko ? "Overnight 연결 준비 중" : "Overnight hookup in progress")}</small>
                 </span>
                 {command && <CopyCommandButton command={command} language={ko ? "ko" : "en"} />}
               </li>

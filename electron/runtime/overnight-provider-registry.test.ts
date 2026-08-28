@@ -21,14 +21,14 @@ describe("Overnight provider registry", () => {
     }
   });
 
-  it("uses the embedded Pi SDK and explicit executables for every external route", () => {
+  it("names an explicit executable for every route, including the pi terminal CLI", () => {
     expect(overnightProviderRoute("pi")).toMatchObject({
       adapterKind: "embedded-sdk",
-      executableNames: [],
+      executableNames: ["pi"],
       receiptProtocol: "sdk-events",
     });
 
-    for (const provider of EXPECTED_PROVIDERS.filter((candidate) => candidate !== "pi")) {
+    for (const provider of EXPECTED_PROVIDERS) {
       const route = overnightProviderRoute(provider);
       expect(route.executableNames.length).toBeGreaterThan(0);
     }
