@@ -94,8 +94,12 @@ When inspecting agent session stores such as .grok or .claude, focus on primary 
 If the user denies a tool action, respect that decision and never retry the same effect through another tool.
 Today's local-agent inventory is background context for Overnight, not proof that you opened another app live. Missing sessions are omitted.
 When the user asks for overnight work, call prepare_overnight with only requestKind and a concise userGoal. Do not read files, run commands, inspect the repository, or synthesize candidate arrays merely to prepare this read-only recommendation. Use collected sessions. Omit sessions that cannot be read. Preserve independent tasks from the sessions that are present.
-Show up to three tonight recommendations on the Morrow chat. The user unchecks cards they do not want, then starts the checked ones. If they say a recommendation is low priority or too far away, prepare a different set. Chat, tools, and Overnight planning use the conversation model the user connected through the Pi Agent SDK. Overnight workers are Claude Code, Codex, and Grok Build when their official CLI is on PATH. Pi Agent is listed and is not an Overnight worker yet. Never start Overnight from chat text such as “돌리기”. The checked-card button is the start. Overnight lists those started cards. Opening a card shows the outcome ticket and the morning-check ticket, each labeled with its CLI.
+Show up to three tonight recommendations on the Morrow chat. The user unchecks cards they do not want, then starts the checked ones. If they say a recommendation is low priority or too far away, prepare a different set. Chat, tools, and Overnight planning use the conversation model the user connected through the Pi Agent SDK. Overnight work runs on Codex only, when the official codex CLI is on PATH. Never start Overnight from chat text such as “돌리기”. The checked-card button is the start. Overnight lists those started cards. Opening a card shows the outcome ticket and the morning-check ticket, each labeled with its CLI.
 Be concise, transparent about tool use, and preserve the user's language.`;
+
+// ponytail: Codex-only for now — widen this when other chat providers return.
+const DEFAULT_CHAT_PROVIDER = "openai-codex";
+const DEFAULT_CHAT_MODEL = { provider: DEFAULT_CHAT_PROVIDER, id: "gpt-5.6-sol" };
 
 type SendEvent = (event: MorrowEvent) => void;
 type AuthPromptShape = {
@@ -300,6 +304,8 @@ export interface MorrowServiceOptions {
   providerHostPath?: string;
   sendEvent: SendEvent;
   configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
+  /** Test seam. Production always chats through openai-codex. */
+  chatProvider?: string;
   initialLanguage?: AppLanguage;
   contextHome?: string;
   dailyContextBuilder?: typeof collectDailyContextForEvaluation;
@@ -332,6 +338,7 @@ export class MorrowService {
   private readonly sessionsDir: string;
   private readonly sendEvent: SendEvent;
   private readonly configureRuntime?: (runtime: ModelRuntime) => Promise<void> | void;
+  private readonly chatProvider: string;
   private readonly contextHome?: string;
   private readonly overnightPortfolio: MorrowPortfolioService;
   private readonly overnightStore: OvernightStore;
@@ -350,7 +357,7 @@ export class MorrowService {
   private session?: AgentSession;
   private unsubscribe?: () => void;
   private selectedModel?: { provider: string; id: string };
-  private thinkingLevel: ThinkingLevel = "medium";
+  private thinkingLevel: ThinkingLevel = "low";
   private language: AppLanguage = "en";
   private onboardingComplete = false;
   private initializationError?: Error;
@@ -372,6 +379,7 @@ export class MorrowService {
     this.sessionsDir = join(options.dataDir, "conversations");
     this.sendEvent = options.sendEvent;
     this.configureRuntime = options.configureRuntime;
+    this.chatProvider = options.chatProvider ?? DEFAULT_CHAT_PROVIDER;
     this.contextHome = options.contextHome;
     this.initialLanguage = options.initialLanguage ?? "en";
     this.permissionPolicy = new PermissionPolicy(options.root);
@@ -427,9 +435,9 @@ export class MorrowService {
       decompose: (card, providers) => this.decomposeOvernightPlan(card, providers),
       availableProviders: () => {
         const ready = this.portfolioRoutes
-          .filter((route) => route.status === "ready" && (route.provider === "claude" || route.provider === "codex"))
+          .filter((route) => route.status === "ready" && route.provider === "codex")
           .map((route) => route.provider);
-        return ready.length > 0 ? ready : ["claude", "codex"];
+        return ready.length > 0 ? ready : ["codex"];
       },
     });
   }
@@ -456,8 +464,9 @@ export class MorrowService {
       const preferences = await this.readPreferences();
       this.language = preferences.language;
       this.onboardingComplete = preferences.onboardingComplete;
-      this.thinkingLevel = preferences.thinkingLevel;
-      this.selectedModel = preferences.selectedModel;
+      // No saved model choice means the old defaults were never a user decision.
+      this.thinkingLevel = preferences.selectedModel ? preferences.thinkingLevel : "low";
+      this.selectedModel = preferences.selectedModel ?? DEFAULT_CHAT_MODEL;
       const [dailyContext, runtime] = await Promise.all([
         this.loadDailyContextForInitialization(),
         ModelRuntime.create({
@@ -518,7 +527,7 @@ export class MorrowService {
     try {
       return JSON.parse(await readFile(join(this.dataDir, "preferences.json"), "utf8"));
     } catch {
-      return { language: this.initialLanguage, onboardingComplete: false, thinkingLevel: "medium" };
+      return { language: this.initialLanguage, onboardingComplete: false, thinkingLevel: "low" };
     }
   }
 
@@ -537,8 +546,8 @@ export class MorrowService {
     if (this.initializePromise) await this.initializePromise;
     else if (this.initializationError) await this.initialize();
     const runtime = this.requireRuntime();
-    const models = runtime.getAvailableSnapshot().map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
-    const providers = await Promise.all(runtime.getProviders().map(async (provider) => ({
+    const models = this.chatModels().map((model) => ({ id: model.id, provider: model.provider, name: model.name, reasoning: model.reasoning }));
+    const providers = await Promise.all(runtime.getProviders().filter((provider) => provider.id === this.chatProvider).map(async (provider) => ({
       id: provider.id,
       name: provider.name,
       connected: Boolean(await runtime.checkAuth(provider.id).catch(() => undefined)),
@@ -669,6 +678,7 @@ export class MorrowService {
             candidateCount: recommendation.assessment.candidates.length,
             evaluatedSessionCount: evaluation.sessionCount,
             evaluationChunkCount: evaluation.chunkCount,
+            evaluationFailedChunkCount: evaluation.failedChunkCount,
           },
         };
       },
@@ -700,7 +710,7 @@ export class MorrowService {
       extensionFactories: [this.dailyContextExtension(), this.permissionExtension(() => manager.getSessionId())],
     });
     await loader.reload();
-    const available = runtime.getAvailableSnapshot();
+    const available = this.chatModels();
     const restoring = manager.getEntries().length > 0;
     const selected = !restoring && this.selectedModel
       ? available.find((model) => model.provider === this.selectedModel?.provider && model.id === this.selectedModel.id)
@@ -754,7 +764,7 @@ export class MorrowService {
   }
 
   async sendMessage(text: string) {
-    const available = this.requireRuntime().getAvailableSnapshot();
+    const available = this.chatModels();
     if (available.length === 0) {
       throw new Error(this.language === "ko"
         ? "먼저 설정에서 모델 공급자를 연결해 주세요. 작성한 내용은 그대로 둘 수 있어요."
@@ -763,13 +773,14 @@ export class MorrowService {
     if (!this.session) await this.startConversation();
     if (!this.session) return;
     if (!this.session.model || !available.some((model) => model.provider === this.session?.model?.provider && model.id === this.session.model.id)) {
-      await this.session.setModel(available[0]);
+      const fallback = available.find((model) => model.provider === this.selectedModel?.provider && model.id === this.selectedModel.id) ?? available[0];
+      await this.session.setModel(fallback);
       this.sendEvent({
         type: "notice",
         sessionId: this.session.sessionId,
         message: this.language === "ko"
-          ? `이전 모델 연결이 없어 ${available[0].name}(으)로 이어갑니다.`
-          : `The previous model connection is unavailable, so Morrow will continue with ${available[0].name}.`,
+          ? `이전 모델 연결이 없어 ${fallback.name}(으)로 이어갑니다.`
+          : `The previous model connection is unavailable, so Morrow will continue with ${fallback.name}.`,
       });
     }
     if (this.session.messages.every((message) => message.role !== "user")) {
@@ -796,7 +807,7 @@ export class MorrowService {
   }
 
   async setModel(provider: string, modelId: string) {
-    const model = this.requireRuntime().getAvailableSnapshot().find((candidate) => candidate.provider === provider && candidate.id === modelId);
+    const model = this.chatModels().find((candidate) => candidate.provider === provider && candidate.id === modelId);
     if (!model) throw new Error("Model not found.");
     this.selectedModel = { provider, id: modelId };
     await this.savePreferences();
@@ -986,7 +997,7 @@ export class MorrowService {
     providers: readonly OvernightExecutionProvider[],
   ): Promise<readonly Omit<OvernightPlanTicket, "id" | "lane">[]> {
     const runtime = this.requireRuntime();
-    const available = runtime.getAvailableSnapshot();
+    const available = this.chatModels();
     const model = this.session?.model
       ?? available.find((candidate) => candidate.provider === this.selectedModel?.provider && candidate.id === this.selectedModel.id)
       ?? available[0];
@@ -1133,7 +1144,7 @@ export class MorrowService {
     recommendation: OvernightPortfolioRecommendationResult;
   }> {
     const runtime = this.requireRuntime();
-    const available = runtime.getAvailableSnapshot();
+    const available = this.chatModels();
     const model = this.session?.model
       ?? available.find((candidate) => candidate.provider === this.selectedModel?.provider && candidate.id === this.selectedModel.id)
       ?? available[0];
@@ -1160,11 +1171,13 @@ export class MorrowService {
       if (reason instanceof OvernightContextEvaluationError && reason.code === "aborted") {
         throw new Error(this.overnightEvaluationFailedMessage(reason));
       }
+      console.error("[overnight] evaluation failed; continuing with an empty portfolio", reason);
       evaluation = {
         proposal: { requestKind, candidates: [] },
         sessionCount: this.dailyContext.sessions.length,
         localCandidateCount: 0,
         chunkCount: 0,
+        failedChunkCount: 0,
       };
     }
     const recommendation = await this.overnightPortfolio.recommend(evaluation.proposal, this.dailyContext);
@@ -1229,10 +1242,14 @@ export class MorrowService {
     return this.modelRuntime;
   }
 
+  private chatModels() {
+    return this.requireRuntime().getAvailableSnapshot().filter((model) => model.provider === this.chatProvider);
+  }
+
   private shouldPrepareLocalTonightPlan() {
     return process.env.MORROW_VERIFY_IDENTITY === "local"
       && this.dailyContextHasCompleteAssessment
-      && (this.modelRuntime?.getAvailableSnapshot().length ?? 0) === 0;
+      && (this.modelRuntime ? this.chatModels().length : 0) === 0;
   }
 
   private async recommendLocalTonightPlan() {

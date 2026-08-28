@@ -20,7 +20,6 @@ import type {
   ConversationDetail,
   GitHubAuthState,
   MorrowEvent,
-  OvernightPortfolioRunSummary,
 } from "./shared/contracts";
 
 const bridge = getMorrowBridge();
@@ -148,8 +147,11 @@ function App() {
       && state.orchestration.portfolioRuns.some((run) => run.planId === currentAssessment.planId));
     // Tonight must not open empty: with no live plan and no run for this
     // context, prepare again — once per launch per context (ref below).
-    if (hasLivePlan || assessmentPlanRan) return;
-    const preparationKey = `${contextKey}:${currentAssessment?.id ?? "new"}`;
+    // An existing assessment for this context counts as done even when it
+    // came back empty; keying on its id would loop, since every empty
+    // preparation stores a fresh assessment id.
+    if (hasLivePlan || assessmentPlanRan || currentAssessment) return;
+    const preparationKey = contextKey;
     if (automaticallyPreparedContext.current === preparationKey) return;
     automaticallyPreparedContext.current = preparationKey;
     void prepareOvernight();
@@ -245,37 +247,6 @@ function App() {
       setChatNotice(undefined);
       setConversation(nextConversation);
       setView("chat");
-    });
-  };
-
-  const startOvernightPortfolio = async (planId: string, itemIds?: string[]) => {
-    overnightPollGeneration.current += 1;
-    let run: OvernightPortfolioRunSummary;
-    try {
-      // One press approves exactly the plan the user can see. Never replace it
-      // behind the launch boundary; an expired plan fails closed and the next
-      // read-only snapshot lets automatic preparation create a new visible one.
-      run = await bridge.startOvernightPortfolio(planId, itemIds);
-    } catch (reason) {
-      try {
-        const orchestration = await bridge.overnightSnapshot();
-        transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
-      } catch {
-        // Keep the last visible plan when the read-only recovery snapshot also
-        // fails. The launch surface will show one simple retry message.
-      }
-      throw reason;
-    }
-    transitionState(() => {
-      setState((current) => current ? {
-        ...current,
-        orchestration: {
-          ...current.orchestration,
-          portfolioPlans: current.orchestration.portfolioPlans.map((plan) => plan.id === planId ? { ...plan, status: "started" } : plan),
-          portfolioRuns: [run, ...current.orchestration.portfolioRuns.filter((item) => item.id !== run.id)],
-        },
-      } : current);
-      setView("overnight");
     });
   };
 
@@ -393,14 +364,9 @@ function App() {
         tonightPlan={visibleTonightPlan(state.orchestration.portfolioPlans, state.orchestration.portfolioRuns)}
         tonightPreparing={overnightPreparing}
         hasReadyOvernightWorker={hasReadyOvernightWorker}
-        onStartTonight={startOvernightPortfolio}
         onPrepareTonight={async () => {
           automaticallyPreparedContext.current = undefined;
           await prepareOvernight();
-        }}
-        onScheduleTonight={async (request) => {
-          const orchestration = await bridge.scheduleOvernightNight(request);
-          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
         }}
       />
       <OvernightView

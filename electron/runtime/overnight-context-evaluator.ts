@@ -120,6 +120,8 @@ export interface OvernightContextEvaluationResult {
   sessionCount: number;
   localCandidateCount: number;
   chunkCount: number;
+  /** Chunks whose model call failed and was skipped. Explains empty results. */
+  failedChunkCount: number;
 }
 
 export interface PiOvernightContextModelPortOptions {
@@ -236,6 +238,7 @@ export async function evaluateOvernightContext(input: EvaluateOvernightContextIn
   const orderedSessions = [...input.context.sessions].sort((left, right) => left.id.localeCompare(right.id));
   const chunks = packSessionChunks(orderedSessions, input, maxPromptChars);
   const localCandidates: LocalCandidateRecord[] = [];
+  let failedChunkCount = 0;
 
   for (let batchIndex = 0; batchIndex < chunks.length; batchIndex += 1) {
     assertNotAborted(input.signal, "local", batchIndex);
@@ -257,6 +260,8 @@ export async function evaluateOvernightContext(input: EvaluateOvernightContextIn
     } catch (reason) {
       if (reason instanceof OvernightContextEvaluationError && reason.code === "aborted") throw reason;
       if (!(reason instanceof OvernightContextEvaluationError)) throw reason;
+      failedChunkCount += 1;
+      console.error(`[overnight] local chunk ${batchIndex + 1}/${chunks.length} skipped (${reason.code})`, reason.message);
     }
   }
 
@@ -267,6 +272,7 @@ export async function evaluateOvernightContext(input: EvaluateOvernightContextIn
       sessionCount: orderedSessions.length,
       localCandidateCount: 0,
       chunkCount: chunks.length,
+      failedChunkCount,
     };
   }
 
@@ -285,6 +291,7 @@ export async function evaluateOvernightContext(input: EvaluateOvernightContextIn
       sessionCount: orderedSessions.length,
       localCandidateCount: orderedCandidates.length,
       chunkCount: chunks.length,
+      failedChunkCount,
     };
   } catch (reason) {
     if (reason instanceof OvernightContextEvaluationError && reason.code === "aborted") throw reason;
@@ -294,6 +301,7 @@ export async function evaluateOvernightContext(input: EvaluateOvernightContextIn
       sessionCount: orderedSessions.length,
       localCandidateCount: orderedCandidates.length,
       chunkCount: chunks.length,
+      failedChunkCount,
     };
   }
 }

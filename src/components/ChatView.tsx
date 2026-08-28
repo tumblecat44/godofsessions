@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, CircleStop, FilePenLine, Settings, ShieldCheck, Sparkles, TerminalSquare, X } from "lucide-react";
 import morrowImage from "../assets/morrow.png";
 import { cn } from "../lib/cn";
-import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightNightRequest, OvernightPortfolioPlanSummary, ThinkingLevel } from "../shared/contracts";
+import type { ApprovalRequest, BootstrapState, ConversationDetail, OvernightPortfolioPlanSummary, ThinkingLevel } from "../shared/contracts";
 import { OperatorMark } from "./OperatorMark";
 import { TonightPlan } from "./TonightPlan";
 import { Button } from "./ui/Button";
@@ -27,8 +27,6 @@ interface ChatViewProps {
   tonightPlan?: OvernightPortfolioPlanSummary;
   tonightPreparing?: boolean;
   hasReadyOvernightWorker?: boolean;
-  onStartTonight?(planId: string, itemIds: string[]): Promise<void>;
-  onScheduleTonight?(request: OvernightNightRequest): Promise<void>;
   onPrepareTonight?(): Promise<void>;
 }
 const FOLLOW_BOTTOM_THRESHOLD = 80;
@@ -116,17 +114,14 @@ export function ChatView(props: ChatViewProps) {
       <section className="chat-main grid h-dvh grid-rows-[48px_auto_minmax(0,1fr)_auto_auto] overflow-hidden">
         <header className="morrow-chat-head flex items-center justify-between border-b border-line-soft px-8 pt-0"><div className="flex items-center gap-2.5"><OperatorMark size={24} active={props.conversation?.busy} /><span className="flex flex-col gap-0.5"><strong className="font-mono text-[11px] tracking-[0.15em] text-amber">MORROW</strong>{props.conversation?.busy && <small className="font-mono text-[9px] tracking-[0.14em] text-ink-faint">{ko ? "생각하는 중" : "THINKING WITH YOU"}</small>}</span></div><RootChip state={props.state} ko={ko} onReveal={props.onRevealRoot} /></header>
 
-        {props.onStartTonight && (
+        {props.onPrepareTonight && (
           <div className="px-8 pt-3 max-[900px]:px-5">
             <TonightPlan
               plan={props.tonightPlan}
               preparing={props.tonightPreparing}
               language={props.state.language}
               disabled={Boolean(props.conversation?.busy)}
-              onStart={props.onStartTonight}
-              onSchedule={props.onScheduleTonight}
               onPrepare={props.onPrepareTonight}
-              rootPath={props.state.rootPath}
               needsConversationModel={!canChat}
               needsOvernightWorker={props.hasReadyOvernightWorker === false}
               onOpenSettings={props.onOpenSettings}
@@ -144,7 +139,7 @@ export function ChatView(props: ChatViewProps) {
             <article className={cn(
               `morrow-message morrow-message--${message.role}`,
               "my-3",
-              message.role === "user" ? "ml-auto mr-[34px] flex w-fit max-w-[min(58%,620px)] flex-col items-end gap-2 rounded-none border-0 bg-transparent p-0 shadow-none" : "grid w-full max-w-[800px] grid-cols-[34px_minmax(0,1fr)] gap-4",
+              message.role === "user" ? "ml-auto flex w-fit max-w-[min(58%,620px)] flex-col items-end gap-2 rounded-none border-0 bg-transparent p-0 shadow-none" : "grid w-full max-w-[800px] grid-cols-[34px_minmax(0,1fr)] gap-4",
               knownMessages.current.ids.has(message.id) ? "" : "is-entering",
             )} key={message.id}>
               {message.role === "assistant" ? (
@@ -177,7 +172,7 @@ export function ChatView(props: ChatViewProps) {
         {!canChat && (
           <Surface className="chat-provider-needed mx-auto mb-3 grid w-[min(820px,calc(100%-48px))] grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-3 border-teal/20 bg-teal/[0.035] px-4 py-3 shadow-none" aria-live="polite">
             <ShieldCheck size={17} />
-            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{props.onStartTonight
+            <span><strong>{ko ? "먼저 Morrow의 목소리를 연결해 주세요" : "Give Morrow a voice first"}</strong><small>{props.onPrepareTonight
               ? (ko ? "설정에서 모델을 연결하세요. 입력한 글은 그대로 남아요." : "Connect a model in Settings. Anything you typed here will stay put.")
               : (ko ? "설정에서 공급자에 연결하면 이 입력 내용은 그대로 보존돼요." : "Connect a provider in Settings. Anything you typed here will stay put.")}</small></span>
             <Button size="sm" onClick={props.onOpenSettings}><Settings size={14} />{ko ? "모델 연결" : "Connect model"}</Button>

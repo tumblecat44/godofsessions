@@ -19,7 +19,7 @@
     "dogfood:electron:github-login": "npm run build && node e2e/github-login-gate-dogfood.mjs",
     "dogfood:electron:portfolio": "npm run build && node scripts/verify-god-of-sessions/scripts/drive.mjs overnight-board && node scripts/verify-god-of-sessions/scripts/drive.mjs kanban-tickets",
     "verify:app": "node scripts/verify-god-of-sessions/scripts/drive.mjs",
-    "verify:ui": "node scripts/verify-god-of-sessions/scripts/drive.mjs tonight-home && node scripts/verify-god-of-sessions/scripts/drive.mjs overnight-board && node scripts/verify-god-of-sessions/scripts/drive.mjs settings-clis && node scripts/verify-god-of-sessions/scripts/drive.mjs four-routes",
+    "verify:ui": "node scripts/verify-god-of-sessions/scripts/drive.mjs tonight-home && node scripts/verify-god-of-sessions/scripts/drive.mjs settings-clis && node scripts/verify-god-of-sessions/scripts/drive.mjs four-routes",
     "verify:live": "node scripts/verify-god-of-sessions/scripts/drive-live.mjs",
     "package:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir",
     "landing:dev": "vite --config landing/vite.config.ts",

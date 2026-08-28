@@ -870,6 +870,7 @@ describe("Morrow service dogfood", () => {
       overnightPortfolioReadiness: portfolio.readiness,
       overnightProviderVerification: { verify: verifyProvider },
       initialLanguage: "ko",
+      chatProvider: "morrow-dogfood",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-dogfood", "test-only");
@@ -899,8 +900,7 @@ describe("Morrow service dogfood", () => {
     expect(observedSystemPrompt).toContain("Ignore credentials, auth files, caches, telemetry, and general logs");
     expect(observedSystemPrompt).toContain("Missing sessions are omitted");
     expect(observedSystemPrompt).toContain("Do not read files, run commands, inspect the repository, or synthesize candidate arrays");
-    expect(observedSystemPrompt).toContain("Overnight workers are Claude Code, Codex, and Grok Build");
-    expect(observedSystemPrompt).toContain("Pi Agent is listed and is not an Overnight worker yet");
+    expect(observedSystemPrompt).toContain("Overnight work runs on Codex only");
     expect(observedSystemPrompt).toContain("conversation model the user connected through the Pi Agent SDK");
     expect(observedSystemPrompt).toContain("Show up to three tonight recommendations");
     expect(observedSystemPrompt).toContain("checked-card button is the start");
@@ -1046,6 +1046,7 @@ describe("Morrow service dogfood", () => {
       contextHome: base,
       overnightPortfolioService: portfolioFixture().service,
       overnightPortfolioReadiness: portfolioFixture().readiness,
+      chatProvider: "morrow-dogfood",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(resumeFaux.provider);
         await runtime.setRuntimeApiKey("morrow-dogfood", "test-only");
@@ -1112,6 +1113,7 @@ describe("Morrow service dogfood", () => {
       },
       overnightPortfolioService: portfolio.service,
       overnightPortfolioReadiness: portfolio.readiness,
+      chatProvider: "morrow-hierarchical-integration",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-hierarchical-integration", "test-only");
@@ -1163,6 +1165,7 @@ describe("Morrow service dogfood", () => {
       overnightContextModelPort: { complete: async () => { throw new Error("PRIVATE_MODEL_FAILURE_MARKER"); } },
       overnightPortfolioService: portfolio.service,
       overnightPortfolioReadiness: portfolio.readiness,
+      chatProvider: "morrow-hierarchical-failure",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-hierarchical-failure", "test-only");
@@ -1272,6 +1275,7 @@ describe("Morrow service dogfood", () => {
       contextHome: base,
       overnightPortfolioService: portfolio.service,
       overnightPortfolioReadiness: portfolio.readiness,
+      chatProvider: "morrow-recovery",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-recovery", "test-only");
@@ -1325,6 +1329,7 @@ describe("Morrow service dogfood", () => {
           sessions: [],
           prompt: "",
         }),
+        chatProvider: "morrow-live-recovery",
         configureRuntime: async (runtime) => {
           runtime.registerNativeProvider(faux.provider);
           await runtime.setRuntimeApiKey("morrow-live-recovery", "test-only");
@@ -1370,6 +1375,7 @@ describe("Morrow service dogfood", () => {
             sessions: [],
             prompt: "",
           }),
+          chatProvider: `morrow-${mode}-recovery`,
           configureRuntime: async (runtime) => {
             runtime.registerNativeProvider(faux.provider);
             await runtime.setRuntimeApiKey(`morrow-${mode}-recovery`, "test-only");
@@ -1457,6 +1463,7 @@ describe("Morrow service dogfood", () => {
       }),
       overnightPortfolioService: portfolio.service,
       overnightPortfolioReadiness: portfolio.readiness,
+      chatProvider: "morrow-collection-refresh",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-collection-refresh", "test-only");
@@ -1529,6 +1536,7 @@ describe("Morrow service dogfood", () => {
       dailyContextBuilder: async () => { throw new Error(privateMarker); },
       overnightPortfolioService: portfolio.service,
       overnightPortfolioReadiness: portfolio.readiness,
+      chatProvider: "morrow-unknown-context",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-unknown-context", "test-only");
@@ -1599,6 +1607,7 @@ describe("Morrow service dogfood", () => {
       dailyContextBuilder: async () => { throw capacity; },
       overnightPortfolioService: portfolio.service,
       overnightPortfolioReadiness: portfolio.readiness,
+      chatProvider: "morrow-capacity",
       configureRuntime: async (runtime) => {
         runtime.registerNativeProvider(faux.provider);
         await runtime.setRuntimeApiKey("morrow-capacity", "test-only");

@@ -94,15 +94,12 @@ try {
   await rm(sandbox, { recursive: true, force: true });
 }
 
-async function proveTonightHome(page, app) {
+async function proveTonightHome(page) {
   const tonight = page.getByLabel("Tonight's overnights");
   await tonight.waitFor();
   assert.equal(await page.getByRole("heading", { name: "Overnight", exact: true, level: 1 }).count(), 0, "home must be Morrow, not Overnight");
-  const boxes = tonight.getByRole("checkbox");
-  assert.equal(await boxes.count(), 3, "tonight shows at most three cards");
-  assert.equal(await boxes.nth(0).isChecked(), true);
-  assert.equal(await boxes.nth(1).isChecked(), true);
-  assert.equal(await boxes.nth(2).isChecked(), true);
+  const cards = tonight.getByRole("button", { name: /^OVERNIGHT \d/ });
+  assert.equal(await cards.count(), 3, "tonight shows at most three cards");
   const body = await page.locator("body").innerText();
   for (const snippet of ["Ship the login fix", "Backfill coverage", "Tighten the release checklist", "Claude Code", "Codex", "Grok Build"]) {
     assert.match(body, new RegExp(snippet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -111,16 +108,11 @@ async function proveTonightHome(page, app) {
     assert.doesNotMatch(body, new RegExp(absent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.doesNotMatch(body, /Hidden extra work/);
-  await boxes.nth(0).click();
-  await page.getByRole("button", { name: "Start 2 selected" }).waitFor();
+  assert.equal(await tonight.getByRole("button", { name: /^Start / }).count(), 0, "no in-app start: prompts are copied out");
+  await cards.nth(0).click();
+  await tonight.getByRole("button", { name: /^Copy / }).waitFor();
+  assert.match(await tonight.innerText(), /Goal: Ship the login fix/);
   await writeEvidence(page, "tonight-home");
-  await page.getByRole("button", { name: "Start 2 selected" }).click();
-  await page.getByRole("heading", { name: "Overnight", exact: true, level: 1 }).waitFor({ timeout: 10_000 });
-  const started = await readStarted(app);
-  assert.equal(started.planId, "tonight-plan");
-  assert.deepEqual(started.itemIds, ["two", "three"]);
-  await writeEvidence(page, "tonight-home-after");
-  await mergeLastRun({ startedItemIds: started.itemIds, planId: started.planId });
   process.stdout.write(`tonight-home passed. evidence: ${join(evidenceRoot, "tonight-home.png")}\n`);
 }
 

@@ -180,7 +180,7 @@ export function SettingsView({
             </Button>
           }
         >
-          {officialOvernightCliCards(state.orchestration.providerRoutes).map((cli) => {
+          {officialOvernightCliCards(state.orchestration.providerRoutes).filter((cli) => cli.provider === "codex").map((cli) => {
             const row = overnightCliRowCopy(cli, state.language, overnightChecking);
             return (
               <SettingsRow

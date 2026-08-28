@@ -268,7 +268,7 @@ describe("Morrow first-use conversation", () => {
         onModel={vi.fn()}
         onThinking={vi.fn()}
         onOpenSettings={onOpenSettings}
-        onStartTonight={vi.fn(async () => undefined)}
+        onPrepareTonight={vi.fn(async () => undefined)}
         hasReadyOvernightWorker
       />,
     );

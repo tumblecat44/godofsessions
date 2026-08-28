@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TonightPlan } from "./TonightPlan";
+import { overnightPrompt } from "../lib/tonight";
 import type { OvernightPortfolioPlanSummary } from "../shared/contracts";
 
 afterEach(cleanup);
@@ -65,23 +66,24 @@ function plan(): OvernightPortfolioPlanSummary {
 }
 
 describe("TonightPlan", () => {
-  it("starts with every card checked and starts only the remaining checks", async () => {
-    const onStart = vi.fn(async () => undefined);
-    render(<TonightPlan plan={plan()} language="en" onStart={onStart} />);
+  it("opens a card into its copyable prompt instead of starting anything", async () => {
+    render(<TonightPlan plan={plan()} language="en" />);
 
-    const boxes = screen.getAllByRole("checkbox");
-    expect(boxes).toHaveLength(2);
-    expect(boxes[0]).toBeChecked();
-    expect(boxes[1]).toBeChecked();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getByText("Codex")).toBeInTheDocument();
-    expect(screen.queryByText(/leftover Max usage/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/free tonight/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Start / })).not.toBeInTheDocument();
+    expect(screen.queryByText(/TONIGHT'S PROMPT/)).not.toBeInTheDocument();
 
-    fireEvent.click(boxes[0]);
-    fireEvent.click(screen.getByRole("button", { name: "Start 1 selected" }));
+    fireEvent.click(screen.getByRole("button", { name: /^OVERNIGHT 1/ }));
 
-    expect(onStart).toHaveBeenCalledWith("plan-1", ["two"]);
+    const promptText = overnightPrompt(plan().items[0], false);
+    expect(promptText).toContain("Goal: Ship the login fix");
+    expect(promptText).toContain("Done when: npm test");
+    expect(screen.getByText("TONIGHT'S PROMPT")).toBeInTheDocument();
+    expect(screen.getByText(/Goal: Ship the login fix/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Copy This is unattended overnight work/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^OVERNIGHT 1/ }));
+    expect(screen.queryByText("TONIGHT'S PROMPT")).not.toBeInTheDocument();
   });
 
   it("puts conversation-model connect controls in the tonight region when Morrow has no voice", () => {
@@ -89,7 +91,6 @@ describe("TonightPlan", () => {
     render(
       <TonightPlan
         language="en"
-        onStart={vi.fn(async () => undefined)}
         needsConversationModel
         onOpenSettings={onOpenSettings}
       />,

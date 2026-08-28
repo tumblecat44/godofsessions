@@ -287,7 +287,7 @@ describe("App Overnight integration", () => {
     await act(async () => { finishPreparation(prepared); });
     await waitFor(() => expect(screen.getAllByText("Automatic plan is ready").length).toBeGreaterThan(0));
     expect(bridge.prepareOvernightPortfolio).toHaveBeenCalledOnce();
-    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^OVERNIGHT 1/ })).toBeInTheDocument();
   });
 
   it("does not spend a planning turn when no Overnight worker can run it", async () => {
@@ -411,52 +411,6 @@ describe("App Overnight integration", () => {
     expect(await screen.findByText("Morrow could not prepare the plan. Try again.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByText(/remote method|private backend detail/i)).not.toBeInTheDocument();
-  });
-
-  it("refreshes a failed start so a consumed plan cannot trap the retry button", async () => {
-    const item = planItem("consumed", "Consumed approval disappears");
-    const readyRoutes = [{ provider: "codex" as const, label: "Codex", status: "ready" as const }];
-    const initial = state({ orchestration: orchestration({ providerRoutes: readyRoutes, portfolioPlans: [plan([item])] }) });
-    const afterFailure = orchestration({ providerRoutes: readyRoutes });
-    const bridge = morrowBridge({
-      bootstrap: vi.fn(async () => initial),
-      startOvernightPortfolio: vi.fn(async () => { throw new Error("approval was consumed before the run manifest was written"); }),
-      overnightSnapshot: vi.fn(async () => afterFailure),
-    });
-    window.morrow = bridge;
-    const { default: App } = await import("./App");
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Start 1 selected" }));
-
-    await waitFor(() => expect(bridge.overnightSnapshot).toHaveBeenCalledOnce());
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Consumed approval disappears" })).not.toBeInTheDocument());
-    expect(screen.queryByText(/approval was consumed/u)).not.toBeInTheDocument();
-  });
-
-  it("never swaps an expired visible plan for a different hidden approval", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-26T07:00:00.000Z"));
-    const item = planItem("exact", "Run only what I saw");
-    const visible = plan([item], { id: "visible-plan", expiresAt: "2026-08-26T07:00:01.000Z" });
-    const initial = state({ orchestration: orchestration({ portfolioPlans: [visible] }) });
-    const bridge = morrowBridge({
-      bootstrap: vi.fn(async () => initial),
-      startOvernightPortfolio: vi.fn(async () => { throw new Error("approval expired"); }),
-      overnightSnapshot: vi.fn(async () => orchestration()),
-    });
-    window.morrow = bridge;
-    const { default: App } = await import("./App");
-    render(<App />);
-
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    const start = screen.getByRole("button", { name: "Start 1 selected" });
-    act(() => vi.advanceTimersByTime(1_100));
-    await act(async () => { fireEvent.click(start); await Promise.resolve(); await Promise.resolve(); });
-
-    expect(bridge.startOvernightPortfolio).toHaveBeenCalledWith("visible-plan", ["exact"]);
-    expect(bridge.startOvernightPortfolio).toHaveBeenCalledOnce();
-    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 });
 
@@ -592,7 +546,7 @@ describe("Morrow revise tonight set", () => {
 
     const tonight = await screen.findByLabelText("Tonight's overnights");
     expect(tonight).toHaveTextContent("Ship the login fix");
-    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^OVERNIGHT 1/ })).toBeInTheDocument();
 
     bootstrap.mockResolvedValue({
       ...initial,
@@ -611,7 +565,7 @@ describe("Morrow revise tonight set", () => {
     expect(tonight).toHaveTextContent("Replace the login work with a closer deadline");
     expect(tonight).toHaveTextContent("Ship the docs pass tonight");
     expect(tonight).not.toHaveTextContent("Ship the login fix");
-    expect(screen.getByRole("button", { name: "Start 2 selected" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^OVERNIGHT/ })).toHaveLength(2);
     expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
   });
 
@@ -636,7 +590,7 @@ describe("Morrow revise tonight set", () => {
     const { default: App } = await import("./App");
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^OVERNIGHT 1/ })).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Talk to Morrow about anything…"), { target: { value: "돌리기" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ text: "돌리기" }));
@@ -645,6 +599,6 @@ describe("Morrow revise tonight set", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ text: "start overnight" }));
     expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^OVERNIGHT 1/ })).toBeInTheDocument();
   });
 });

@@ -160,7 +160,7 @@ describe("Settings user-facing safety contract", () => {
     expect(document.body).not.toHaveTextContent(/local first|local by default|Pi SDK|Pi runtime/i);
   });
 
-  it("always lists the four official Overnight CLIs from PATH, not a canary", async () => {
+  it("lists only the Codex Overnight CLI from PATH, not a canary", async () => {
     const verify = vi.fn(async () => undefined);
     const refresh = vi.fn(async () => undefined);
     render(
@@ -194,27 +194,21 @@ describe("Settings user-facing safety contract", () => {
 
     const overnight = screen.getByRole("heading", { name: "Overnight" }).closest(".settings-section");
     // Opening Settings runs one real re-check; wait for it to settle.
-    await waitFor(() => expect(overnight).toHaveTextContent("Ready for Overnight"));
+    await waitFor(() => expect(overnight).toHaveTextContent("Not installed"));
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(overnight).toHaveTextContent("Claude Code");
     expect(overnight).toHaveTextContent("Codex");
-    expect(overnight).toHaveTextContent("Grok Build");
-    expect(overnight).toHaveTextContent("Pi Agent");
+    expect(overnight).not.toHaveTextContent(/Claude Code|Grok Build|Pi Agent/);
     expect(overnight).not.toHaveTextContent(/Cursor|Hermes|OpenClaw/);
     expect(overnight).not.toHaveTextContent(/Installed means the command is on PATH/);
-    expect(overnight).toHaveTextContent("Not installed");
-    expect(overnight).toHaveTextContent("Sign in from Terminal");
     expect(overnight).not.toHaveTextContent("Checking");
     expect(overnight).not.toHaveTextContent(/Conversation SDK only|not a worker/i);
-    expect(overnight).toHaveTextContent("Powers Morrow conversations and runs as the pi terminal CLI.");
     expect(overnight).not.toHaveTextContent(/Bundled with Morrow/i);
     expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy claude auth login" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy codex login" })).toHaveTextContent("Copy login");
-    expect(screen.getByRole("button", { name: "Copy grok login" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy npm install -g @earendil-works/pi-coding-agent" })).toHaveTextContent("Copy install");
+    expect(screen.queryByRole("button", { name: "Copy grok login" })).not.toBeInTheDocument();
     expect(overnight).not.toHaveTextContent(/Safety check|OS containment|canary/i);
-    expect(overnight?.querySelectorAll("button")).toHaveLength(4);
+    expect(overnight?.querySelectorAll("button")).toHaveLength(2);
     expect(overnight?.querySelector("button[aria-label^='Connect']")).toBeNull();
     expect(screen.getByRole("button", { name: /Sign in with your Anthropic/ })).toBeInTheDocument();
     expect(verify).not.toHaveBeenCalled();

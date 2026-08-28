@@ -82,7 +82,7 @@
 
 .morrow-message { width: min(790px, 100%); margin: 0 auto 30px; display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 14px; }
 
-.morrow-message--user { width: min(650px, 86%); margin-right: 0; padding: 15px 16px; display: block; border: 1px solid var(--etched-edge); border-radius: 12px 12px 3px 12px; background: var(--deck-raised); }
+.morrow-message--user { width: min(650px, 86%); margin-right: max(0px, calc((100% - 790px) / 2)); padding: 15px 16px; display: block; border: 1px solid var(--etched-edge); border-radius: 12px 12px 3px 12px; background: var(--deck-raised); }
 
 .message-author { padding-top: 3px; color: var(--ink-muted); font: 650 10px "JetBrains Mono Variable", monospace; letter-spacing: .12em; }
 
@@ -1622,6 +1622,8 @@ button:active:not(:disabled) {
   grid-template-columns: minmax(0, 1fr) 42px;
   grid-template-rows: 49px auto;
   position: relative;
+  /* Above .chat-transcript (z2) so the model menu stays visible and clickable. */
+  z-index: 4;
   border: 1px solid var(--etched-edge-focus);
   border-radius: 13px;
   background: var(--control-inset);

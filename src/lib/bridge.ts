@@ -8,9 +8,9 @@ import type {
 const demoConversation: ConversationDetail = {
   id: "preview",
   title: "Planning the next quiet step",
-  thinkingLevel: "medium",
+  thinkingLevel: "low",
   busy: false,
-  model: { provider: "anthropic", id: "claude-sonnet", name: "Claude Sonnet" },
+  model: { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
   messages: [
     { id: "u1", role: "user", parts: [{ type: "text", text: "What should I focus on before tomorrow?" }] },
     { id: "a1", role: "assistant", parts: [{ type: "text", text: "I’d close the loop on the provider setup first. After that, I can help you turn the remaining notes into one calm, ordered checklist." }] },
@@ -22,17 +22,17 @@ const demoState: BootstrapState = {
   rootPath: "/Users/example/godofsessions",
   onboardingComplete: true,
   language: "en",
-  thinkingLevel: "medium",
-  selectedModel: { provider: "anthropic", id: "claude-sonnet" },
+  thinkingLevel: "low",
+  selectedModel: { provider: "openai-codex", id: "gpt-5.6-sol" },
   providers: [
-    { id: "anthropic", name: "Anthropic", connected: true, authTypes: ["api_key", "oauth"], authLabel: "Claude Pro / Max or API key" },
-    { id: "openai-codex", name: "OpenAI Codex", connected: false, authTypes: ["oauth"], authLabel: "ChatGPT Plus / Pro" },
-    { id: "openai", name: "OpenAI", connected: false, authTypes: ["api_key"], authLabel: "OpenAI API key" },
-    { id: "github-copilot", name: "GitHub Copilot", connected: false, authTypes: ["oauth"], authLabel: "Copilot subscription" },
+    { id: "openai-codex", name: "OpenAI Codex", connected: true, authTypes: ["oauth"], authLabel: "ChatGPT Plus / Pro" },
   ],
   models: [
-    { id: "claude-sonnet", provider: "anthropic", name: "Claude Sonnet", reasoning: true },
-    { id: "gpt-5", provider: "openai", name: "GPT-5", reasoning: true },
+    { id: "gpt-5.3-codex-spark", provider: "openai-codex", name: "GPT-5.3 Codex Spark", reasoning: true },
+    { id: "gpt-5.5", provider: "openai-codex", name: "GPT-5.5", reasoning: true },
+    { id: "gpt-5.6-luna", provider: "openai-codex", name: "GPT-5.6 Luna", reasoning: true },
+    { id: "gpt-5.6-sol", provider: "openai-codex", name: "GPT-5.6 Sol", reasoning: true },
+    { id: "gpt-5.6-terra", provider: "openai-codex", name: "GPT-5.6 Terra", reasoning: true },
   ],
   conversations: [
     { id: "preview", path: "preview", title: demoConversation.title, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messageCount: 2 },
