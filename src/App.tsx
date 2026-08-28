@@ -45,7 +45,6 @@ function App() {
   const overnightPollInFlight = useRef(false);
   const overnightPollGeneration = useRef(0);
   const overnightPreparationInFlight = useRef(false);
-  const automaticallyPreparedContext = useRef<string | undefined>(undefined);
   const interfaceLanguage: AppLanguage = state?.language ?? (navigator.language.toLowerCase().startsWith("ko") ? "ko" : "en");
   const ko = interfaceLanguage === "ko";
 
@@ -127,7 +126,9 @@ function App() {
       setOvernightError(undefined);
     });
     try {
-      const orchestration = await bridge.prepareOvernightPortfolio(userGoal);
+      const orchestration = userGoal
+        ? await bridge.prepareOvernightPortfolio(userGoal)
+        : await (bridge.generateOvernightCandidates ?? bridge.prepareOvernightPortfolio)();
       transitionState(() => setState((latest) => latest ? { ...latest, orchestration } : latest));
       return orchestration;
     } catch (reason) {
@@ -139,23 +140,6 @@ function App() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!state?.onboardingComplete || !canPrepareOvernight || !hasReadyOvernightWorker || activePortfolioRun || conversation?.busy) return;
-    const contextKey = `${state.orchestration.context.date}:${state.orchestration.context.generatedAt}`;
-    const currentAssessment = state.orchestration.portfolioAssessments.find((assessment) => assessment.contextGeneratedAt === state.orchestration.context.generatedAt);
-    const hasLivePlan = state.orchestration.portfolioPlans.some((plan) => plan.status === "draft" && Date.now() < Date.parse(plan.expiresAt));
-    const assessmentPlanRan = Boolean(currentAssessment?.planId
-      && state.orchestration.portfolioRuns.some((run) => run.planId === currentAssessment.planId));
-    const expiredPreparedPlan = currentAssessment?.disposition === "recommend"
-      && Boolean(currentAssessment.planId)
-      && !hasLivePlan
-      && !assessmentPlanRan;
-    if (hasLivePlan || assessmentPlanRan || (currentAssessment && !expiredPreparedPlan)) return;
-    const preparationKey = `${contextKey}:${currentAssessment?.id ?? "new"}`;
-    if (automaticallyPreparedContext.current === preparationKey) return;
-    automaticallyPreparedContext.current = preparationKey;
-    void prepareOvernight();
-  }, [activePortfolioRun?.id, canPrepareOvernight, conversation?.busy, hasReadyOvernightWorker, prepareOvernight, state?.onboardingComplete, state?.orchestration.context.date, state?.orchestration.context.generatedAt, state?.orchestration.portfolioAssessments, state?.orchestration.portfolioPlans, state?.orchestration.portfolioRuns]);
   useEffect(() => {
     if (!activePortfolioRun) return;
     let disposed = false;
@@ -398,18 +382,31 @@ function App() {
         preparing={overnightPreparing}
         error={overnightError}
         onPrepare={async () => {
-          automaticallyPreparedContext.current = undefined;
           await prepareOvernight();
         }}
         onAddOvernight={async (goal) => {
-          automaticallyPreparedContext.current = undefined;
           await prepareOvernight(goal);
         }}
         onOpenSettings={() => changeView("settings")}
+        onOpenChat={() => changeView("chat")}
         onStopPortfolio={async (runId) => {
           setOvernightError(undefined);
           try { await stopOvernightPortfolio(runId); }
           catch { transitionState(() => setOvernightError(overnightStopFailureMessage(state.language))); }
+        }}
+        onReviseCard={async (card, patch) => {
+          if (!bridge.reviseOvernightCard) throw new Error(state.language === "ko" ? "후보를 저장할 수 없습니다." : "Cannot save this candidate.");
+          const orchestration = await bridge.reviseOvernightCard({ id: card.id, patch });
+          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
+        }}
+        onDiscardCard={async (card) => {
+          if (!bridge.discardOvernightCard) throw new Error(state.language === "ko" ? "후보를 삭제할 수 없습니다." : "Cannot delete this candidate.");
+          const orchestration = await bridge.discardOvernightCard({ id: card.id });
+          transitionState(() => setState((current) => current ? { ...current, orchestration } : current));
+        }}
+        onHelp={(goal) => {
+          setDraft(`${goal} 수정하고 작업하고 있는데 도와주세요`);
+          changeView("chat");
         }}
       />
       {view === "settings" ? (

@@ -8,6 +8,10 @@ import type {
   GitHubAuthState,
   MorrowBridge,
   MorrowEvent,
+  OvernightCard,
+  OvernightGenerationId,
+  OvernightId,
+  OvernightLocalDate,
   OvernightPortfolioPlanItemSummary,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
@@ -32,6 +36,7 @@ function orchestration(overrides: Partial<OrchestrationSnapshot> = {}): Orchestr
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
     ...overrides,
   };
 }
@@ -223,63 +228,71 @@ describe("App Overnight integration", () => {
     expect(screen.queryByText(/private stop detail/u)).not.toBeInTheDocument();
   });
 
-  it("prepares a read-only plan automatically after opening Overnight without writing into chat", async () => {
+  it("fills Ask Morrow with a help draft from a candidate without starting Overnight", async () => {
+    const candidate: OvernightCard = {
+      id: "card-help" as OvernightId,
+      generationId: "gen-help" as OvernightGenerationId,
+      localDate: context.date as OvernightLocalDate,
+      status: "candidate",
+      goal: "Fix the hover",
+      finishCondition: "Hover works",
+      workAi: "codex",
+      verifyAi: "codex",
+      stallHours: 0,
+      decisionsLog: [],
+      createdAt: "2026-08-26T21:00:00.000Z",
+      updatedAt: "2026-08-26T21:00:00.000Z",
+    };
     const initial = state({
       providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
       models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
       selectedModel: { provider: "test", id: "model" },
-      orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
-    });
-    const item = planItem("automatic", "Automatic plan is ready");
-    const prepared = orchestration({
+      orchestration: orchestration({
         providerRoutes: [{ provider: "codex", label: "Codex", status: "ready", verification: { state: "verified", canVerify: true } }],
-        portfolioPlans: [plan([item])],
-        portfolioAssessments: [{
-          id: "assessment-automatic",
-          requestKind: "discover",
-          disposition: "recommend",
-          planId: "plan-1",
-          candidates: [{
-            stableKey: item.stableKey,
-            origin: item.origin,
-            disposition: "recommend",
-            title: item.title,
-            rationale: "Bounded",
-            reasonCodes: ["bounded_scope"],
-            selectedSessions: [],
-            excludedSessions: [],
-            outcome: item.outcome,
-            verification: item.verification,
-            preferredProvider: "codex",
-            providerReason: "Ready",
-            estimatedMinutes: 45,
-            risks: [],
-            questions: [],
-            dependencyKeys: [],
-            conflictKeys: [],
-            writeScopes: ["src/**"],
-          }],
-          createdAt: "2026-08-26T07:00:00.000Z",
-          contextGeneratedAt: context.generatedAt,
-        }],
+        overnightCards: [candidate],
+      }),
     });
-    let finishPreparation!: (value: OrchestrationSnapshot) => void;
-    const preparation = new Promise<OrchestrationSnapshot>((resolve) => { finishPreparation = resolve; });
     const bridge = morrowBridge({
       bootstrap: vi.fn(async () => initial),
-      refreshDailyContext: vi.fn(async () => initial.orchestration),
-      prepareOvernightPortfolio: vi.fn(() => preparation),
+      startOvernightPortfolio: vi.fn(async () => { throw new Error("should not start"); }),
+      sendMessage: vi.fn(async () => undefined),
     });
     window.morrow = bridge;
     const { default: App } = await import("./App");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Morrow is choosing tonight's work" })).toBeInTheDocument();
-    expect(bridge.sendMessage).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Fix the hover/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
 
-    await act(async () => { finishPreparation(prepared); });
-    await waitFor(() => expect(screen.getAllByText("Automatic plan is ready").length).toBeGreaterThan(0));
-    expect(bridge.prepareOvernightPortfolio).toHaveBeenCalledOnce();
+    expect(screen.getByRole("textbox")).toHaveValue("Fix the hover 수정하고 작업하고 있는데 도와주세요");
+    expect(bridge.sendMessage).not.toHaveBeenCalled();
+    expect(bridge.startOvernightPortfolio).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-prepare overnight when a conversation model connects", async () => {
+    const item = planItem("ready", "Start stays on Ask Morrow");
+    const initial = state({
+      providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
+      models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      selectedModel: { provider: "test", id: "model" },
+      orchestration: orchestration({
+        providerRoutes: [{ provider: "codex", label: "Codex", status: "ready", verification: { state: "verified", canVerify: true } }],
+        portfolioPlans: [plan([item])],
+      }),
+    });
+    const bridge = morrowBridge({
+      bootstrap: vi.fn(async () => initial),
+      refreshDailyContext: vi.fn(async () => initial.orchestration),
+      prepareOvernightPortfolio: vi.fn(async () => initial.orchestration),
+    });
+    window.morrow = bridge;
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Start 1 selected" })).toBeInTheDocument();
   });
 
@@ -307,7 +320,7 @@ describe("App Overnight integration", () => {
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 
-  it("puts conversation-model setup in Settings when Overnight CLIs are already installed", async () => {
+  it("puts conversation-model setup on Ask Morrow when Overnight CLIs are already installed", async () => {
     const initial = state({
       providers: [{ id: "anthropic", name: "Anthropic", connected: false, authTypes: ["oauth"] }],
       orchestration: orchestration({
@@ -327,8 +340,8 @@ describe("App Overnight integration", () => {
     expect(screen.queryByRole("button", { name: /Sign in with your Anthropic/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Overnight" }));
     expect(await screen.findByRole("heading", { name: "Connect a conversation model first" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect a model in Settings" }));
-    expect(screen.getByRole("heading", { name: "Connections & preferences" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a model on Ask Morrow" }));
+    expect(screen.getByRole("heading", { name: "Tonight's 3 cards" })).toBeInTheDocument();
     expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
   });
 
@@ -384,26 +397,31 @@ describe("App Overnight integration", () => {
     expect(await screen.findByText("Finished outcome stays finished")).toBeInTheDocument();
   });
 
-  it("keeps bridge internals out of a failed automatic preparation", async () => {
+  it("does not auto-prepare Overnight and never leaks bridge internals on the empty board", async () => {
     const initial = state({
       providers: [{ id: "test", name: "Test", connected: true, authTypes: ["api_key"] }],
       models: [{ id: "model", provider: "test", name: "Test model", reasoning: false }],
+      selectedModel: { provider: "test", id: "model" },
       orchestration: orchestration({ providerRoutes: [{ provider: "codex", label: "Codex", status: "ready" }] }),
     });
-    window.morrow = morrowBridge({
+    const bridge = morrowBridge({
       bootstrap: vi.fn(async () => initial),
       prepareOvernightPortfolio: vi.fn(async () => {
         throw new Error("Error invoking remote method 'morrow:prepare-overnight-portfolio': private backend detail");
       }),
     });
+    window.morrow = bridge;
     const { default: App } = await import("./App");
 
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Overnight" }));
-    expect(await screen.findByText("Morrow could not prepare the plan. Try again.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overnight", level: 1 })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Overnights" })).getAllByText("Empty")).toHaveLength(3);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(bridge.prepareOvernightPortfolio).not.toHaveBeenCalled();
     expect(screen.queryByText(/remote method|private backend detail/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Overnight" })).not.toBeInTheDocument();
   });
 
   it("refreshes a failed start so a consumed plan cannot trap the retry button", async () => {

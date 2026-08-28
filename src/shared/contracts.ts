@@ -410,6 +410,8 @@ export interface OrchestrationSnapshot {
   portfolioAssessments: OvernightPortfolioAssessmentSummary[];
   portfolioPlans: OvernightPortfolioPlanSummary[];
   portfolioRuns: OvernightPortfolioRunSummary[];
+  /** Purpose cards from OvernightStore; UI filters by localDate. */
+  overnightCards: OvernightCard[];
 }
 
 export interface ProviderSummary {
@@ -528,7 +530,10 @@ export interface MorrowBridge {
   refreshDailyContext(): Promise<OrchestrationSnapshot>;
   /** Read-only assessment used to keep the one-click Overnight launch ready. */
   prepareOvernightPortfolio(userGoal?: string): Promise<OrchestrationSnapshot>;
+  generateOvernightCandidates?(now?: string): Promise<OrchestrationSnapshot>;
   verifyOvernightProvider(provider: OvernightExecutionProvider): Promise<OrchestrationSnapshot>;
+  reviseOvernightCard?(input: { id: OvernightId; patch: OvernightCardRevision }): Promise<OrchestrationSnapshot>;
+  discardOvernightCard?(input: { id: OvernightId }): Promise<OrchestrationSnapshot>;
   startOvernightPortfolio(planId: string, itemIds?: readonly string[]): Promise<OvernightPortfolioRunSummary>;
   stopOvernightPortfolio(runId: string): Promise<void>;
   listOvernightBoardTickets?(overnightId: string): Promise<OvernightBoardTicket[]>;

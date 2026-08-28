@@ -44,6 +44,7 @@ const demoState: BootstrapState = {
     portfolioAssessments: [],
     portfolioPlans: [],
     portfolioRuns: [],
+    overnightCards: [],
   },
 };
 
@@ -65,7 +66,10 @@ function previewBridge(): MorrowBridge {
     finishOnboarding: async () => undefined,
     refreshDailyContext: async () => demoState.orchestration,
     prepareOvernightPortfolio: async (_userGoal?: string) => demoState.orchestration,
+    generateOvernightCandidates: async () => demoState.orchestration,
     verifyOvernightProvider: async () => { throw new Error("Overnight provider verification is only available in the desktop app."); },
+    reviseOvernightCard: async () => { throw new Error("Overnight candidate edits are only available in the desktop app."); },
+    discardOvernightCard: async () => { throw new Error("Overnight candidate edits are only available in the desktop app."); },
     startOvernightPortfolio: async (_planId, _itemIds) => { throw new Error("Overnight portfolio runs are only available in the desktop app."); },
     stopOvernightPortfolio: async () => { throw new Error("Overnight portfolio controls are only available in the desktop app."); },
     openExternal: async (url) => { window.open(url, "_blank", "noopener"); },

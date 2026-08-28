@@ -28,7 +28,10 @@ import type {
   OvernightPortfolioAssessmentSummary,
   OvernightPortfolioPlanSummary,
   OvernightPortfolioRunSummary,
+  OvernightCard,
+  OvernightCardRevision,
   OvernightExecutionProvider,
+  OvernightId,
   OvernightProviderRouteSummary,
   OvernightProviderVerificationSummary,
   ThinkingLevel,
@@ -40,6 +43,7 @@ import {
   isOvernightExecutionProvider,
   parseOvernightBoardTicketId,
   parseOvernightId,
+  parseOvernightLocalDate,
 } from "../../src/shared/contracts";
 import { deferred, type Deferred } from "./deferred";
 import { PermissionPolicy, type ApprovalScope } from "./permission-policy";
@@ -61,6 +65,12 @@ import {
   type OvernightPortfolioAssessmentRecord,
 } from "./overnight-portfolio-ledger";
 import { OvernightStore } from "./overnight-store";
+import {
+  catchUpOvernightCandidates,
+  generateOvernightCandidates,
+  msUntilNextLocalHour,
+  OVERNIGHT_GENERATE_LOCAL_HOUR,
+} from "./overnight-generate";
 import {
   OvernightPortfolioService,
   type OvernightPortfolioContainmentControl,
@@ -308,6 +318,8 @@ export interface MorrowServiceOptions {
   overnightProviderVerification?: OvernightProviderVerificationPort;
   overnightProviderControlPlane?: MorrowOvernightProviderControlPlaneFactory;
   overnightStore?: OvernightStore;
+  now?: () => Date;
+  schedule?: (handler: () => void, timeout: number) => ReturnType<typeof setTimeout>;
 }
 
 export interface OvernightProviderVerificationPort {
@@ -340,8 +352,12 @@ export class MorrowService {
   private readonly dailyContextBuilder: typeof collectDailyContextForEvaluation;
   private readonly overnightContextEvaluator: MorrowOvernightContextEvaluator;
   private readonly overnightContextModelPort?: OvernightContextModelPort;
+  private readonly now: () => Date;
+  private readonly schedule: (handler: () => void, timeout: number) => ReturnType<typeof setTimeout>;
   private readonly initialLanguage: AppLanguage;
   private readonly permissionPolicy: PermissionPolicy;
+  private overnightGenerateTimer?: ReturnType<typeof setTimeout>;
+  private overnightGenerateInFlight?: Promise<void>;
   private readonly approvalWaiters = new Map<string, { deferred: Deferred<boolean>; scope: ApprovalScope; rememberable: boolean }>();
   private readonly authWaiters = new Map<string, Deferred<string>>();
   private modelRuntime?: ModelRuntime;
@@ -375,9 +391,11 @@ export class MorrowService {
     this.dailyContextBuilder = options.dailyContextBuilder ?? collectDailyContextForEvaluation;
     this.overnightContextEvaluator = options.overnightContextEvaluator ?? evaluateOvernightContext;
     this.overnightContextModelPort = options.overnightContextModelPort;
+    this.now = options.now ?? (() => new Date());
+    this.schedule = options.schedule ?? ((handler, timeout) => setTimeout(handler, timeout));
     const portfolioLedger = new OvernightPortfolioLedger({ dataDir: options.dataDir });
     this.overnightStore = options.overnightStore
-      ?? new OvernightStore({ dataDir: options.dataDir });
+      ?? new OvernightStore({ dataDir: options.dataDir, now: this.now });
     const providerControlPlane = options.overnightProviderControlPlane?.create({
       approvalClaims: {
         consume: (input) => portfolioLedger.consumeApprovedLaunchClaim(input),
@@ -455,10 +473,87 @@ export class MorrowService {
       if (this.shouldPrepareLocalTonightPlan()) {
         await this.recommendLocalTonightPlan().catch(() => undefined);
       }
+      await this.catchUpOvernightCandidatesIfNeeded().catch(() => undefined);
+      this.armOvernightCandidateSchedule();
       this.initializationError = undefined;
     } catch (reason) {
       this.initializationError = reason instanceof Error ? reason : new Error("Morrow could not initialize the embedded Pi runtime.");
     }
+  }
+
+  async generateOvernightCandidatesNow(now = this.now()) {
+    await generateOvernightCandidates({
+      now,
+      timeZone: this.dailyContext.summary.timeZone,
+      store: this.overnightStore,
+      contextHome: this.contextHome,
+      collectDailyContext: this.dailyContextBuilder,
+      evaluateDiscover: async (context) => {
+        this.dailyContext = context;
+        this.dailyContextAssessmentUnavailable = undefined;
+        this.dailyContextHasCompleteAssessment = true;
+        const { recommendation } = await this.evaluateOvernightPortfolio("discover");
+        return recommendation;
+      },
+    });
+    return this.combinedOrchestrationSnapshot(true);
+  }
+
+  async reviseOvernightCard(id: OvernightId, patch: OvernightCardRevision): Promise<OrchestrationSnapshot> {
+    this.overnightStore.revise(parseOvernightId(id), patch);
+    return this.combinedOrchestrationSnapshot(false);
+  }
+
+  async discardOvernightCard(id: OvernightId): Promise<OrchestrationSnapshot> {
+    this.overnightStore.discard(parseOvernightId(id));
+    return this.combinedOrchestrationSnapshot(false);
+  }
+
+  private async catchUpOvernightCandidatesIfNeeded() {
+    const now = this.now();
+    await catchUpOvernightCandidates({
+      now,
+      timeZone: this.dailyContext.summary.timeZone,
+      store: this.overnightStore,
+      contextHome: this.contextHome,
+      collectDailyContext: this.dailyContextBuilder,
+      evaluateDiscover: async (context) => {
+        this.dailyContext = context;
+        this.dailyContextAssessmentUnavailable = undefined;
+        this.dailyContextHasCompleteAssessment = true;
+        const { recommendation } = await this.evaluateOvernightPortfolio("discover");
+        return recommendation;
+      },
+    });
+  }
+
+  private armOvernightCandidateSchedule() {
+    const now = this.now();
+    const timeZone = this.dailyContext.summary.timeZone;
+    const delay = msUntilNextLocalHour(now, timeZone, OVERNIGHT_GENERATE_LOCAL_HOUR);
+    this.overnightGenerateTimer = this.schedule(() => {
+      void this.runScheduledOvernightGenerate();
+    }, delay);
+  }
+
+  private async runScheduledOvernightGenerate() {
+    if (this.overnightGenerateInFlight) {
+      await this.overnightGenerateInFlight;
+      return;
+    }
+    const pending = (async () => {
+      try {
+        await this.generateOvernightCandidatesNow(this.now());
+      } catch {
+        // Leave any prior generation/candidates untouched on failure.
+      } finally {
+        this.armOvernightCandidateSchedule();
+      }
+    })();
+    this.overnightGenerateInFlight = pending.finally(() => {
+      if (this.overnightGenerateInFlight === pending) this.overnightGenerateInFlight = undefined;
+    });
+    await this.overnightGenerateInFlight;
   }
 
   private async loadDailyContextForInitialization(): Promise<DailyContextSnapshot> {
@@ -1031,7 +1126,16 @@ export class MorrowService {
       portfolioAssessments: assessments.map(portfolioAssessmentSummary),
       portfolioPlans: plans,
       portfolioRuns: runs,
+      overnightCards: this.snapshotOvernightCards(),
     };
+  }
+
+  private snapshotOvernightCards(): OvernightCard[] {
+    try {
+      return this.overnightStore.listCards(parseOvernightLocalDate(this.dailyContext.summary.date));
+    } catch {
+      return [];
+    }
   }
 
   private async evaluateOvernightPortfolio(
