@@ -58,7 +58,7 @@
     "typescript": "^5.7.2",
     "vite": "^8.1.5",
     "vitest": "4.1.11",
-    "wait-on": "8.0.5"
+    "wait-on": "9.1.0"
   },
   "build": {
     "appId": "dev.beautifului.godofsessions",
